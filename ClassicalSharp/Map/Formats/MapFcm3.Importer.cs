@@ -2,9 +2,8 @@
 // Part of fCraft | Copyright (c) 2009-2014 Matvei Stefarov <me@matvei.org> | BSD-3 | See LICENSE.txt
 using System;
 using System.IO;
-using System.IO.Compression;
-using System.Text;
 using ClassicalSharp.Entities;
+using Ionic.Zlib;
 
 namespace ClassicalSharp.Map {
 
@@ -19,7 +18,7 @@ namespace ClassicalSharp.Map {
 			if (r.ReadInt32() != Identifier || r.ReadByte() != Revision)
 				throw new InvalidDataException("Unexpected constant in .fcm file");
 
-			width = r.ReadInt16();
+			width  = r.ReadInt16();
 			height = r.ReadInt16();
 			length = r.ReadInt16();
 
@@ -36,24 +35,22 @@ namespace ClassicalSharp.Map {
 			r.ReadBytes(26); // layer index
 			int metaSize = r.ReadInt32();
 
-			using (DeflateStream ds = new DeflateStream(stream, CompressionMode.Decompress)) {
-				r = new BinaryReader(ds);
+			using (DeflateStream s = new DeflateStream(stream)) {
+				r = new BinaryReader(s);
 				for (int i = 0; i < metaSize; i++) {
-					string group = ReadString(r);
-					string key = ReadString(r);
-					string value = ReadString(r);
+					SkipString(r); // group
+					SkipString(r); // key
+					SkipString(r); // value
 				}
 				
 				byte[] blocks = new byte[width * height * length];
-				int read = ds.Read(blocks, 0, blocks.Length);
+				int read = s.Read(blocks, 0, blocks.Length);
 				return blocks;
 			}
 		}
 		
-		static string ReadString(BinaryReader reader) {
-			int length = reader.ReadUInt16();
-			byte[] data = reader.ReadBytes(length);
-			return Encoding.ASCII.GetString(data);
+		static void SkipString(BinaryReader reader) {
+			reader.ReadBytes(reader.ReadUInt16());
 		}
 	}
 }

@@ -2,16 +2,11 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using ClassicalSharp.Events;
 using ClassicalSharp.GraphicsAPI;
 using ClassicalSharp.Map;
+using ClassicalSharp.Textures;
 using OpenTK;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Renderers {
 	
@@ -19,150 +14,143 @@ namespace ClassicalSharp.Renderers {
 		
 		World map;
 		Game game;
-		IGraphicsApi gfx;
 		
-		int sidesVb = -1, edgesVb = -1;
-		int edgeTexId, sideTexId;
+		int sidesVb, edgesVb;
+		int edgesTex, sidesTex;
 		int sidesVertices, edgesVertices;
 		internal bool legacy;
-		bool fullColSides, fullColEdge;
+		bool fullBrightSides, fullBrightEdge;
 		
 		public void UseLegacyMode(bool legacy) {
 			this.legacy = legacy;
-			ResetSidesAndEdges(null, null);
+			ResetSidesAndEdges();
 		}
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
 			map = game.World;
-			gfx = game.Graphics;
 			
-			game.WorldEvents.EnvVariableChanged += EnvVariableChanged;
-			game.Events.ViewDistanceChanged += ResetSidesAndEdges;
-			game.Events.TerrainAtlasChanged += ResetTextures;
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			Events.EnvVariableChanged  += EnvVariableChanged;
+			Events.ViewDistanceChanged += ResetSidesAndEdges;
+			Events.TerrainAtlasChanged += ResetTextures;
+			Events.ContextLost      += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
+		}
+		
+		void RenderBorders(BlockID block, int vb, int tex, int count) {
+			if (vb == 0) return;
+			IGraphicsApi gfx = game.Graphics;
+
+			gfx.Texturing = true;
+			gfx.SetupAlphaState(BlockInfo.Draw[block]);
+			gfx.EnableMipmaps();
+
+			gfx.BindTexture(tex);
+			gfx.SetBatchFormat(VertexFormat.P3fT2fC4b);
+			gfx.BindVb(vb);
+			if (count > 0) gfx.DrawVb_IndexedTris(count);
+
+			gfx.DisableMipmaps();
+			gfx.RestoreAlphaState(BlockInfo.Draw[block]);
+			gfx.Texturing = false;
 		}
 		
 		public void RenderSides(double delta) {
-			if (sidesVb == -1) return;
-			BlockID block = game.World.Env.SidesBlock;
-			if (game.BlockInfo.Draw[block] == DrawType.Gas) return;
-			
-			gfx.SetupAlphaState(game.BlockInfo.Draw[block]);
-			gfx.Texturing = true;
-			
-			gfx.BindTexture(sideTexId);
-			gfx.SetBatchFormat(VertexFormat.P3fT2fC4b);
-			gfx.BindVb(sidesVb);
-			gfx.DrawIndexedVb_TrisT2fC4b(sidesVertices * 6 / 4, 0);
-			
-			gfx.RestoreAlphaState(game.BlockInfo.Draw[block]);
-			gfx.Texturing = false;
+			RenderBorders(game.World.Env.SidesBlock, sidesVb,
+			              sidesTex, sidesVertices);
 		}
 		
 		public void RenderEdges(double delta) {
-			if (edgesVb == -1) return;
-			BlockID block = game.World.Env.EdgeBlock;
-			if (game.BlockInfo.Draw[block] == DrawType.Gas) return;
-			
+			// Do not draw water when player cannot see it
+			// Fixes some 'depth bleeding through' issues with 16 bit depth buffers on large maps
 			Vector3 camPos = game.CurrentCameraPos;
-			gfx.SetupAlphaState(game.BlockInfo.Draw[block]);
-			gfx.Texturing = true;
+			int vertices = 0, yVisible = Math.Min(0, map.Env.SidesHeight);
+			if (camPos.Y >= yVisible) vertices = edgesVertices;
 			
-			gfx.BindTexture(edgeTexId);
-			gfx.SetBatchFormat(VertexFormat.P3fT2fC4b);
-			gfx.BindVb(edgesVb);
-			// Do not draw water when we cannot see it.
-			// Fixes some 'depth bleeding through' issues with 16 bit depth buffers on large maps.
-			float yVisible = Math.Min(0, map.Env.SidesHeight);
-			if (camPos.Y >= yVisible)
-				gfx.DrawIndexedVb_TrisT2fC4b(edgesVertices * 6 / 4, 0);
-			
-			gfx.RestoreAlphaState(game.BlockInfo.Draw[block]);
-			gfx.Texturing = false;
+			RenderBorders(game.World.Env.EdgeBlock, edgesVb,
+			              edgesTex, vertices);
 		}
 		
-		public void Dispose() {
+		void IDisposable.Dispose() {
 			ContextLost();
 			
-			game.WorldEvents.EnvVariableChanged -= EnvVariableChanged;
-			game.Events.ViewDistanceChanged -= ResetSidesAndEdges;
-			game.Events.TerrainAtlasChanged -= ResetTextures;
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;
+			Events.EnvVariableChanged  -= EnvVariableChanged;
+			Events.ViewDistanceChanged -= ResetSidesAndEdges;
+			Events.TerrainAtlasChanged -= ResetTextures;
+			Events.ContextLost      -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { OnNewMap(game); }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { OnNewMap(game); }
 		
 		public void OnNewMap(Game game) {
-			gfx.DeleteVb(ref sidesVb);
-			gfx.DeleteVb(ref edgesVb);
-			MakeTexture(ref edgeTexId, ref lastEdgeTexLoc, map.Env.EdgeBlock);
-			MakeTexture(ref sideTexId, ref lastSideTexLoc, map.Env.SidesBlock);
+			game.Graphics.DeleteVb(ref sidesVb);
+			game.Graphics.DeleteVb(ref edgesVb);
+			MakeTexture(ref edgesTex, ref lastEdgeTexLoc, map.Env.EdgeBlock);
+			MakeTexture(ref sidesTex, ref lastSideTexLoc, map.Env.SidesBlock);
 		}
 		
-		public void OnNewMapLoaded(Game game) { ResetSidesAndEdges(null, null); }
+		void IGameComponent.OnNewMapLoaded(Game game) { ResetSidesAndEdges(); }
 		
-		void EnvVariableChanged(object sender, EnvVarEventArgs e) {
-			if (e.Var == EnvVar.EdgeBlock) {
-				MakeTexture(ref edgeTexId, ref lastEdgeTexLoc, map.Env.EdgeBlock);
-				if (game.BlockInfo.BlocksLight[map.Env.EdgeBlock] != fullColEdge)
-					ResetSidesAndEdges(null, null);
-			} else if (e.Var == EnvVar.SidesBlock) {
-				MakeTexture(ref sideTexId, ref lastSideTexLoc, map.Env.SidesBlock);
-				if (game.BlockInfo.BlocksLight[map.Env.SidesBlock] != fullColSides)
-					ResetSidesAndEdges(null, null);
-			} else if (e.Var == EnvVar.EdgeLevel || e.Var == EnvVar.SidesOffset) {
-				ResetSidesAndEdges(null, null);
-			} else if (e.Var == EnvVar.SunlightColour) {
+		void EnvVariableChanged(EnvVar envVar) {
+			if (envVar == EnvVar.EdgeBlock) {
+				MakeTexture(ref edgesTex, ref lastEdgeTexLoc, map.Env.EdgeBlock);
 				ResetEdges();
-			} else if (e.Var == EnvVar.ShadowlightColour) {
+			} else if (envVar == EnvVar.SidesBlock) {
+				MakeTexture(ref sidesTex, ref lastSideTexLoc, map.Env.SidesBlock);
+				ResetSides();
+			} else if (envVar == EnvVar.EdgeLevel || envVar == EnvVar.SidesOffset) {
+				ResetSidesAndEdges();
+			} else if (envVar == EnvVar.SunCol) {
+				ResetEdges();
+			} else if (envVar == EnvVar.ShadowCol) {
 				ResetSides();
 			}
 		}
 		
-		void ResetTextures(object sender, EventArgs e) {
-			lastEdgeTexLoc = lastSideTexLoc = -1;
-			MakeTexture(ref edgeTexId, ref lastEdgeTexLoc, map.Env.EdgeBlock);
-			MakeTexture(ref sideTexId, ref lastSideTexLoc, map.Env.SidesBlock);
+		void ResetTextures() {
+			lastEdgeTexLoc = -1; lastSideTexLoc = -1;
+			MakeTexture(ref edgesTex, ref lastEdgeTexLoc, map.Env.EdgeBlock);
+			MakeTexture(ref sidesTex, ref lastSideTexLoc, map.Env.SidesBlock);
 		}
 
-		void ResetSidesAndEdges(object sender, EventArgs e) {
-			CalculateRects((int)game.ViewDistance);
+		void ResetSidesAndEdges() {
+			CalculateRects();
 			ContextRecreated();
 		}
 		
 		void ResetSides() {
-			if (game.World.IsNotLoaded || gfx.LostContext) return;
-			gfx.DeleteVb(ref sidesVb);
+			if (!game.World.HasBlocks || game.Graphics.LostContext) return;
+			game.Graphics.DeleteVb(ref sidesVb);
 			RebuildSides(map.Env.SidesHeight, legacy ? 128 : 65536);
 		}
 		
 		void ResetEdges() {
-			if (game.World.IsNotLoaded || gfx.LostContext) return;
-			gfx.DeleteVb(ref edgesVb);
+			if (!game.World.HasBlocks || game.Graphics.LostContext) return;
+			game.Graphics.DeleteVb(ref edgesVb);
 			RebuildEdges(map.Env.EdgeHeight, legacy ? 128 : 65536);
 		}
 		
 		void ContextLost() {
-			gfx.DeleteVb(ref sidesVb);
-			gfx.DeleteVb(ref edgesVb);
-			gfx.DeleteTexture(ref edgeTexId);
-			gfx.DeleteTexture(ref sideTexId);
+			game.Graphics.DeleteVb(ref sidesVb);
+			game.Graphics.DeleteVb(ref edgesVb);
+			game.Graphics.DeleteTexture(ref edgesTex);
+			game.Graphics.DeleteTexture(ref sidesTex);
 		}
 		
 		void ContextRecreated() {
 			ResetSides();
 			ResetEdges();
-			ResetTextures(null, null);
+			ResetTextures();
 		}
 
 		
 		void RebuildSides(int y, int axisSize) {
 			BlockID block = game.World.Env.SidesBlock;
 			sidesVertices = 0;
+			if (BlockInfo.Draw[block] == DrawType.Gas) return;
+			
 			for (int i = 0; i < rects.Length; i++) {
 				Rectangle r = rects[i];
 				sidesVertices += Utils.CountVertices(r.Width, r.Height, axisSize); // YQuads outside
@@ -174,11 +162,9 @@ namespace ClassicalSharp.Renderers {
 			VertexP3fT2fC4b[] v = new VertexP3fT2fC4b[sidesVertices];
 			int index = 0;
 			
-			fullColSides = game.BlockInfo.FullBright[block];
-			int col = fullColSides ? FastColour.WhitePacked : map.Env.Shadow;
-			if (game.BlockInfo.Tinted[block]) {
-				col = Utils.Tint(col, game.BlockInfo.FogColour[block]);
-			}
+			fullBrightSides = BlockInfo.FullBright[block];
+			PackedCol col = fullBrightSides ? PackedCol.White : map.Env.Shadow;
+			if (BlockInfo.Tinted[block]) { col *= BlockInfo.FogCol[block]; }
 			
 			for (int i = 0; i < rects.Length; i++) {
 				Rectangle r = rects[i];
@@ -193,12 +179,17 @@ namespace ClassicalSharp.Renderers {
 			DrawZ(map.Length, 0, map.Width, y1, y2, axisSize, col, v, ref index);
 			DrawX(0, 0, map.Length, y1, y2, axisSize, col, v, ref index);
 			DrawX(map.Width, 0, map.Length, y1, y2, axisSize, col, v, ref index);
-			sidesVb = gfx.CreateVb(v, VertexFormat.P3fT2fC4b, sidesVertices);
+			
+			fixed (VertexP3fT2fC4b* ptr = v) {
+				sidesVb = game.Graphics.CreateVb((IntPtr)ptr, VertexFormat.P3fT2fC4b, sidesVertices);
+			}
 		}
 		
 		void RebuildEdges(int y, int axisSize) {
 			BlockID block = game.World.Env.EdgeBlock;
 			edgesVertices = 0;
+			if (BlockInfo.Draw[block] == DrawType.Gas) return;
+			
 			for (int i = 0; i < rects.Length; i++) {
 				Rectangle r = rects[i];
 				edgesVertices += Utils.CountVertices(r.Width, r.Height, axisSize); // YPlanes outside
@@ -206,33 +197,35 @@ namespace ClassicalSharp.Renderers {
 			VertexP3fT2fC4b[] v = new VertexP3fT2fC4b[edgesVertices];
 			int index = 0;
 			
-			fullColEdge = game.BlockInfo.FullBright[block];
-			int col = fullColEdge ? FastColour.WhitePacked : map.Env.Sun;
-			if (game.BlockInfo.Tinted[block]) {
-				col = Utils.Tint(col, game.BlockInfo.FogColour[block]);
-			}
+			fullBrightEdge = BlockInfo.FullBright[block];
+			PackedCol col = fullBrightEdge ? PackedCol.White : map.Env.Sun;
+			if (BlockInfo.Tinted[block]) { col *= BlockInfo.FogCol[block]; }
 			
 			for (int i = 0; i < rects.Length; i++) {
 				Rectangle r = rects[i];
 				DrawY(r.X, r.Y, r.X + r.Width, r.Y + r.Height, y, axisSize, col,
 				      HorOffset(block), YOffset(block), v, ref index);
 			}
-			edgesVb = gfx.CreateVb(v, VertexFormat.P3fT2fC4b, edgesVertices);
+
+			fixed (VertexP3fT2fC4b* ptr = v) {
+				edgesVb = game.Graphics.CreateVb((IntPtr)ptr, VertexFormat.P3fT2fC4b, edgesVertices);
+			}
 		}
 
 		float HorOffset(BlockID block) {
-			BlockInfo info = game.BlockInfo;
-			return info.RenderMinBB[block].X - info.MinBB[block].X;
+			return BlockInfo.RenderMinBB[block].X - BlockInfo.MinBB[block].X;
 		}
 		
 		float YOffset(BlockID block) {
-			BlockInfo info = game.BlockInfo;
-			return info.RenderMinBB[block].Y - info.MinBB[block].Y;
+			return BlockInfo.RenderMinBB[block].Y - BlockInfo.MinBB[block].Y;
 		}
 		
 		void DrawX(int x, int z1, int z2, int y1, int y2, int axisSize,
-		           int col, VertexP3fT2fC4b[] v, ref int i) {
+		           PackedCol col, VertexP3fT2fC4b[] vertices, ref int i) {
 			int endZ = z2, endY = y2, startY = y1;
+			VertexP3fT2fC4b v;
+			v.X = x; v.Col = col;
+			
 			for (; z1 < endZ; z1 += axisSize) {
 				z2 = z1 + axisSize;
 				if (z2 > endZ) z2 = endZ;
@@ -241,18 +234,21 @@ namespace ClassicalSharp.Renderers {
 					y2 = y1 + axisSize;
 					if (y2 > endY) y2 = endY;
 					
-					TextureRec rec = new TextureRec(0, 0, z2 - z1, y2 - y1);
-					v[i++] = new VertexP3fT2fC4b(x, y1, z1, rec.U1, rec.V2, col);
-					v[i++] = new VertexP3fT2fC4b(x, y2, z1, rec.U1, rec.V1, col);
-					v[i++] = new VertexP3fT2fC4b(x, y2, z2, rec.U2, rec.V1, col);
-					v[i++] = new VertexP3fT2fC4b(x, y1, z2, rec.U2, rec.V2, col);
+					float u2 = z2 - z1, v2 = y2 - y1;
+					v.Y = y1; v.Z = z1; v.U = 0f; v.V = v2; vertices[i++] = v;
+					v.Y = y2;                     v.V = 0f; vertices[i++] = v;
+					v.Z = z2; v.U = u2;           vertices[i++] = v;
+					v.Y = y1;                     v.V = v2; vertices[i++] = v;
 				}
 			}
 		}
 		
 		void DrawZ(int z, int x1, int x2, int y1, int y2, int axisSize,
-		           int col, VertexP3fT2fC4b[] v, ref int i) {
+		           PackedCol col, VertexP3fT2fC4b[] vertices, ref int i) {
 			int endX = x2, endY = y2, startY = y1;
+			VertexP3fT2fC4b v;
+			v.Z = z; v.Col = col;
+			
 			for (; x1 < endX; x1 += axisSize) {
 				x2 = x1 + axisSize;
 				if (x2 > endX) x2 = endX;
@@ -261,18 +257,21 @@ namespace ClassicalSharp.Renderers {
 					y2 = y1 + axisSize;
 					if (y2 > endY) y2 = endY;
 					
-					TextureRec rec = new TextureRec(0, 0, x2 - x1, y2 - y1);
-					v[i++] = new VertexP3fT2fC4b(x1, y1, z, rec.U1, rec.V2, col);
-					v[i++] = new VertexP3fT2fC4b(x1, y2, z, rec.U1, rec.V1, col);
-					v[i++] = new VertexP3fT2fC4b(x2, y2, z, rec.U2, rec.V1, col);
-					v[i++] = new VertexP3fT2fC4b(x2, y1, z, rec.U2, rec.V2, col);
+					float u2 = x2 - x1, v2 = y2 - y1;
+					v.X = x1; v.Y = y1; v.U = 0f; v.V = v2; vertices[i++] = v;
+					v.Y = y2;           v.V = 0f; vertices[i++] = v;
+					v.X = x2;           v.U = u2;           vertices[i++] = v;
+					v.Y = y1;           v.V = v2; vertices[i++] = v;
 				}
 			}
 		}
 		
 		void DrawY(int x1, int z1, int x2, int z2, float y, int axisSize,
-		           int col, float offset, float yOffset, VertexP3fT2fC4b[] v, ref int i) {
+		           PackedCol col, float offset, float yOffset, VertexP3fT2fC4b[] vertices, ref int i) {
 			int endX = x2, endZ = z2, startZ = z1;
+			VertexP3fT2fC4b v;
+			v.Y = y + yOffset; v.Col = col;
+			
 			for (; x1 < endX; x1 += axisSize) {
 				x2 = x1 + axisSize;
 				if (x2 > endX) x2 = endX;
@@ -281,18 +280,18 @@ namespace ClassicalSharp.Renderers {
 					z2 = z1 + axisSize;
 					if (z2 > endZ) z2 = endZ;
 					
-					TextureRec rec = new TextureRec(0, 0, x2 - x1, z2 - z1);
-					v[i++] = new VertexP3fT2fC4b(x1 + offset, y + yOffset, z1 + offset, rec.U1, rec.V1, col);
-					v[i++] = new VertexP3fT2fC4b(x1 + offset, y + yOffset, z2 + offset, rec.U1, rec.V2, col);
-					v[i++] = new VertexP3fT2fC4b(x2 + offset, y + yOffset, z2 + offset, rec.U2, rec.V2, col);
-					v[i++] = new VertexP3fT2fC4b(x2 + offset, y + yOffset, z1 + offset, rec.U2, rec.V1, col);
+					float u2 = x2 - x1, v2 = z2 - z1;
+					v.X = x1 + offset; v.Z = z1 + offset; v.U = 0f; v.V = 0f; vertices[i++] = v;
+					v.Z = z2 + offset;           v.V = v2; vertices[i++] = v;
+					v.X = x2 + offset;                    v.U = u2;           vertices[i++] = v;
+					v.Z = z1 + offset;           v.V = 0f; vertices[i++] = v;
 				}
 			}
 		}
 		
 		Rectangle[] rects = new Rectangle[4];
-		void CalculateRects(int extent) {
-			extent = Utils.AdjViewDist(extent);
+		void CalculateRects() {
+			int extent = Utils.AdjViewDist(game.ViewDistance);
 			rects[0] = new Rectangle(-extent, -extent, extent + map.Width + extent, extent);
 			rects[1] = new Rectangle(-extent, map.Length, extent + map.Width + extent, extent);
 			
@@ -302,12 +301,12 @@ namespace ClassicalSharp.Renderers {
 		
 		int lastEdgeTexLoc, lastSideTexLoc;
 		void MakeTexture(ref int id, ref int lastTexLoc, BlockID block) {
-			int texLoc = game.BlockInfo.GetTextureLoc(block, Side.Top);
-			if (texLoc == lastTexLoc || gfx.LostContext) return;
+			int texLoc = BlockInfo.GetTextureLoc(block, Side.Top);
+			if (texLoc == lastTexLoc || game.Graphics.LostContext) return;
 			lastTexLoc = texLoc;
 			
 			game.Graphics.DeleteTexture(ref id);
-			id = game.TerrainAtlas.LoadTextureElement(texLoc);
+			id = Atlas2D.LoadTile(texLoc);
 		}
 	}
 }

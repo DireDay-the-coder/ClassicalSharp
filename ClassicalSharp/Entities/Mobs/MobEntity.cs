@@ -1,4 +1,5 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
+#if SURVIVAL_TEST
 using System;
 using OpenTK;
 
@@ -9,7 +10,7 @@ namespace ClassicalSharp.Entities.Mobs {
 		LocalInterpComponent interp;
 		CollisionsComponent collisions;
 		PhysicsComponent physics;
-		static HacksComponent hacks = new HacksComponent(null, null);
+		static HacksComponent hacks = new HacksComponent(null);
 		
 		AI ai;
 		int climbCooldown;
@@ -24,7 +25,7 @@ namespace ClassicalSharp.Entities.Mobs {
 			physics.hacks = hacks;
 			physics.collisions = collisions;
 			
-			if (Utils.CaselessEquals(model, "pig") || Utils.CaselessEquals(model, "sheep")) {
+			if (Utils.CaselessEq(model, "pig") || Utils.CaselessEq(model, "sheep")) {
 				ai = new FleeAI(game, this);
 			} else {
 				ai = new HostileAI(game, this);
@@ -37,7 +38,7 @@ namespace ClassicalSharp.Entities.Mobs {
 		// TODO: this is just so the entities do something, remove later
 		static Random rand = new Random();
 		public override void Tick(double delta) {
-			if (game.World.IsNotLoaded) return;
+			if (!game.World.HasBlocks) return;
 			interp.AdvanceState();
 			physics.UpdateVelocityState();
 			
@@ -74,3 +75,4 @@ namespace ClassicalSharp.Entities.Mobs {
 		}
 	}
 }
+#endif

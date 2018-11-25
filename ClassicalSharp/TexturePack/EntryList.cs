@@ -15,28 +15,27 @@ namespace ClassicalSharp.Textures {
 			this.file = file;
 		}
 		
-		public void AddEntry(string entry) {
+		public void Add(string entry) {
 			Entries.Add(entry);
 			Save();
 		}
 		
-		public bool HasEntry(string entry) {
+		public bool Has(string entry) {
 			return Entries.Contains(entry);
 		}
 		
 		public bool Load() {
-			string path = Path.Combine(Program.AppDirectory, folder);
-			path = Path.Combine(path, file);
-			if (!File.Exists(path)) return true;
+			string path = Path.Combine(folder, file);
+			if (!Platform.FileExists(path)) return true;
 			
 			try {
-				using (Stream fs = File.OpenRead(path))
+				using (Stream fs = Platform.FileOpen(path))
 					using (StreamReader reader = new StreamReader(fs, false))
 				{
 					string line;
 					while ((line = reader.ReadLine()) != null) {
 						line = line.Trim();
-						if (line.Length == 0 || line[0] == '#') continue;
+						if (line.Length == 0) continue;
 						Entries.Add(line);
 					}
 				}
@@ -48,12 +47,11 @@ namespace ClassicalSharp.Textures {
 		}
 		
 		public bool Save() {
-			try {
-				string path = Path.Combine(Program.AppDirectory, folder);
-				if (!Directory.Exists(path))
-				   Directory.CreateDirectory(path);
+			try {				
+				Utils.EnsureDirectory(folder);
+				string path = Path.Combine(folder, file);
 				
-				using (Stream fs = File.Create(Path.Combine(path, file)))
+				using (Stream fs = Platform.FileCreate(path))
 					using (StreamWriter writer = new StreamWriter(fs))
 				{
 					for (int i = 0; i < Entries.Count; i++)

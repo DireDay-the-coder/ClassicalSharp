@@ -1,4 +1,5 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
+#if SURVIVAL_TEST
 using System;
 using System.Drawing;
 using ClassicalSharp.GraphicsAPI;
@@ -8,7 +9,7 @@ using Android.Graphics;
 #endif
 
 namespace ClassicalSharp.Gui.Widgets {
-	public sealed class SurvivalHotbarWidget : HotbarWidget {
+	public class SurvivalHotbarWidget : HotbarWidget {
 		
 		TextAtlas posAtlas;
 		Font font;
@@ -21,10 +22,10 @@ namespace ClassicalSharp.Gui.Widgets {
 			font = new Font(game.FontName, 16);
 			posAtlas = new TextAtlas(game, 16);
 			posAtlas.Pack("0123456789", font, "f");
-			game.Events.ChatFontChanged += ChatFontChanged;
+			Events.ChatFontChanged += ChatFontChanged;
 		}
 		
-		void ChatFontChanged(object sender, EventArgs e) { Recreate(); }
+		void ChatFontChanged(object nill, EventArgs e) { Recreate(); }
 		
 		public override void Render(double delta) {
 			base.Render(delta);
@@ -35,7 +36,7 @@ namespace ClassicalSharp.Gui.Widgets {
 		public override void Dispose() {
 			font.Dispose();
 			posAtlas.Dispose();
-			game.Events.ChatFontChanged -= ChatFontChanged;
+			Events.ChatFontChanged -= ChatFontChanged;
 		}
 		
 		
@@ -43,7 +44,7 @@ namespace ClassicalSharp.Gui.Widgets {
 			SurvivalGameMode surv = (SurvivalGameMode)game.Mode;
 			VertexP3fT2fC4b[] vertices = game.ModelCache.vertices;
 			int index = 0;
-			posAtlas.tex.Y = (short)(game.Height - barHeight);
+			posAtlas.tex.Y = (short)(Y + (Height - barHeight));
 			
 			int offset = game.Inventory.Offset;
 			for (int i = 0; i < Inventory.BlocksPerRow; i++) {
@@ -53,9 +54,8 @@ namespace ClassicalSharp.Gui.Widgets {
 					posAtlas.AddInt(surv.invCount[offset + i], vertices, ref index);
 			}
 
-			gfx.BindTexture(posAtlas.tex.ID);
-			gfx.UpdateDynamicIndexedVb(DrawMode.Triangles,
-			                           game.ModelCache.vb, game.ModelCache.vertices, index);
+			game.Graphics.BindTexture(posAtlas.tex.ID);
+			game.Graphics.UpdateDynamicVb_IndexedTris(game.ModelCache.vb, game.ModelCache.vertices, index);
 		}
 		
 		void DrawHearts() {
@@ -67,21 +67,21 @@ namespace ClassicalSharp.Gui.Widgets {
 			
 			int selBlockSize = (int)(23 * game.GuiHotbarScale);
 			int offset = middle - inner;
-			int y = game.Height - selBlockSize - outer;
+			int y = Y + (Height - selBlockSize - outer);
 			
 			for (int heart = 0; heart < 10; heart++) {
 				Texture tex = new Texture(0, X + middle * heart, y, outer, outer, backRec);
-				IGraphicsApi.Make2DQuad(ref tex, FastColour.WhitePacked, cache.vertices, ref index);
+				IGraphicsApi.Make2DQuad(ref tex, PackedCol.White, cache.vertices, ref index);
 				if (health <= 0) continue;
 				
 				TextureRec rec = (health >= 2) ? fullRec : halfRec;
 				tex = new Texture(0, X + middle * heart + offset, y + offset, inner, inner, rec);
-				IGraphicsApi.Make2DQuad(ref tex, FastColour.WhitePacked, cache.vertices, ref index);
+				IGraphicsApi.Make2DQuad(ref tex, PackedCol.White, cache.vertices, ref index);
 				health -= 2;
 			}
 			
-			gfx.BindTexture(game.Gui.IconsTex);
-			gfx.UpdateDynamicIndexedVb(DrawMode.Triangles, cache.vb, cache.vertices, index);
+			game.Graphics.BindTexture(game.Gui.IconsTex);
+			game.Graphics.UpdateDynamicVb_IndexedTris(cache.vb, cache.vertices, index);
 		}
 		
 		static TextureRec backRec = new TextureRec(16 / 256f, 0 / 256f, 9 / 256f, 9 / 256f);
@@ -89,3 +89,4 @@ namespace ClassicalSharp.Gui.Widgets {
 		static TextureRec halfRec = new TextureRec(62 / 256f, 1 / 256f, 7 / 256f, 7 / 256f);
 	}
 }
+#endif

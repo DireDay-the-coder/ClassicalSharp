@@ -41,13 +41,17 @@ namespace ClassicalSharp.Network {
 		public const byte CpeExtAddEntity2 = 33;
 		public const byte CpePlayerClick = 34;
 		public const byte CpeDefineBlock = 35;
-		public const byte CpeRemoveBlockDefinition = 36;
+		public const byte CpeUndefineBlock = 36;
 		public const byte CpeDefineBlockExt = 37;
 		public const byte CpeBulkBlockUpdate = 38;
 		public const byte CpeSetTextColor = 39;
 		public const byte CpeSetMapEnvUrl = 40;
 		public const byte CpeSetMapEnvProperty = 41;
 		public const byte CpeSetEntityProperty = 42;
+		public const byte CpeTwoWayPing = 43;
+		public const byte CpeSetInventoryOrder = 44;
+		
+		public const byte Count = 45;
 	}
 }
 
@@ -64,12 +68,9 @@ namespace ClassicalSharp {
 		Announcement = 100,
 		
 		// client defined message ids
-		ClientStatus1 = 256,
+		ClientStatus1 = 256, // cuboid messages
 		ClientStatus2 = 257,
-		ClientStatus3 = 258, // cuboid messages
-		ClientStatus4 = 259, // clipboard invalid characters
-		ClientStatus5 = 260, // tab list matching names
-		ClientStatus6 = 261, // no LongerMessages warning
+		ClientStatus3 = 258, // tab list matching names
 	}
 	
 	public enum BlockFace { XMax, XMin, YMax, YMin, ZMax, ZMin, }

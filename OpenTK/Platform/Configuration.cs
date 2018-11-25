@@ -28,6 +28,7 @@
 using System;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Net.Sockets;
 
 namespace OpenTK {
 	
@@ -40,19 +41,19 @@ namespace OpenTK {
 		// Detects the underlying OS and runtime.
 		unsafe static Configuration() {
 			PlatformID platform = Environment.OSVersion.Platform;
-			if( platform == PlatformID.Win32NT || platform == PlatformID.Win32S ||
-			   platform == PlatformID.Win32Windows || platform == PlatformID.WinCE )
+			if (platform == PlatformID.Win32NT || platform == PlatformID.Win32S ||
+			   platform == PlatformID.Win32Windows || platform == PlatformID.WinCE)
 				RunningOnWindows = true;
-			else if ( platform == PlatformID.Unix || platform == (PlatformID)4 ) {
+			else if (platform == PlatformID.Unix || platform == (PlatformID)4) {
 				sbyte* ascii = stackalloc sbyte[8192];
-				uname( ascii );
+				uname(ascii);
 				// Distinguish between Linux, Mac OS X and other Unix operating systems.
-				string kernel = new String( ascii );
-				if( kernel == "Linux" ) {
+				string kernel = new String(ascii);
+				if (kernel == "Linux") {
 					RunningOnLinux = RunningOnUnix = true;
-				} else if( kernel == "Darwin" ) {
+				} else if (kernel == "Darwin") {
 					RunningOnMacOS = RunningOnUnix = true;
-				} else if( !String.IsNullOrEmpty( kernel ) ) {
+				} else if (!String.IsNullOrEmpty(kernel)) {
 					RunningOnUnix = true;
 				} else {
 					throw new PlatformNotSupportedException("Unknown platform. Please file a bug report at http://www.opentk.com/");
@@ -64,13 +65,13 @@ namespace OpenTK {
 			// Detect whether X is present.
 			// Hack: it seems that this check will cause X to initialize itself on Mac OS X Leopard and newer.
 			// We don't want that (we'll be using the native interfaces anyway), so we'll avoid this check when we detect Mac OS X.
-			if( !RunningOnMacOS && !RunningOnWindows ) {
+			if (!RunningOnMacOS && !RunningOnWindows) {
 				try { RunningOnX11 = OpenTK.Platform.X11.API.DefaultDisplay != IntPtr.Zero; }
 				catch { }
 			}
 
 			// Detect the Mono runtime (code taken from http://mono.wikia.com/wiki/Detecting_if_program_is_running_in_Mono).
-			if( Type.GetType("Mono.Runtime") != null )
+			if (Type.GetType("Mono.Runtime") != null)
 				RunningOnMono = true;
 			
 			Debug.Print("Detected configuration: {0} / {1}",
@@ -102,6 +103,13 @@ namespace OpenTK {
 			
 			// So we hack around and prevent them ever being initalised.
 			// TODO: only seems to work before .NET 4.0, not sure if still needed by then
+			HACK_PerfCounters();
+			
+			// Another issue with ipv6 DNS resolution delaying downloads for 30-40 seconds too
+			HACK_IPv6();
+		}
+		
+		static void HACK_PerfCounters() {
 			try {
 				Assembly assem = typeof(System.Net.IPAddress).Assembly;
 				Type perfType = assem.GetType("System.Net.NetworkingPerfCounters");
@@ -111,7 +119,20 @@ namespace OpenTK {
 				if (field == null) return;
 				
 				field.SetValue(null, true);
-			} catch {				
+			} catch {
+			}
+		}
+		
+		static void HACK_IPv6() {
+			try {
+				// Force socket state to get initalised
+				bool ignored = System.Net.Sockets.Socket.OSSupportsIPv6;
+				
+				FieldInfo field = typeof(Socket).GetField("s_OSSupportsIPv6", BindingFlags.NonPublic | BindingFlags.Static);
+				if (field == null) return;
+				
+				field.SetValue(null, false);
+			} catch {
 			}
 		}
 	}

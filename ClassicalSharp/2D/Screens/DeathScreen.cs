@@ -11,17 +11,17 @@ namespace ClassicalSharp.Gui.Screens {
 		}
 		
 		public override void Init() {
+			textFont = new Font(game.FontName, 40);
 			base.Init();
-			titleFont = new Font(game.FontName, 16, FontStyle.Bold);
-			regularFont = new Font(game.FontName, 40, FontStyle.Regular);
 			ContextRecreated();
 		}
 		
 		protected override void ContextRecreated() {
+			string score = game.Chat.Status1.Text;
 			widgets = new Widget[] {
-				TextWidget.Create(game, "Game over!", regularFont)
+				TextWidget.Create(game, "Game over!", textFont)
 					.SetLocation(Anchor.Centre, Anchor.Centre, 0, -150),
-				TextWidget.Create(game, "Score: 0", titleFont)
+				TextWidget.Create(game, score, titleFont)
 					.SetLocation(Anchor.Centre, Anchor.Centre, 0, -75),
 				ButtonWidget.Create(game, 400, "Generate new level...", titleFont, GenLevelClick)
 					.SetLocation(Anchor.Centre, Anchor.Centre, 0, 25),
@@ -29,14 +29,14 @@ namespace ClassicalSharp.Gui.Screens {
 					.SetLocation(Anchor.Centre, Anchor.Centre, 0, 75),
 			};
 		}
+		
+		public override bool HandlesKeyDown(Key key) { return true; }
 
-		void GenLevelClick(Game g, Widget w, MouseButton btn, int x, int y) {
-			if (btn != MouseButton.Left) return;
+		void GenLevelClick(Game g, Widget w) {
 			game.Gui.SetNewScreen(new GenLevelScreen(game));
 		}
 		
-		void LoadLevelClick(Game g, Widget w, MouseButton btn, int x, int y) {
-			if (btn != MouseButton.Left) return;
+		void LoadLevelClick(Game g, Widget w) {
 			game.Gui.SetNewScreen(new LoadLevelScreen(game));
 		}
 	}

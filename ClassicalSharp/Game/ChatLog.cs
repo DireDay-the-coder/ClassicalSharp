@@ -11,34 +11,42 @@ namespace ClassicalSharp {
 		
 		public ChatLine Status1, Status2, Status3, BottomRight1,
 		BottomRight2, BottomRight3, Announcement;
-		public ChatLine[] ClientStatus = new ChatLine[6];
+		public ChatLine[] ClientStatus = new ChatLine[3];
 		
 		Game game;
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
 		}
+		
+		void IGameComponent.Reset(Game game) { 
+			logName = null;
+			// Reset all the CPE messages
+			Add(null, MessageType.Announcement);
+			Add(null, MessageType.Status1);
+			Add(null, MessageType.Status2);
+			Add(null, MessageType.Status3);
+			Add(null, MessageType.BottomRight1);
+			Add(null, MessageType.BottomRight2);
+			Add(null, MessageType.BottomRight3);
+		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { logName = null; }
-		public void OnNewMap(Game game) { }
-		public void OnNewMapLoaded(Game game) { }
+		void IGameComponent.Ready(Game game) { }		
+		void IGameComponent.OnNewMap(Game game) { }
+		void IGameComponent.OnNewMapLoaded(Game game) { }
 		
-		/// <summary> List of chat messages received from the server and added by client commands. </summary>
-		/// <remarks> index 0 is the oldest chat message, last index is newest. </remarks>
 		public List<ChatLine> Log = new List<ChatLine>();
-		
-		/// <summary> List of chat messages sent by the user to the server. </summary>
 		public List<string> InputLog = new List<string>();
 		
-		public void Send(string text, bool partial) {
-			text = text.TrimEnd(trimChars);
+		public void Send(string text, bool logUsage) {
 			if (String.IsNullOrEmpty(text)) return;
+			Events.RaiseChatSending(ref text);
+			if (logUsage) InputLog.Add(text);
 			
 			if (game.CommandList.IsCommandPrefix(text)) {
 				game.CommandList.Execute(text);
-				return;
+			} else {
+				game.Server.SendChat(text);
 			}
-			game.Server.SendChat(text, partial);
 		}
 		
 		static char[] trimChars = new char[] { ' ', '\0' };
@@ -46,6 +54,8 @@ namespace ClassicalSharp {
 		public void Add(string text) { Add(text, MessageType.Normal); }
 		
 		public void Add(string text, MessageType type) {
+			Events.RaiseChatReceived(ref text, type);
+			
 			if (type == MessageType.Normal) {
 				Log.Add(text);
 				LogChatToFile(text);
@@ -63,10 +73,9 @@ namespace ClassicalSharp {
 				BottomRight3 = text;
 			} else if (type == MessageType.Announcement) {
 				Announcement = text;
-			} else if (type >= MessageType.ClientStatus1 && type <= MessageType.ClientStatus6) {
+			} else if (type >= MessageType.ClientStatus1 && type <= MessageType.ClientStatus3) {
 				ClientStatus[(int)(type - MessageType.ClientStatus1)] = text;
 			}
-			game.Events.RaiseChatReceived(text, type);
 		}
 		
 		public void Dispose() {
@@ -80,30 +89,27 @@ namespace ClassicalSharp {
 		
 		public void SetLogName(string name) {
 			if (logName != null) return;
-			StringBuffer buffer = new StringBuffer(name.Length);
-			int len = 0;
 			
+			name = Utils.StripColours(name);
+			StringBuffer buffer = new StringBuffer(name.Length);
+
 			for (int i = 0; i < name.Length; i++) {
-				if (Allowed(name[i]))
-					buffer.Append(ref len, name[i]);
+				if (Allowed(name[i])) buffer.Append(name[i]);
 			}
 			logName = buffer.ToString();
 		}
 		
 		static bool Allowed(char c) {
-			return 
-				c == '{' || c == '}' || 
-				c == '[' || c == ']' || 
-				c == '(' || c == ')' ||				
-				(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') ||
-				(c >= 'A' && c <= 'Z');
+			return
+				c == '{' || c == '}' || c == '[' || c == ']' || c == '(' || c == ')' ||
+				(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
 		}
 		
 		DateTime last;
 		StreamWriter writer = null;
 		void LogChatToFile(string text) {
 			if (logName == null || !game.ChatLogging) return;
-			DateTime now = DateTime.Now;
+			DateTime now = Utils.LocalNow();
 			
 			if (now.Day != last.Day || now.Month != last.Month || now.Year != last.Year) {
 				Dispose();
@@ -115,31 +121,28 @@ namespace ClassicalSharp {
 			
 			if (32 + text.Length > logBuffer.Capacity)
 				logBuffer = new StringBuffer(32 + text.Length);
-			int index = 0;
+			
 			logBuffer.Clear() // [HH:mm:ss] text
-				.Append(ref index, '[').AppendPaddedNum(ref index, 2, now.Hour)
-				.Append(ref index, ':').AppendPaddedNum(ref index, 2, now.Minute)
-				.Append(ref index, ':').AppendPaddedNum(ref index, 2, now.Second)
-				.Append(ref index, "] ").AppendColourless(ref index, text)
-				.Append(ref index, Environment.NewLine);
+				.Append('[').AppendPaddedNum(2, now.Hour)
+				.Append(':').AppendPaddedNum(2, now.Minute)
+				.Append(':').AppendPaddedNum(2, now.Second)
+				.Append("] ").AppendColourless(text)
+				.Append(Environment.NewLine);
 			writer.Write(logBuffer.value, 0, logBuffer.Length);
 		}
 		
 		void OpenChatFile(DateTime now) {
-			string basePath = Path.Combine(Program.AppDirectory, "logs");
-			if (!Directory.Exists(basePath))
-				Directory.CreateDirectory(basePath);
-
+			Utils.EnsureDirectory("logs");
 			string date = now.ToString("yyyy-MM-dd");
+			
 			// Ensure multiple instances do not end up overwriting each other's log entries.
 			for (int i = 0; i < 20; i++) {
 				string id = i == 0 ? "" : " _" + i;
-				string fileName = date + " " + logName + id + ".log";
-				string path = Path.Combine(basePath, fileName);
+				string path = Path.Combine("logs", date + " " + logName + id + ".log");
 				
-				FileStream stream = null;
+				Stream stream = null;
 				try {
-					stream = File.Open(path, FileMode.Append, FileAccess.Write, FileShare.Read);
+					stream = Platform.FileAppend(path);
 				} catch (IOException ex) {
 					int hresult = Marshal.GetHRForException(ex);
 					uint errorCode = (uint)hresult & 0xFFFF;

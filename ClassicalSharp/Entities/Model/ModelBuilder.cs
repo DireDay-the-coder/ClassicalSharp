@@ -4,7 +4,7 @@ using System;
 namespace ClassicalSharp.Model {
 	
 	public struct BoxDesc {
-		public int TexX, TexY, SidesW, BodyW, BodyH;
+		public int TexX, TexY, SizeX, SizeY, SizeZ;
 		public float X1, X2, Y1, Y2, Z1, Z2;
 		public float RotX, RotY, RotZ;
 		
@@ -21,7 +21,7 @@ namespace ClassicalSharp.Model {
 			return this;
 		}
 		
-		/// <summary> Expands the corners of this box outwards by the given amount in pixel units. </summary>
+		/// <summary> Expands the corners of this box outwards by the given amount in pixel coordinates. </summary>
 		public BoxDesc Expand(float amount) {
 			X1 -= amount / 16f; X2 += amount / 16f;
 			Y1 -= amount / 16f; Y2 += amount / 16f;
@@ -48,28 +48,17 @@ namespace ClassicalSharp.Model {
 			float temp = X1; X1 = X2; X2 = temp;
 			return this;
 		}
-		
-		public BoxDesc SetX1(float value) { X1 = value / 16f; return this; }
-		
-		public BoxDesc SetX2(float value) { X1 = value / 16f; return this; }
 	}
 
 	/// <summary> Contains methods to create parts of 3D objects, typically boxes and quads. </summary>
 	public static class ModelBuilder {
 		
+		const ushort UVMaxBit = IModel.UVMaxBit;
 		public static BoxDesc MakeBoxBounds(int x1, int y1, int z1, int x2, int y2, int z2) {
 			BoxDesc desc = default(BoxDesc).SetModelBounds(x1, y1, z1, x2, y2, z2);
-			desc.SidesW = Math.Abs(z2 - z1);
-			desc.BodyW = Math.Abs(x2 - x1);
-			desc.BodyH = Math.Abs(y2 - y1);
-			return desc;
-		}
-		
-		public static BoxDesc MakeRotatedBoxBounds(int x1, int y1, int z1, int x2, int y2, int z2) {
-			BoxDesc desc = default(BoxDesc).SetModelBounds(x1, y1, z1, x2, y2, z2);
-			desc.SidesW = Math.Abs(y2 - y1);
-			desc.BodyW = Math.Abs(x2 - x1);
-			desc.BodyH = Math.Abs(z2 - z1);
+			desc.SizeX = Math.Abs(x2 - x1);
+			desc.SizeY = Math.Abs(y2 - y1);
+			desc.SizeZ = Math.Abs(z2 - z1);
 			return desc;
 		}
 		
@@ -81,23 +70,23 @@ namespace ClassicalSharp.Model {
 		/// ┃W┈┈┈┈┈┈┈┈┈W┃W┈┈┈┈tex┈┈┈W┃W┈┈┈┈tex┈┈┈┈W┃┈┈┈┈┈┈┈┈┈┈┈┈┃ <br/>
 		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┈┃┈┈┈┈┈┈┈┈┈┈┈┈┃ <br/>
 		/// ┣━━━━━━━━━━━━━╋━━━━━━━━━━━━━╋━━━━━━━━━━━━━━╋━━━━━━━━━━━━┃ <br/>
-		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┃ <br/>
+		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┃ <br/>
 		/// ┃B┈┈┈left┈┈┈┈┈B┃B┈┈front┈┈┈┈B┃B┈┈┈right┈┈┈┈B┃B┈┈┈back┈┈┈B┃ <br/>
 		/// ┃H┈┈┈tex┈┈┈┈┈H┃H┈┈tex┈┈┈┈┈H┃H┈┈┈tex┈┈┈┈┈H┃H┈┈┈┈tex┈┈┈H┃ <br/>
-		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┃ <br/>
+		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┃ <br/>
 		/// ┗━━━━━━━━━━━━━┻━━━━━━━━━━━━━┻━━━━━━━━━━━━━┻━━━━━━━━━━━━━┛ </summary>
 		public static ModelPart BuildBox(IModel m, BoxDesc desc) {
-			int sidesW = desc.SidesW, bodyW = desc.BodyW, bodyH = desc.BodyH;
+			int sidesW = desc.SizeZ, bodyW = desc.SizeX, bodyH = desc.SizeY;
 			float x1 = desc.X1, y1 = desc.Y1, z1 = desc.Z1;
 			float x2 = desc.X2, y2 = desc.Y2, z2 = desc.Z2;
 			int x = desc.TexX, y = desc.TexY;
 			
-			YQuad(m, x + sidesW, y, bodyW, sidesW, x2, x1, z2, z1, y2); // top
-			YQuad(m, x + sidesW + bodyW, y, bodyW, sidesW, x2, x1, z2, z1, y1); // bottom
-			ZQuad(m, x + sidesW, y + sidesW, bodyW, bodyH, x2, x1, y1, y2, z1); // front
-			ZQuad(m, x + sidesW + bodyW + sidesW, y + sidesW, bodyW, bodyH, x1, x2, y1, y2, z2); // back
-			XQuad(m, x, y + sidesW, sidesW, bodyH, z2, z1, y1, y2, x2); // left
-			XQuad(m, x + sidesW + bodyW, y + sidesW, sidesW, bodyH, z1, z2, y1, y2, x1); // right
+			YQuad(m, x + sidesW,                  y,          bodyW, sidesW, x1, x2, z2, z1, y2, true);  // top
+			YQuad(m, x + sidesW + bodyW,          y,          bodyW, sidesW, x2, x1, z2, z1, y1, false); // bottom
+			ZQuad(m, x + sidesW,                  y + sidesW, bodyW,  bodyH, x1, x2, y1, y2, z1, true);  // front
+			ZQuad(m, x + sidesW + bodyW + sidesW, y + sidesW, bodyW,  bodyH, x2, x1, y1, y2, z2, true);  // back
+			XQuad(m, x,                           y + sidesW, sidesW, bodyH, z1, z2, y1, y2, x2, true);  // right
+			XQuad(m, x + sidesW + bodyW,          y + sidesW, sidesW, bodyH, z2, z1, y1, y2, x1, true);  // left
 			return new ModelPart(m.index - 6 * 4, 6 * 4, desc.RotX, desc.RotY, desc.RotZ);
 		}
 		
@@ -109,23 +98,23 @@ namespace ClassicalSharp.Model {
 		/// ┃W┈┈┈┈┈┈┈┈┈W┃W┈┈┈┈tex┈┈┈W┃W┈┈┈┈tex┈┈┈┈W┃┈┈┈┈┈┈┈┈┈┈┈┈┃ <br/>
 		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┈┃┈┈┈┈┈┈┈┈┈┈┈┈┃ <br/>
 		/// ┣━━━━━━━━━━━━━╋━━━━━━━━━━━━━╋━━━━━━━━━━━━━━╋━━━━━━━━━━━━┃ <br/>
-		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┃ <br/>
+		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┃ <br/>
 		/// ┃B┈┈┈left┈┈┈┈┈B┃B┈┈bottom┈┈B┃B┈┈┈right┈┈┈┈B┃B┈┈┈┈top┈┈┈B┃ <br/>
 		/// ┃H┈┈┈tex┈┈┈┈┈H┃H┈┈tex┈┈┈┈┈H┃H┈┈┈tex┈┈┈┈┈H┃H┈┈┈┈tex┈┈┈H┃ <br/>
-		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┃ <br/>
+		/// ┃┈┈┈┈┈SW┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┈┃┈┈┈┈┈SW┈┈┈┈┈┈┃┈┈┈┈┈BW┈┈┈┈┃ <br/>
 		/// ┗━━━━━━━━━━━━━┻━━━━━━━━━━━━━┻━━━━━━━━━━━━━┻━━━━━━━━━━━━━┛ </summary>
 		public static ModelPart BuildRotatedBox(IModel m, BoxDesc desc) {
-			int sidesW = desc.SidesW, bodyW = desc.BodyW, bodyH = desc.BodyH;
+			int sidesW = desc.SizeY, bodyW = desc.SizeX, bodyH = desc.SizeZ;
 			float x1 = desc.X1, y1 = desc.Y1, z1 = desc.Z1;
 			float x2 = desc.X2, y2 = desc.Y2, z2 = desc.Z2;
 			int x = desc.TexX, y = desc.TexY;
 			
-			YQuad(m, x + sidesW + bodyW + sidesW, y + sidesW, bodyW, bodyH, x1, x2, z1, z2, y2); // top
-			YQuad(m, x + sidesW, y + sidesW, bodyW, bodyH, x2, x1, z1, z2, y1); // bottom
-			ZQuad(m, x + sidesW, y, bodyW, sidesW, x2, x1, y1, y2, z1); // front
-			ZQuad(m, x + sidesW + bodyW, y, bodyW, sidesW, x1, x2, y2, y1, z2); // back
-			XQuad(m, x, y + sidesW, sidesW, bodyH, y2, y1, z2, z1, x2); // left
-			XQuad(m, x + sidesW + bodyW, y + sidesW, sidesW, bodyH, y1, y2, z2, z1, x1); // right
+			YQuad(m, x + sidesW + bodyW + sidesW, y + sidesW, bodyW, bodyH,  x1, x2, z1, z2, y2, false); // top
+			YQuad(m, x + sidesW,                  y + sidesW, bodyW, bodyH,  x2, x1, z1, z2, y1, false); // bottom
+			ZQuad(m, x + sidesW,                  y,          bodyW, sidesW, x2, x1, y1, y2, z1, false); // front
+			ZQuad(m, x + sidesW + bodyW,          y,          bodyW, sidesW, x1, x2, y2, y1, z2, false); // back
+			XQuad(m, x,                           y + sidesW, sidesW, bodyH, y2, y1, z2, z1, x2, false); // right
+			XQuad(m, x + sidesW + bodyW,          y + sidesW, sidesW, bodyH, y1, y2, z2, z1, x1, false); // left
 			
 			// rotate left and right 90 degrees
 			for (int i = m.index - 8; i < m.index; i++) {
@@ -137,27 +126,36 @@ namespace ClassicalSharp.Model {
 		}
 		
 		public static void XQuad(IModel m, int texX, int texY, int texWidth, int texHeight,
-		                     float z1, float z2, float y1, float y2, float x) {
-			m.vertices[m.index++] = new ModelVertex(x, y1, z1, texX, texY + texHeight);
-			m.vertices[m.index++] = new ModelVertex(x, y2, z1, texX, texY);
-			m.vertices[m.index++] = new ModelVertex(x, y2, z2, texX + texWidth, texY);
-			m.vertices[m.index++] = new ModelVertex(x, y1, z2, texX + texWidth, texY + texHeight);
+		                         float z1, float z2, float y1, float y2, float x, bool swapU) {
+			int u1 = texX, u2 = texX + texWidth | UVMaxBit;
+			if (swapU) { int tmp = u1; u1 = u2; u2 = tmp; }
+			
+			m.vertices[m.index++] = new ModelVertex(x, y1, z1, u1, texY + texHeight | UVMaxBit);
+			m.vertices[m.index++] = new ModelVertex(x, y2, z1, u1, texY);
+			m.vertices[m.index++] = new ModelVertex(x, y2, z2, u2, texY);
+			m.vertices[m.index++] = new ModelVertex(x, y1, z2, u2, texY + texHeight | UVMaxBit);
 		}
 		
 		public static void YQuad(IModel m, int texX, int texY, int texWidth, int texHeight,
-		                     float x1, float x2, float z1, float z2, float y) {
-			m.vertices[m.index++] = new ModelVertex(x1, y, z2, texX, texY + texHeight);
-			m.vertices[m.index++] = new ModelVertex(x1, y, z1, texX, texY);
-			m.vertices[m.index++] = new ModelVertex(x2, y, z1, texX + texWidth, texY);
-			m.vertices[m.index++] = new ModelVertex(x2, y, z2, texX + texWidth, texY + texHeight);
+		                         float x1, float x2, float z1, float z2, float y, bool swapU) {
+			int u1 = texX, u2 = texX + texWidth | UVMaxBit;
+			if (swapU) { int tmp = u1; u1 = u2; u2 = tmp; }
+			
+			m.vertices[m.index++] = new ModelVertex(x1, y, z2, u1, texY + texHeight | UVMaxBit);
+			m.vertices[m.index++] = new ModelVertex(x1, y, z1, u1, texY);
+			m.vertices[m.index++] = new ModelVertex(x2, y, z1, u2, texY);
+			m.vertices[m.index++] = new ModelVertex(x2, y, z2, u2, texY + texHeight | UVMaxBit);
 		}
 		
 		public static void ZQuad(IModel m, int texX, int texY, int texWidth, int texHeight,
-		                     float x1, float x2, float y1, float y2, float z) {
-			m.vertices[m.index++] = new ModelVertex(x1, y1, z, texX, texY + texHeight);
-			m.vertices[m.index++] = new ModelVertex(x1, y2, z, texX, texY);
-			m.vertices[m.index++] = new ModelVertex(x2, y2, z, texX + texWidth, texY);
-			m.vertices[m.index++] = new ModelVertex(x2, y1, z, texX + texWidth, texY + texHeight);
+		                         float x1, float x2, float y1, float y2, float z, bool swapU) {
+			int u1 = texX, u2 = texX + texWidth | UVMaxBit;
+			if (swapU) { int tmp = u1; u1 = u2; u2 = tmp; }
+			
+			m.vertices[m.index++] = new ModelVertex(x1, y1, z, u1, texY + texHeight | UVMaxBit);
+			m.vertices[m.index++] = new ModelVertex(x1, y2, z, u1, texY);
+			m.vertices[m.index++] = new ModelVertex(x2, y2, z, u2, texY);
+			m.vertices[m.index++] = new ModelVertex(x2, y1, z, u2, texY + texHeight | UVMaxBit);
 		}
 	}
 }

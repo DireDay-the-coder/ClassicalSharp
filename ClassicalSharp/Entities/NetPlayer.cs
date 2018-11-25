@@ -8,10 +8,9 @@ namespace ClassicalSharp.Entities {
 	public sealed class NetPlayer : Player {
 		
 		NetInterpComponent interp;
-		public NetPlayer(string displayName, string skinName, Game game, byte id) : base(game) {
+		public NetPlayer(string displayName, string skinName, Game game) : base(game) {
 			DisplayName = displayName;
 			SkinName = skinName;
-			SkinIdentifier = "skin_" + id;
 			interp = new NetInterpComponent(game, this);
 		}
 		
@@ -38,8 +37,9 @@ namespace ClassicalSharp.Entities {
 		
 		public override void RenderName() { 
 			if (!shouldRender) return;
-			float dist = Model.RenderDistance(this);
-			if (dist <= 32 * 32) DrawName();
+			float dist = IModel.RenderDistance(this, game.CurrentCameraPos);			
+			float threshold = game.Entities.NamesMode == NameMode.AllUnscaled ? 8192 * 8192 : 32 * 32;
+			if (dist <= threshold) DrawName();
 		}
 	}
 }

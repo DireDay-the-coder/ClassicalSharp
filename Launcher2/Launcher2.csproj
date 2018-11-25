@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+<Project ToolsVersion="2.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
   <PropertyGroup>
     <ProjectGuid>{3E84ACC1-27B4-401B-A359-6AAE4DF6C9B5}</ProjectGuid>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -33,7 +33,7 @@
     <DebugType>Full</DebugType>
     <Optimize>False</Optimize>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
-    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <DefineConstants>DEBUG;TRACE;LAUNCHER</DefineConstants>
     <BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
     <StartAction>Project</StartAction>
   </PropertyGroup>
@@ -43,20 +43,155 @@
     <DebugType>None</DebugType>
     <Optimize>True</Optimize>
     <CheckForOverflowUnderflow>False</CheckForOverflowUnderflow>
-    <DefineConstants>TRACE</DefineConstants>
+    <DefineConstants>TRACE;LAUNCHER</DefineConstants>
     <BaseIntermediateOutputPath>obj\</BaseIntermediateOutputPath>
     <StartAction>Project</StartAction>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="SharpWave">
-      <HintPath>..\ClassicalSharp\SharpWave.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Security" />
     <Reference Include="System.Windows.Forms" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\ClassicalSharp\2D\Drawing\GdiPlusDrawer2D.cs">
+      <Link>Shared\GdiPlusDrawer2D.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\2D\Drawing\IDrawer2D.cs">
+      <Link>Shared\IDrawer2D.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\2D\Drawing\IDrawer2D.TextMC.cs">
+      <Link>Shared\IDrawer2D.TextMC.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\2D\Utils\FastBitmap.cs">
+      <Link>Shared\FastBitmap.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\2D\Utils\PackedCol.cs">
+      <Link>Shared\PackedCol.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Network\Utils\AsyncDownloader.cs">
+      <Link>Shared\AsyncDownloader.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Platform\Platform.cs">
+      <Link>Shared\Platform.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Program.cs">
+      <Link>Shared\Program.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\TexturePack\ZipReader.cs">
+      <Link>Shared\ZipReader.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Utils\ErrorHandler.cs">
+      <Link>Shared\ErrorHandler.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Utils\Options.cs">
+      <Link>Shared\Options.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Utils\Utils.cs">
+      <Link>Shared\Utils.cs</Link>
+    </Compile>
+    <Compile Include="..\ClassicalSharp\Utils\Utils.Math.cs">
+      <Link>Shared\Utils.Math.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\DisplayDevice.cs">
+      <Link>OpenTK\DisplayDevice.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\INativeWindow.cs">
+      <Link>OpenTK\INativeWindow.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Keyboard.cs">
+      <Link>OpenTK\Keyboard.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Utils.cs">
+      <Link>OpenTK\Utils.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Graphics\ColorFormat.cs">
+      <Link>OpenTK\Graphics\ColorFormat.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Graphics\GraphicsMode.cs">
+      <Link>OpenTK\Graphics\GraphicsMode.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Graphics\IGraphicsContext.cs">
+      <Link>OpenTK\Graphics\IGraphicsContext.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Mouse.cs">
+      <Link>OpenTK\Mouse.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Configuration.cs">
+      <Link>OpenTK\Platform\Configuration.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\IPlatformFactory.cs">
+      <Link>OpenTK\Platform\IPlatformFactory.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\AglContext.cs">
+      <Link>OpenTK\Platform\MacOS\AglContext.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\Application.cs">
+      <Link>OpenTK\Platform\MacOS\Application.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\CarbonBindings\Agl.cs">
+      <Link>OpenTK\Platform\MacOS\CarbonBindings\Agl.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\CarbonBindings\CarbonAPI.cs">
+      <Link>OpenTK\Platform\MacOS\CarbonBindings\CarbonAPI.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\CarbonBindings\API.cs">
+      <Link>OpenTK\Platform\MacOS\CarbonBindings\API.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\CarbonBindings\MacOSKeys.cs">
+      <Link>OpenTK\Platform\MacOS\CarbonBindings\MacOSKeys.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\CarbonWindow.cs">
+      <Link>OpenTK\Platform\MacOS\CarbonWindow.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\MacOSException.cs">
+      <Link>OpenTK\Platform\MacOS\MacOSException.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\MacOSKeyMap.cs">
+      <Link>OpenTK\Platform\MacOS\MacOSKeyMap.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\MacOS\QuartzDisplayDevice.cs">
+      <Link>OpenTK\Platform\MacOS\QuartzDisplayDevice.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\API.cs">
+      <Link>OpenTK\Platform\Windows\API.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\Wgl.cs">
+      <Link>OpenTK\Platform\Windows\Wgl.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\WinDisplayDevice.cs">
+      <Link>OpenTK\Platform\Windows\WinDisplayDevice.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\WinGLContext.cs">
+      <Link>OpenTK\Platform\Windows\WinGLContext.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\WinWindow.cs">
+      <Link>OpenTK\Platform\Windows\WinWindow.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\Windows\WinKeyMap.cs">
+      <Link>OpenTK\Platform\Windows\WinKeyMap.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\API.cs">
+      <Link>OpenTK\Platform\X11\API.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\Glx.cs">
+      <Link>OpenTK\Platform\X11\Glx.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\Structs.cs">
+      <Link>OpenTK\Platform\X11\Structs.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\X11DisplayDevice.cs">
+      <Link>OpenTK\Platform\X11\X11DisplayDevice.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\X11GLContext.cs">
+      <Link>OpenTK\Platform\X11\X11GLContext.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\X11Window.cs">
+      <Link>OpenTK\Platform\X11\X11Window.cs</Link>
+    </Compile>
+    <Compile Include="..\OpenTK\Platform\X11\X11KeyMap.cs">
+      <Link>OpenTK\Platform\X11\X11KeyMap.cs</Link>
+    </Compile>
     <Compile Include="Drawing\BitmapDrawer.cs" />
     <Compile Include="Drawing\Drawer2DExt.cs" />
     <Compile Include="Drawing\Gradient.cs" />
@@ -78,7 +213,6 @@
     <Compile Include="Gui\TableWidget\Comparers.cs" />
     <Compile Include="Gui\TableWidget\TableView.cs" />
     <Compile Include="Gui\TableWidget\TableWidget.cs" />
-    <Compile Include="Gui\TableWidget\TableWidget.Input.cs" />
     <Compile Include="Gui\Views\ChooseModeView.cs" />
     <Compile Include="Gui\Views\ColoursView.cs" />
     <Compile Include="Gui\Views\DirectConnectView.cs" />
@@ -99,8 +233,6 @@
     <Compile Include="Gui\Widgets\Makers.cs" />
     <Compile Include="LauncherWindow.Background.cs" />
     <Compile Include="LauncherWindow.cs" />
-    <Compile Include="Patcher\Animations.cs" />
-    <Compile Include="Patcher\BinUnpacker.cs" />
     <Compile Include="Patcher\ResourceChecker.cs" />
     <Compile Include="Patcher\ResourceFetcher.cs" />
     <Compile Include="Patcher\ResourcePatcher.cs" />
@@ -109,27 +241,13 @@
     <Compile Include="Patcher\ZipWriter.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="WebTasks.cs" />
     <Compile Include="Updater\Scripts.cs" />
     <Compile Include="Updater\Applier.cs" />
     <Compile Include="Utils\Client.cs" />
-    <Compile Include="Utils\ErrorHandler.cs" />
     <Compile Include="Utils\JSON.cs" />
     <Compile Include="Utils\LauncherSkin.cs" />
     <Compile Include="Utils\Secure.cs" />
-    <Compile Include="WebService\ClassiCubeSession.cs" />
-    <Compile Include="WebService\IWebTask.cs" />
-    <Compile Include="WebService\ServerListEntry.cs" />
-    <Compile Include="WebService\UpdateCheckTask.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\ClassicalSharp\ClassicalSharp.csproj">
-      <Project>{BEB1C785-5CAD-48FF-A886-876BF0A318D4}</Project>
-      <Name>ClassicalSharp</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\OpenTK\OpenTK.csproj">
-      <Project>{35FEE071-2DE6-48A1-9343-B5C1F202A12B}</Project>
-      <Name>OpenTK</Name>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Gui" />
@@ -139,10 +257,16 @@
     <Folder Include="Gui\Screens" />
     <Folder Include="Gui\Widgets" />
     <Folder Include="Drawing" />
+    <Folder Include="Shared" />
     <Folder Include="Updater" />
     <Folder Include="Utils" />
     <Folder Include="Patcher" />
-    <Folder Include="WebService" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\SharpWave\SharpWave.csproj">
+      <Project>{77EA9D1E-4995-4D05-A9C7-29173CB5DC72}</Project>
+      <Name>SharpWave</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
 </Project>

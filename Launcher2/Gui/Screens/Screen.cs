@@ -20,10 +20,10 @@ namespace Launcher.Gui.Screens {
 		
 		/// <summary> Function called to setup the widgets and other data for this screen. </summary>
 		public virtual void Init() {
-			game.Window.Mouse.Move += MouseMove;
-			game.Window.Mouse.ButtonDown += MouseButtonDown;
-			game.Window.Keyboard.KeyDown += KeyDown;
-			game.Window.Keyboard.KeyUp += KeyUp;
+			Mouse.Move += MouseMove;
+			Mouse.ButtonDown += MouseButtonDown;
+			Keyboard.KeyDown += KeyDown;
+			Keyboard.KeyUp += KeyUp;
 		}
 		
 		/// <summary> Function that is repeatedly called multiple times every second. </summary>
@@ -34,10 +34,10 @@ namespace Launcher.Gui.Screens {
 		
 		/// <summary> Cleans up all native resources held by this screen. </summary>
 		public virtual void Dispose() {
-			game.Window.Mouse.Move -= MouseMove;
-			game.Window.Mouse.ButtonDown -= MouseButtonDown;
-			game.Window.Keyboard.KeyDown -= KeyDown;
-			game.Window.Keyboard.KeyUp -= KeyUp;
+			Mouse.Move -= MouseMove;
+			Mouse.ButtonDown -= MouseButtonDown;
+			Keyboard.KeyDown -= KeyDown;
+			Keyboard.KeyUp -= KeyUp;
 		}
 		
 		/// <summary> Function called when the pixels from the framebuffer
@@ -87,12 +87,14 @@ namespace Launcher.Gui.Screens {
 		
 		
 		protected Widget lastClicked;
-		void MouseButtonDown(object sender, MouseButtonEventArgs e) {
-			MouseButtonDown(e.X, e.Y, e.Button);
+		void MouseButtonDown(MouseButton btn) {
+			int x = Mouse.X, y = Mouse.Y;
+			MouseButtonDown(x, y, btn);
 		}
 		
-		void MouseMove(object sender, MouseMoveEventArgs e) { 
-			MouseMove(e.X, e.Y, e.XDelta, e.YDelta); 
+		internal void MouseMove(int deltaX, int deltaY) { 
+			int x = Mouse.X, y = Mouse.Y;
+			MouseMove(x, y, deltaX, deltaY); 
 		}
 		
 		protected virtual void MouseButtonDown(int x, int y, MouseButton button) {
@@ -136,32 +138,39 @@ namespace Launcher.Gui.Screens {
 		}
 		
 		
-		protected virtual void KeyDown(object sender, KeyboardKeyEventArgs e) {
-			if (e.Key == Key.Tab) {
+		protected virtual void KeyDown(Key key) {
+			if (key == Key.Tab) {
 				HandleTab();
-			} else if (e.Key == Key.Enter) {
+			} else if (key == Key.Enter) {
 				Widget widget = selectedWidget;
 				if (widget != null && widget.OnClick != null)
 					widget.OnClick(0, 0);
 			}
 		}
 		
-		protected virtual void KeyUp(object sender, KeyboardKeyEventArgs e) {
-			if (e.Key == Key.Tab)
+		protected virtual void KeyUp(Key key) {
+			if (key == Key.Tab)
 				tabDown = false;
+		}
+		
+		protected int IndexOfWidget(Widget w) {
+			for (int i = 0; i < widgets.Length; i++) {
+				if (widgets[i] == w) return i;
+			}
+			return -1;
 		}
 		
 		protected bool tabDown = false;
 		protected void HandleTab() {
 			if (tabDown) return;
 			tabDown = true;
-			bool shiftDown = game.Window.Keyboard[Key.ShiftLeft]
-				|| game.Window.Keyboard[Key.ShiftRight];
+			bool shiftDown = game.IsKeyDown(Key.ShiftLeft)
+				|| game.IsKeyDown(Key.ShiftRight);
 			
 			int dir = shiftDown ? -1 : 1;
 			int index = 0;
 			if (lastClicked != null) {
-				index = Array.IndexOf<Widget>(widgets, lastClicked);
+				index = IndexOfWidget(lastClicked);
 				index += dir;
 			}
 			

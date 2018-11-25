@@ -12,13 +12,14 @@ namespace ClassicalSharp.GraphicsAPI {
 	/// <summary> Implements IGraphicsAPI using OpenGL ES 1.1 </summary>
 	public unsafe class OpenGLESApi : IGraphicsApi {
 		
-		All[] modeMappings;
 		public OpenGLESApi() {
+			MinZNear = 0.1f;
 			InitFields();
 			int texDims;
 			GL.GetInteger(All.MaxTextureSize, &texDims);
 			textureDims = texDims;
-			base.InitDynamicBuffers();
+			base.InitCommon();
+			// TODO: Support mipmaps
 			
 			setupBatchFuncCol4b = SetupVbPos3fCol4b;
 			setupBatchFuncTex2fCol4b = SetupVbPos3fTex2fCol4b;
@@ -40,10 +41,14 @@ namespace ClassicalSharp.GraphicsAPI {
 			GL.BlendFunc(blendFuncs[(int)srcFunc], blendFuncs[(int)dstFunc]);
 		}
 		
-		public override bool Fog { set { Toggle(All.Fog, value); } }
+		bool fogEnable;
+		public override bool Fog {
+			get { return fogEnable; }
+			set { fogEnable = value; Toggle(All.Fog, value); } 
+		}
 		
-		FastColour lastFogCol = FastColour.Black;
-		public override void SetFogColour(FastColour col) {
+		PackedCol lastFogCol = PackedCol.Black;
+		public override void SetFogCol(PackedCol col) {
 			if (col != lastFogCol) {
 				Vector4 colRGBA = new Vector4(col.R / 255f, col.G / 255f, col.B / 255f, col.A / 255f);
 				GL.Fog(All.FogColor, &colRGBA.X);
@@ -51,13 +56,9 @@ namespace ClassicalSharp.GraphicsAPI {
 			}
 		}
 		
-		float lastFogStart = -1, lastFogEnd = -1, lastFogDensity = -1;
+		float lastFogEnd = -1, lastFogDensity = -1;
 		public override void SetFogDensity(float value) {
 			FogParam(All.FogDensity, value, ref lastFogDensity);
-		}
-		
-		public override void SetFogStart(float value) {
-			FogParam(All.FogStart, value, ref lastFogStart);
 		}
 		
 		public override void SetFogEnd(float value) {
@@ -91,8 +92,8 @@ namespace ClassicalSharp.GraphicsAPI {
 			GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 		}
 		
-		FastColour lastClearCol;
-		public override void ClearColour(FastColour col) {
+		PackedCol lastClearCol;
+		public override void ClearCol(PackedCol col) {
 			if (col != lastClearCol) {
 				GL.ClearColor(col.R / 255f, col.G / 255f, col.B / 255f, col.A / 255f);
 				lastClearCol = col;
@@ -134,17 +135,17 @@ namespace ClassicalSharp.GraphicsAPI {
 			GL.BindTexture(All.Texture2D, texture);
 		}
 		
-		public override void UpdateTexturePart(int texId, int texX, int texY, FastBitmap part) {
+		public override void UpdateTexturePart(int texId, int x, int y, FastBitmap part) {
 			GL.BindTexture(All.Texture2D, texId);
-			GL.TexSubImage2D(All.Texture2D, 0, texX, texY, part.Width, part.Height,
+			GL.TexSubImage2D(All.Texture2D, 0, x, y, part.Width, part.Height,
 				All.BgraExt, All.UnsignedByte, part.Scan0);
 		}
 		
 		public override void DeleteTexture(ref int texId) {
-			if (texId <= 0) return;
+			if (texId == 0) return;
 			int id = texId;
 			GL.DeleteTextures(1, &id);
-			texId = -1;
+			texId = 0;
 		}
 		#endregion
 		
@@ -155,13 +156,6 @@ namespace ClassicalSharp.GraphicsAPI {
 			int id = GenAndBind(All.ArrayBuffer);
 			int sizeInBytes = maxVertices * strideSizes[(int)format];
 			GL.BufferData(All.ArrayBuffer, new IntPtr(sizeInBytes), IntPtr.Zero, All.DynamicDraw);
-			return id;
-		}
-		
-		public override int CreateVb<T>(T[] vertices, VertexFormat format, int count) {
-			int id = GenAndBind(All.ArrayBuffer);
-			int sizeInBytes = count * strideSizes[(int)format];
-			GL.BufferData(All.ArrayBuffer, new IntPtr(sizeInBytes), vertices, All.StaticDraw);
 			return id;
 		}
 		
@@ -187,22 +181,22 @@ namespace ClassicalSharp.GraphicsAPI {
 		}
 		
 		int batchStride;		
-		public override void SetDynamicVbData<T>(int id, T[] vertices, int count) {
+		public override void SetDynamicVbData(int id, IntPtr vertices, int count) {
 			GL.BindBuffer(All.ArrayBuffer, id);
 			GL.BufferSubData(All.ArrayBuffer, IntPtr.Zero, 
 			                 new IntPtr(count * batchStride), vertices);
 		}
 		
 		public override void DeleteVb(ref int vb) {
-			if (vb <= 0) return;
+			if (vb == 0) return;
 			int id = vb; GL.DeleteBuffers(1, &id);
-			vb = -1;
+			vb = 0;
 		}
 		
 		public override void DeleteIb(ref int ib) {
-			if (ib <= 0) return;
+			if (ib == 0) return;
 			int id = ib; GL.DeleteBuffers(1, &id);
-			ib = -1;
+			ib = 0;
 		}
 		
 		VertexFormat batchFormat = (VertexFormat)999;
@@ -233,16 +227,21 @@ namespace ClassicalSharp.GraphicsAPI {
 		}
 		
 		const All indexType = All.UnsignedShort;
-		public override void DrawVb(DrawMode mode, int startVertex, int verticesCount) {
+		public override void DrawVb_Lines(int verticesCount) {
 			setupBatchFunc();
-			GL.DrawArrays(modeMappings[(int)mode], startVertex, verticesCount);
+			GL.DrawArrays(All.Lines, 0, verticesCount);
 		}		
 		
-		public override void DrawIndexedVb(DrawMode mode, int indicesCount, int startIndex) {
+		public override void DrawVb_IndexedTris(int indicesCount, int startIndex) {
 			setupBatchFunc();
-			GL.DrawElements(modeMappings[(int)mode], indicesCount, indexType, new IntPtr(startIndex * 2));
+			GL.DrawElements(All.Triangles, indicesCount, indexType, new IntPtr(startIndex * 2));
 		}
-
+		
+		public override void DrawVb_IndexedTris(int indicesCount) {
+			setupBatchFunc();
+			GL.DrawElements(All.Triangles, indicesCount, indexType, IntPtr.Zero);
+		}
+		
 		internal override void DrawIndexedVb_TrisT2fC4b(int indicesCount, int startIndex) {
 			GL.VertexPointer(3, All.Float, 24, zero);
 			GL.ColorPointer(4, All.UnsignedByte, 24, twelve);
@@ -292,19 +291,6 @@ namespace ClassicalSharp.GraphicsAPI {
 			GL.LoadIdentity();
 		}
 		
-		public override void PushMatrix() {
-			GL.PushMatrix();
-		}
-		
-		public override void PopMatrix() {
-			GL.PopMatrix();
-		}
-		
-		public override void MultiplyMatrix(ref Matrix4 matrix) {
-			fixed(Single* ptr = &matrix.Row0.X)
-				GL.MultMatrix(ptr);
-		}
-		
 		#endregion
 		
 		public override void BeginFrame(Game game) {
@@ -340,7 +326,7 @@ namespace ClassicalSharp.GraphicsAPI {
 		}
 		
 		// Based on http://www.opentk.com/doc/graphics/save-opengl-rendering-to-disk
-		public override void TakeScreenshot(string output, int width, int height) {
+		public override void TakeScreenshot(Stream output, int width, int height) {
 			using (Bitmap bmp = Bitmap.CreateBitmap(width, height, Bitmap.Config.Argb8888)) { // ignore alpha component
 				using (FastBitmap fastBmp = new FastBitmap(bmp, true)) {
 					GL.ReadPixels(0, 0, width, height, All.BgraExt, All.UnsignedByte, fastBmp.Scan0);
@@ -353,8 +339,7 @@ namespace ClassicalSharp.GraphicsAPI {
 						}
 					}
 				}
-				using (FileStream fs = File.Create(output))
-					Platform.WriteBmp(bmp, fs);
+				Platform.WriteBmp(bmp, output);
 			}
 		}
 		
@@ -368,8 +353,6 @@ namespace ClassicalSharp.GraphicsAPI {
 		}
 		
 		void InitFields() {
-			modeMappings = new All[2];
-			modeMappings[0] = All.Triangles; modeMappings[1] = All.Lines;
 			blendFuncs = new All[6];
 			blendFuncs[0] = All.Zero; blendFuncs[1] = All.One;
 			blendFuncs[2] = All.SrcAlpha; blendFuncs[3] = All.OneMinusSrcAlpha;

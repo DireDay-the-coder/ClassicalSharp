@@ -14,7 +14,7 @@ namespace Launcher.Gui.Views {
 		internal int defIndex, sliderIndex;
 		
 		public override void Init() {
-			titleFont = new Font(game.FontName, 15, FontStyle.Bold);
+			titleFont = new Font(game.FontName, 16, FontStyle.Bold);
 			textFont = new Font(game.FontName, 14, FontStyle.Regular);
 			inputHintFont = new Font(game.FontName, 12, FontStyle.Italic);
 			MakeWidgets();
@@ -59,12 +59,12 @@ namespace Launcher.Gui.Views {
 			return;
 			
 			sliderIndex = widgetIndex;
-			Makers.Slider(this, 100, 10, 30, 255, FastColour.Red)
-				.SetLocation(Anchor.LeftOrTop, Anchor.LeftOrTop, 5, 5);
-			Makers.Slider(this, 100, 10, 30, 255, FastColour.Green)
-				.SetLocation(Anchor.LeftOrTop, Anchor.LeftOrTop, 5, 25);
-			Makers.Slider(this, 100, 10, 30, 255, FastColour.Blue)
-				.SetLocation(Anchor.LeftOrTop, Anchor.LeftOrTop, 5, 45);
+			Makers.Slider(this, 100, 10, 30, 255, PackedCol.Red)
+				.SetLocation(Anchor.Min, Anchor.Min, 5, 5);
+			Makers.Slider(this, 100, 10, 30, 255, PackedCol.Green)
+				.SetLocation(Anchor.Min, Anchor.Min, 5, 25);
+			Makers.Slider(this, 100, 10, 30, 255, PackedCol.Blue)
+				.SetLocation(Anchor.Min, Anchor.Min, 5, 45);
 		}
 		
 		public void MakeAllRGBTriplets(bool force) {
@@ -76,7 +76,7 @@ namespace Launcher.Gui.Views {
 			MakeRGBTriplet(LauncherSkin.ButtonForeActiveCol, force, 60);
 		}
 		
-		void MakeRGBTriplet(FastColour defCol, bool force, int y) {
+		void MakeRGBTriplet(PackedCol defCol, bool force, int y) {
 			MakeInput(GetCol(defCol.R, force), 55, false, 3, null)
 				.SetLocation(Anchor.Centre, Anchor.Centre, 30, y);
 			MakeInput(GetCol(defCol.G, force), 55, false, 3, null)

@@ -1,50 +1,30 @@
 ﻿// ClassicalSharp copyright 2014-2016 UnknownShadow200 | Licensed under MIT
 using System;
-using System.IO;
-using System.Windows.Forms;
 using ClassicalSharp;
 
 namespace Launcher {
 
 	internal static class Program {
 		
-		public const string AppName = "ClassicalSharp Launcher 0.99.6";
-		
-		public static string AppDirectory;
-		
+		public const string AppName = "ClassicalSharp Launcher 0.99.9.98";
 		public static bool ShowingErrorDialog = false;
 		
 		[STAThread]
 		static void Main(string[] args) {
-			AppDirectory = AppDomain.CurrentDomain.BaseDirectory;
-			if (!CheckFilesExist()) return;
-			
-			// NOTE: we purposely put this in another method, as we need to ensure
-			// that we do not reference any OpenTK code directly in the main function
-			// (which LauncherWindow does), which otherwise causes native crash.
-			RunLauncher();
-		}
-		
-		static bool CheckFilesExist() {
-			string path = Path.Combine(AppDirectory, "ClassicalSharp.exe");
-			if (!File.Exists(path)) {
-				MessageBox.Show("ClassicalSharp.exe needs to be in the same folder as the launcher.", "Missing file");
-				return false;
+			Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory;
+			ErrorHandler.InstallHandler("launcher.log");
+
+			if (!Platform.FileExists("ClassicalSharp.exe")) {
+				ErrorHandler.ShowDialog("Missing file", "ClassicalSharp.exe needs to be in the same folder as the launcher.");
+				return;
 			}
+			OpenTK.Configuration.SkipPerfCountersHack();
 			
-			path = Path.Combine(AppDirectory, "OpenTK.dll");
-			if (!File.Exists(path)) {
-				MessageBox.Show("OpenTK.dll needs to be in the same folder as the launcher.", "Missing file");
-				return false;
-			}
-			return true;		
-		}
-		
-		static void RunLauncher() {
-			string logPath = Path.Combine(AppDirectory, "launcher.log");
-			AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionHandler;
-			ErrorHandler2.InstallHandler(logPath);
-			OpenTK.Configuration.SkipPerfCountersHack();			
+			Utils.EnsureDirectory("maps");
+			Utils.EnsureDirectory("texpacks");
+			Utils.EnsureDirectory("texturecache");
+			
+			AppDomain.CurrentDomain.UnhandledException += UnhandledExceptionHandler;			
 			LauncherWindow window = new LauncherWindow();
 			window.Run();
 		}

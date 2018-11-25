@@ -2,6 +2,7 @@
 using System;
 using System.Drawing;
 using ClassicalSharp;
+using Launcher.Web;
 using Launcher.Gui.Views;
 using Launcher.Gui.Widgets;
 using OpenTK.Input;
@@ -11,22 +12,46 @@ namespace Launcher.Gui.Screens {
 		
 		const int tableX = 10, tableY = 50;
 		ServersView view;
+		FetchServersTask fetchTask;
+		FetchFlagsTask flagsTask;
 		
 		public ServersScreen(LauncherWindow game) : base(game) {
 			enterIndex = 3;
 			view = new ServersView(game);
-			widgets = view.widgets;
+			widgets = view.widgets;		
+			flagsTask = new FetchFlagsTask();
+			FetchFlags(game);
+		}
+		
+		void FetchFlags(LauncherWindow game) {
+			int oldCount = FetchFlagsTask.DownloadedCount;
+			bool wasFetching = oldCount < FetchFlagsTask.Flags.Count;
+			for (int i = 0; i < game.Servers.Count; i++) {
+				flagsTask.AsyncGetFlag(game.Servers[i].Flag);
+			}
+			
+			int count = FetchFlagsTask.Flags.Count;
+			flagsTask.Game = game;
+			if (wasFetching || oldCount == count) return;
+			flagsTask.RunAsync(game);
 		}
 		
 		public override void Tick() {
 			base.Tick();
-			if (fetchingList) CheckFetchStatus();
+			if (fetchTask != null) CheckFetchStatus();
+			flagsTask.Tick();
 			
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
-			if (!game.Window.Mouse[MouseButton.Left]) {
+			if (!Mouse.Get(MouseButton.Left)) {
 				table.DraggingColumn = -1;
 				table.DraggingScrollbar = false;
 				table.mouseOffset = 0;
+			}
+			
+			if (flagsTask.PendingRedraw) {
+				table.RedrawFlags();
+				game.Dirty = true;
+				flagsTask.PendingRedraw = false;
 			}
 		}
 		
@@ -38,7 +63,7 @@ namespace Launcher.Gui.Screens {
 			}
 		}
 		
-		void MouseButtonUp(object sender, MouseButtonEventArgs e) {
+		void MouseButtonUp(MouseButton btn) {
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
 			table.DraggingColumn = -1;
 			table.DraggingScrollbar = false;
@@ -49,32 +74,33 @@ namespace Launcher.Gui.Screens {
 		
 		protected override void OnRemovedChar() { FilterList(); }
 		
-		protected override void KeyDown(object sender, KeyboardKeyEventArgs e) {
+		protected override void KeyDown(Key key) {
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
-			if (e.Key == Key.Enter) {
-				string curServer = Get(view.hashIndex) ?? "";
+			if (key == Key.Enter) {
+				string curServer = Get(view.hashIndex);
+				if (curServer == null) curServer = "";
+				
 				if (table.Count >= 1 && curServer == "") {
-					widgets[view.hashIndex].Text = table.usedEntries[0].Hash;
+					widgets[view.hashIndex].Text = table.Get(0).Hash;
 					ConnectToServer(0, 0);
-				} else if (curServer != "" &&
-				          (selectedWidget == null || selectedWidget == widgets[view.tableIndex])) {
+				} else if (curServer != "" && (selectedWidget == null || selectedWidget == widgets[view.tableIndex])) {
 					ConnectToServer(0, 0);
 				}
-			} else if (e.Key == Key.Up) {
+			} else if (key == Key.Up) {
 				table.SetSelected(table.SelectedIndex - 1);
 				table.NeedRedraw();
-			} else if (e.Key == Key.Down) {
+			} else if (key == Key.Down) {
 				table.SetSelected(table.SelectedIndex + 1);
 				table.NeedRedraw();
 			} else {
-				base.KeyDown(sender, e);
+				base.KeyDown(key);
 			}
 		}
 		
 		protected override void RedrawLastInput() {
 			base.RedrawLastInput();
-			if (curInput != widgets[view.hashIndex])
-				return;
+			if (curInput != widgets[view.hashIndex]) return;
+			
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
 			table.SetSelected(widgets[view.hashIndex].Text);
 			MarkPendingRedraw();
@@ -82,7 +108,7 @@ namespace Launcher.Gui.Screens {
 
 		public override void Init() {
 			base.Init();
-			game.Window.Mouse.ButtonUp += MouseButtonUp;
+			Mouse.ButtonUp += MouseButtonUp;
 			view.Init();
 			SetupWidgetHandlers();
 			
@@ -101,8 +127,7 @@ namespace Launcher.Gui.Screens {
 			InputWidget hashWidget = (InputWidget)widgets[view.hashIndex];
 			hashWidget.Chars.ClipboardFilter = HashFilter;
 			
-			widgets[view.backIndex].OnClick =
-				(x, y) => game.SetScreen(new MainScreen(game));
+			widgets[view.backIndex].OnClick = SwitchToMain;
 			widgets[view.connectIndex].OnClick = ConnectToServer;
 			widgets[view.refreshIndex].OnClick = RefreshList;
 			
@@ -112,11 +137,14 @@ namespace Launcher.Gui.Screens {
 			SetupInputHandlers();
 		}
 		
+		void SwitchToMain(int x, int y) { game.SetScreen(new MainScreen(game)); }
+		
 		void FilterList() {
-			if (curInput != widgets[view.searchIndex])
-				return;
+			if (curInput != widgets[view.searchIndex]) return;
+			
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
 			table.FilterEntries(curInput.Text);
+			table.SetSelected(table.SelectedHash);
 			MarkPendingRedraw();
 		}
 
@@ -133,19 +161,19 @@ namespace Launcher.Gui.Screens {
 			game.ConnectToServer(table.servers, Get(view.hashIndex));
 		}
 		
-		bool fetchingList = false;
 		void RefreshList(int mouseX, int mouseY) {
-			if (fetchingList) return;
-			fetchingList = true;
-			game.Session.FetchServersAsync();
-
+			if (fetchTask != null) return;
+			fetchTask = new FetchServersTask();
+			fetchTask.RunAsync(game);
 			view.RefreshText = "&eWorking..";
 			Resize();
 		}
 		
-		protected override void MouseWheelChanged(object sender, MouseWheelEventArgs e) {
+		float tableAcc;
+		protected override void MouseWheelChanged(float delta) {
 			TableWidget table = (TableWidget)widgets[view.tableIndex];
-			table.CurrentIndex -= e.Delta;
+			int steps = Utils.AccumulateWheelDelta(ref tableAcc, delta);
+			table.CurrentIndex -= steps;
 			MarkPendingRedraw();
 		}
 		
@@ -184,11 +212,22 @@ namespace Launcher.Gui.Screens {
 		}
 		
 		void CheckFetchStatus() {
-			if (!game.Session.Done) return;
-			fetchingList = false;
+			fetchTask.Tick();
+			if (!fetchTask.Completed) return;
 			
-			view.RefreshText = game.Session.Exception == null ? "Refresh" : "&cFailed";
+			if (fetchTask.Success) {
+				game.Servers = fetchTask.Servers;
+				FetchFlags(game);
+			}
+						
+			view.RefreshText = fetchTask.Success ? "Refresh" : "&cFailed";
+			fetchTask = null;
 			Resize();
+			
+			// needed to ensure 'highlighted server hash' is over right entry after refresh
+			TableWidget table = (TableWidget)widgets[view.tableIndex];
+			table.SetSelected(widgets[view.hashIndex].Text);
+			MarkPendingRedraw();
 		}
 		
 		void MarkPendingRedraw() {

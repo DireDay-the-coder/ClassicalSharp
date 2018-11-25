@@ -17,47 +17,56 @@ namespace Launcher {
 			fontPng = false; terrainPng = false;
 			Options.Load();
 			LauncherSkin.LoadFromOptions();
-			if (Options.Get("nostalgia-classicbg") != null)
+			
+			if (Options.Get("nostalgia-classicbg", null) != null) {
 				ClassicBackground = Options.GetBool("nostalgia-classicbg", false);
-			else
-				ClassicBackground = Options.GetBool("mode-classic", false);
+			} else {
+				ClassicBackground = Options.GetBool(OptionsKey.ClassicMode, false);
+			}
 			
-			string texDir = Path.Combine(Program.AppDirectory, "texpacks");
-			string texPack = Options.Get(OptionsKey.DefaultTexturePack) ?? "default.zip";
-			texPack = Path.Combine(texDir, texPack);
+			string texPack = Options.Get(OptionsKey.DefaultTexturePack, "default.zip");
+			string texPath = Path.Combine("texpacks", texPack);
 			
-			if (!File.Exists(texPack))
-				texPack = Path.Combine(texDir, "default.zip");
-			if (!File.Exists(texPack)) return;
+			if (!Platform.FileExists(texPath)) {
+				texPath = Path.Combine("texpacks", "default.zip");
+			}
+			if (!Platform.FileExists(texPath)) return;
 			
-			ExtractTexturePack(texPack);
+			ExtractTexturePack(texPath);
+			// user selected texture pack is missing some required .png files
 			if (!fontPng || !terrainPng) {
-				texPack = Path.Combine(texDir, "default.zip");
-				ExtractTexturePack(texPack);
+				texPath = Path.Combine("texpacks", "default.zip");
+				ExtractTexturePack(texPath);
 			}
 		}
 		
-		void ExtractTexturePack(string texPack) {
-			using (Stream fs = new FileStream(texPack, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+		void ExtractTexturePack(string relPath) {
+			using (Stream fs = Platform.FileOpen(relPath)) {
 				ZipReader reader = new ZipReader();
-				reader.ShouldProcessZipEntry = (f) => f == "default.png" || f == "terrain.png";
+				reader.SelectZipEntry = SelectZipEntry;
 				reader.ProcessZipEntry = ProcessZipEntry;
 				reader.Extract(fs);
 			}
 		}
 		
-		void ProcessZipEntry(string filename, byte[] data, ZipEntry entry) {
-			if (filename == "default.png") {
+		bool SelectZipEntry(string path) {
+			return 
+				Utils.CaselessEq(path, "default.png") ||
+				Utils.CaselessEq(path, "terrain.png");
+		}
+		
+		void ProcessZipEntry(string path, byte[] data, ZipEntry entry) {
+			if (Utils.CaselessEq(path, "default.png")) {
 				if (fontPng) return;
 				
-				Bitmap bmp = Platform.ReadBmp32Bpp(Drawer, data);
+				Bitmap bmp = Platform.ReadBmp(Drawer, data);
 				Drawer.SetFontBitmap(bmp);
-				useBitmappedFont = !Options.GetBool(OptionsKey.ArialChatFont, false);
+				useBitmappedFont = !Options.GetBool(OptionsKey.UseChatFont, false);
 				fontPng = true;
-			} else if (filename == "terrain.png") {
+			} else if (Utils.CaselessEq(path, "terrain.png")) {
 				if (terrainPng) return;
 				
-				Bitmap bmp = Platform.ReadBmp32Bpp(Drawer, data);
+				Bitmap bmp = Platform.ReadBmp(Drawer, data);
 				MakeClassicTextures(bmp);
 				bmp.Dispose();
 				terrainPng = true;
@@ -112,7 +121,7 @@ namespace Launcher {
 
 				drawer.UseBitmappedChat = (useBitmappedFont || ClassicBackground) && fontPng;
 				DrawTextArgs args = new DrawTextArgs("&eClassical&fSharp", logoFont, false);
-				Size size = drawer.MeasureSize(ref args);
+				Size size = drawer.MeasureText(ref args);
 				int xStart = Width / 2 - size.Width / 2;
 				
 				args.Text = "&0Classical&0Sharp";
@@ -134,7 +143,7 @@ namespace Launcher {
 			if (ClassicBackground && terrainPixels != null) {
 				ClearTile(x, y, width, height, 0, dst);
 			} else {
-				FastColour col = LauncherSkin.BackgroundCol;
+				PackedCol col = LauncherSkin.BackgroundCol;
 				Gradient.Noise(dst, new Rectangle(x, y, width, height), col, 6);
 			}
 		}

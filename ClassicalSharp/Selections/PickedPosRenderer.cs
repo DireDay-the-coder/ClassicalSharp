@@ -9,37 +9,36 @@ namespace ClassicalSharp.Renderers {
 		Game game;
 		int vb;
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
-			col = new FastColour(0, 0, 0, 102).Pack();
+			col = new PackedCol(0, 0, 0, 102);
 			
 			ContextRecreated();
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			Events.ContextLost += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 		}
 		
-		public void Dispose() { 
+		void IDisposable.Dispose() { 
 			ContextLost();
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;			
+			Events.ContextLost -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { }
-		public void OnNewMap(Game game) { }
-		public void OnNewMapLoaded(Game game) { }		
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { }
+		void IGameComponent.OnNewMap(Game game) { }
+		void IGameComponent.OnNewMapLoaded(Game game) { }		
 		
-		int col;
+		PackedCol col;
 		int index;
 		const int verticesCount = 16 * 6;
 		VertexP3fC4b[] vertices = new VertexP3fC4b[verticesCount];
 		
-		public void UpdateState(PickedPos selected) {
+		public void Update(PickedPos selected) {
 			index = 0;
 			Vector3 camPos = game.CurrentCameraPos;
 			float dist = (camPos - selected.Min).LengthSquared;
-			IGraphicsApi gfx = game.Graphics;
-			
+
 			float offset = 0.01f;
 			if (dist < 4 * 4) offset = 0.00625f;
 			if (dist < 2 * 2) offset = 0.00500f;
@@ -64,7 +63,7 @@ namespace ClassicalSharp.Renderers {
 			gfx.AlphaBlending = true;
 			gfx.DepthWrite = false;
 			gfx.SetBatchFormat(VertexFormat.P3fC4b);
-			gfx.UpdateDynamicIndexedVb(DrawMode.Triangles, vb, vertices, index);
+			gfx.UpdateDynamicVb_IndexedTris(vb, vertices, index);
 			gfx.DepthWrite = true;
 			gfx.AlphaBlending = false;
 		}

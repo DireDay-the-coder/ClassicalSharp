@@ -26,137 +26,130 @@
 #endregion
 
 using System;
-using System.ComponentModel;
 using System.Drawing;
-using OpenTK.Input;
-using OpenTK.Platform;
 
 namespace OpenTK {
 	
+	/// <summary> Enumerates available window states. </summary>
+	public enum WindowState {
+		/// <summary> The window is in its normal state. </summary>
+		Normal = 0,
+		/// <summary> The window is minimized to the taskbar (also known as 'iconified'). </summary>
+		Minimized,
+		/// <summary> The window covers the whole working area, which includes the desktop but not the taskbar and/or panels. </summary>
+		Maximized,
+		/// <summary> The window covers the whole screen, including all taskbars and/or panels. </summary>
+		Fullscreen,
+	}
+	public delegate void KeyPressEventFunc(char keyChar);
+	
 	/// <summary> Defines the interface for a native window.  </summary>
-	public interface INativeWindow : IDisposable {
+	public abstract class INativeWindow : IDisposable {
 		
-		/// <summary> Gets the current contents of the clipboard. </summary>
-		string GetClipboardText();
+		public abstract string GetClipboardText();
+		public abstract void SetClipboardText(string value);
+		public abstract Icon Icon { get; set; }
 		
-		/// <summary> Sets the current contents of the clipboard. </summary>
-		void SetClipboardText( string value );
+		/// <summary> Gets the handle of the window. </summary>
+		public IntPtr WinHandle;
 		
-		/// <summary> Gets or sets the <see cref="System.Drawing.Icon"/> of the window. </summary>
-		Icon Icon { get; set; }
-
-		/// <summary> Gets or sets the title of the window. </summary>
-		string Title { get; set; }
+		/// <summary> Gets whether the window has been created and has not been destroyed. </summary>
+		public bool Exists;
 		
-		/// <summary> Gets a System.Boolean that indicates whether this window has input focus. </summary>
-		bool Focused { get; }
+		/// <summary> Gets whether this window has input focus. </summary>
+		public bool Focused;
 		
-		/// <summary> Gets or sets a System.Boolean that indicates whether the window is visible. </summary>
-		bool Visible { get; set; }
+		/// <summary> Gets or sets whether this window is visible. </summary>
+		public abstract bool Visible { get; set; }
 		
-		/// <summary> Gets a System.Boolean that indicates whether the window has been created and has not been destroyed. </summary>
-		bool Exists { get; }
-		
-		/// <summary> Gets the <see cref="OpenTK.Platform.IWindowInfo"/> for this window. </summary>
-		IWindowInfo WindowInfo { get; }
-		
-		/// <summary> Gets or sets the <see cref="OpenTK.WindowState"/> for this window. </summary>
-		WindowState WindowState { get; set; }
+		public abstract WindowState WindowState { get; set; }
 
 		/// <summary> Gets or sets a <see cref="System.Drawing.Rectangle"/> structure the contains the external bounds of this window, in screen coordinates.
 		/// External bounds include the title bar, borders and drawing area of the window. </summary>
-		Rectangle Bounds { get; set; }
+		public abstract Rectangle Bounds { get; set; }
 		
 		/// <summary> Gets or sets a <see cref="System.Drawing.Point"/> structure that contains the location of this window on the desktop. </summary>
-		Point Location { get; set; }
+		public abstract Point Location { get; set; }
 		
 		/// <summary> Gets or sets a <see cref="System.Drawing.Size"/> structure that contains the external size of this window. </summary>
-		Size Size { get; set; }
+		public abstract Size Size { get; set; }
 		
-		/// <summary> Gets or sets the horizontal location of this window on the desktop. </summary>
-		int X { get; set; }
-		
-		/// <summary> Gets or sets the vertical location of this window on the desktop. </summary>
-		int Y { get; set; }
-		
-		/// <summary> Gets or sets the external width of this window. </summary>
-		int Width { get; set; }
-		
-		/// <summary> Gets or sets the external height of this window. </summary>
-		int Height { get; set; }
-		
-		/// <summary> Gets or sets a <see cref="System.Drawing.Rectangle"/> structure that contains the internal bounds of this window, in client coordinates.
-		/// The internal bounds include the drawing area of the window, but exclude the titlebar and window borders. </summary>
-		Rectangle ClientRectangle { get; set; }
-		
-		/// <summary> Gets or sets a <see cref="System.Drawing.Size"/> structure that contains the internal size this window. </summary>
-		Size ClientSize { get; set; }
+		/// <summary> Gets or sets a <see cref="System.Drawing.Size"/> structure that contains the internal size of this window;
+		/// The internal size include the drawing area of the window, but exclude the titlebar and window borders. </summary>
+		public abstract Size ClientSize { get; set; }
 
 		/// <summary> Closes this window. </summary>
-		void Close();
+		public abstract void Close();
 		
 		/// <summary> Processes pending window events. </summary>
-		void ProcessEvents();
+		public abstract void ProcessEvents();
 		
 		/// <summary> Transforms the specified point from screen to client coordinates.  </summary>
 		/// <param name="point"> A <see cref="System.Drawing.Point"/> to transform. </param>
 		/// <returns> The point transformed to client coordinates. </returns>
-		Point PointToClient(Point point);
+		public abstract Point PointToClient(Point point);
 		
 		/// <summary> Transforms the specified point from client to screen coordinates. </summary>
 		/// <param name="point"> A <see cref="System.Drawing.Point"/> to transform. </param>
 		/// <returns> The point transformed to screen coordinates. </returns>
-		Point PointToScreen(Point point);
-		
-		/// <summary> Gets the available KeyboardDevice. </summary>
-		KeyboardDevice Keyboard { get; }
-		
-		/// <summary> Gets the available MouseDevice. </summary>
-		MouseDevice Mouse { get; }
+		public abstract Point PointToScreen(Point point);
+		/*public virtual Point PointToScreen(Point point) {
+			// Here we use the fact that PointToClient just translates the point, and PointToScreen
+			// should perform the inverse operation.
+			Point trans = PointToClient(Point.Empty);
+			point.X -= trans.X;
+			point.Y -= trans.Y;
+			return point;
+		}*/
 		
 		/// <summary> Gets or sets the cursor position in screen coordinates. </summary>
-		Point DesktopCursorPos { get; set; }
+		public abstract Point DesktopCursorPos { get; set; }
 		
 		/// <summary> Gets or sets whether the cursor is visible in the window. </summary>
-		bool CursorVisible { get; set; }
+		public abstract bool CursorVisible { get; set; }
 
-		/// <summary> Occurs whenever the window is moved. </summary>
-		event EventHandler<EventArgs> Move;
+		public event EmptyEventFunc Move;
+		protected void RaiseMove() { Raise(Move); }
 
-		/// <summary> Occurs whenever the window is resized. </summary>
-		event EventHandler<EventArgs> Resize;
+		public event EmptyEventFunc Resize;
+		protected void RaiseResize() { Raise(Resize); }
+		
+		public event EmptyEventFunc Redraw;
+		protected void RaiseRedraw() { Raise(Redraw); }
 
-		/// <summary> Occurs when the window is about to close. </summary>
-		event EventHandler<CancelEventArgs> Closing;
+		public event EmptyEventFunc Closing;
+		protected void RaiseClosing() { Raise(Closing); }
 
-		/// <summary> Occurs after the window has closed. </summary>
-		event EventHandler<EventArgs> Closed;
+		public event EmptyEventFunc Closed;
+		protected void RaiseClosed() { Raise(Closed); }
 
-		/// <summary> Occurs when the window is disposed. </summary>
-		event EventHandler<EventArgs> Disposed;
+		public event EmptyEventFunc VisibleChanged;
+		protected void RaiseVisibleChanged() { Raise(VisibleChanged); }
 
-		/// <summary> Occurs when the <see cref="Icon"/> property of the window changes. </summary>
-		event EventHandler<EventArgs> IconChanged;
+		public event EmptyEventFunc FocusedChanged;
+		protected void RaiseFocusedChanged() { Raise(FocusedChanged); }
 
-		/// <summary> Occurs when the <see cref="Title"/> property of the window changes. </summary>
-		event EventHandler<EventArgs> TitleChanged;
-
-		/// <summary> Occurs when the <see cref="Visible"/> property of the window changes. </summary>
-		event EventHandler<EventArgs> VisibleChanged;
-
-		/// <summary> Occurs when the <see cref="Focused"/> property of the window changes. </summary>
-		event EventHandler<EventArgs> FocusedChanged;
-
-		/// <summary> Occurs when the <see cref="WindowState"/> property of the window changes. </summary>
-		event EventHandler<EventArgs> WindowStateChanged;
+		public event EmptyEventFunc WindowStateChanged;
+		protected void RaiseWindowStateChanged() { Raise(WindowStateChanged); }
 
 		/// <summary> Occurs whenever a character is typed. </summary>
-		event EventHandler<KeyPressEventArgs> KeyPress;
-
-		/// <summary> Occurs whenever the mouse cursor leaves the window <see cref="Bounds"/>. </summary>
-		event EventHandler<EventArgs> MouseLeave;
-
-		/// <summary> Occurs whenever the mouse cursor enters the window <see cref="Bounds"/>. </summary>
-		event EventHandler<EventArgs> MouseEnter;
+		public event KeyPressEventFunc KeyPress;
+		
+		protected void RaiseKeyPress(char keyChar) {
+			if (KeyPress != null) KeyPress(keyChar);
+		}
+		
+		protected void Raise(EmptyEventFunc handler) {
+			if (handler != null) handler();
+		}
+		
+		public void Dispose() {
+			Dispose(true);
+			GC.SuppressFinalize(this);
+		}
+		
+		protected abstract void Dispose(bool calledManually);
+		
+		~INativeWindow() { Dispose(false); }
 	}
 }

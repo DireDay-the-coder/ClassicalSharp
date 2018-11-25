@@ -3,12 +3,10 @@ using System;
 using System.Drawing;
 using ClassicalSharp;
 
-namespace Launcher.Drawing {	
+namespace Launcher.Drawing {
 	/// <summary> Per-platform class used to transfer a framebuffer directly to the native window. </summary>
-	public abstract class PlatformDrawer {
-		
-		/// <summary> Data describing the native window. </summary>
-		internal OpenTK.Platform.IWindowInfo info;
+	public abstract class PlatformDrawer {	
+		internal OpenTK.INativeWindow window;
 		
 		/// <summary> Initialises the variables for this platform drawer. </summary>
 		public abstract void Init();
@@ -19,7 +17,7 @@ namespace Launcher.Drawing {
 		}
 		
 		/// <summary> Updates the variables when the native window changes dimensions. </summary>
-		public abstract void Resize();
+		public virtual void Resize() { }
 		
 		/// <summary> Redraws a portion of the framebuffer to the window. </summary>
 		/// <remarks> r is only a hint, the entire framebuffer may still be

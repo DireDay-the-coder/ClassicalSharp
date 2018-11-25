@@ -29,23 +29,35 @@ using System;
 using OpenTK.Graphics;
 
 namespace OpenTK.Platform {
-	
-	interface IPlatformFactory {
-		INativeWindow CreateNativeWindow(int x, int y, int width, int height, string title, GraphicsMode mode, GameWindowFlags options, DisplayDevice device);
 
-		IDisplayDeviceDriver CreateDisplayDeviceDriver();
-
-		IGraphicsContext CreateGLContext(GraphicsMode mode, IWindowInfo window);
+	public class PlatformException : Exception {
+		public PlatformException(string s) : base(s) { }
 	}
 	
-	internal static class Factory {
+	public interface IPlatformFactory {
+		INativeWindow CreateWindow(int x, int y, int width, int height, string title, GraphicsMode mode, DisplayDevice device);
+
+		void InitDisplayDeviceDriver();
+
+		#if !USE_DX
+		IGraphicsContext CreateGLContext(GraphicsMode mode, INativeWindow window);
+		#endif
+	}
+	
+	public static class Factory {
 		public static readonly IPlatformFactory Default;
+		
+		public static INativeWindow CreateWindow(int width, int height, string title, GraphicsMode mode, DisplayDevice device) {
+			int x = device.Bounds.Left + (device.Bounds.Width  - width)  / 2;
+			int y = device.Bounds.Top  + (device.Bounds.Height - height) / 2;
+			return Default.CreateWindow(x, y, width, height, title, mode, device);
+		}
 
 		static Factory() {
 			if (Configuration.RunningOnWindows) Default = new Windows.WinFactory();
 			else if (Configuration.RunningOnMacOS) Default = new MacOS.MacOSFactory();
 			else if (Configuration.RunningOnX11) Default = new X11.X11Factory();
-			else throw new NotSupportedException( "Running on an unsupported platform, please refer to http://www.opentk.com for more information." );
+			else throw new NotSupportedException("Running on an unsupported platform, please refer to http://www.opentk.com for more information.");
 		}
 	}
 }
@@ -53,51 +65,57 @@ namespace OpenTK.Platform {
 namespace OpenTK.Platform.MacOS {
 	class MacOSFactory : IPlatformFactory {
 		
-		public INativeWindow CreateNativeWindow(int x, int y, int width, int height, string title, GraphicsMode mode, GameWindowFlags options, DisplayDevice device) {
-			return new CarbonGLNative(x, y, width, height, title, options, device);
+		public INativeWindow CreateWindow(int x, int y, int width, int height, string title, GraphicsMode mode, DisplayDevice device) {
+			return new CarbonWindow(x, y, width, height, title, device);
 		}
 
-		public IDisplayDeviceDriver CreateDisplayDeviceDriver() {
-			return new QuartzDisplayDeviceDriver();
+		public void InitDisplayDeviceDriver() {
+			QuartzDisplayDevice.Init();
 		}
 
-		public IGraphicsContext CreateGLContext(GraphicsMode mode, IWindowInfo window) {
-			return new AglContext(mode, window);
+		#if !USE_DX
+		public IGraphicsContext CreateGLContext(GraphicsMode mode, INativeWindow window) {
+			return new AglContext(mode, (CarbonWindow)window);
 		}
+		#endif
 	}
 }
 
 namespace OpenTK.Platform.Windows {
 	class WinFactory : IPlatformFactory {
 		
-		public INativeWindow CreateNativeWindow(int x, int y, int width, int height, string title, GraphicsMode mode, GameWindowFlags options, DisplayDevice device) {
-			return new WinGLNative(x, y, width, height, title, options, device);
+		public INativeWindow CreateWindow(int x, int y, int width, int height, string title, GraphicsMode mode, DisplayDevice device) {
+			return new WinWindow(x, y, width, height, title, device);
 		}
 
-		public IDisplayDeviceDriver CreateDisplayDeviceDriver() {
-			return new WinDisplayDeviceDriver();
+		public void InitDisplayDeviceDriver() {
+			WinDisplayDevice.Init();
 		}
-
-		public IGraphicsContext CreateGLContext(GraphicsMode mode, IWindowInfo window) {
-			return new WinGLContext(mode, (WinWindowInfo)window);
+		
+		#if !USE_DX
+		public IGraphicsContext CreateGLContext(GraphicsMode mode, INativeWindow window) {
+			return new WinGLContext(mode, (WinWindow)window);
 		}
+		#endif
 	}
 }
 
 namespace OpenTK.Platform.X11 {
 	class X11Factory : IPlatformFactory {
 
-		public INativeWindow CreateNativeWindow(int x, int y, int width, int height, string title, GraphicsMode mode, GameWindowFlags options, DisplayDevice device) {
-			return new X11GLNative(x, y, width, height, title, mode, options, device);
+		public INativeWindow CreateWindow(int x, int y, int width, int height, string title, GraphicsMode mode, DisplayDevice device) {
+			return new X11Window(x, y, width, height, title, mode, device);
 		}
 
-		public IDisplayDeviceDriver CreateDisplayDeviceDriver() {
-			return new X11DisplayDevice();
+		public void InitDisplayDeviceDriver() {
+			X11DisplayDevice.Init();
 		}
 
-		public IGraphicsContext CreateGLContext(GraphicsMode mode, IWindowInfo window) {
-			return new X11GLContext(mode, window);
+		#if !USE_DX
+		public IGraphicsContext CreateGLContext(GraphicsMode mode, INativeWindow window) {
+			return new X11GLContext(mode, (X11Window)window);
 		}
+		#endif
 	}
 }
 

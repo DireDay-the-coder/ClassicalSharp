@@ -3,27 +3,11 @@ using ClassicalSharp.Entities;
 using ClassicalSharp.Map;
 using System;
 using OpenTK;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Physics {
 	
-	public struct State {
-		public int X, Y, Z;
-		public float tSquared;
-		
-		public State(int x, int y, int z, BlockID block, float tSquared) {
-			X = x << 3; Y = y << 3; Z = z << 3;
-			X |= (block & 0x07);
-			Y |= (block & 0x38) >> 3;
-			Z |= (block & 0xC0) >> 6;
-			this.tSquared = tSquared;
-		}
-	}
+	public struct State { public int X, Y, Z; public float tSquared; }
 	
 	/// <summary> Calculates all possible blocks that a moving entity can intersect with. </summary>
 	public sealed class Searcher {
@@ -50,10 +34,10 @@ namespace ClassicalSharp.Physics {
 			int elements = (max.X + 1 - min.X) * (max.Y + 1 - min.Y) * (max.Z + 1 - min.Z);
 			if (elements > stateCache.Length) {
 				stateCache = new State[elements];
-			}			
+			}
 			
-			AABB blockBB = default(AABB);
-			BlockInfo info = game.BlockInfo;
+			AABB blockBB;
+			State state;
 			int count = 0;
 			
 			// Order loops so that we minimise cache misses
@@ -62,20 +46,25 @@ namespace ClassicalSharp.Physics {
 					for (int x = min.X; x <= max.X; x++)
 			{
 				BlockID block = game.World.GetPhysicsBlock(x, y, z);
-				if (info.Collide[block] != CollideType.Solid) continue;
+				if (BlockInfo.Collide[block] != CollideType.Solid) continue;
 				
-				blockBB.Min = info.MinBB[block];
+				blockBB.Min = BlockInfo.MinBB[block];
 				blockBB.Min.X += x; blockBB.Min.Y += y; blockBB.Min.Z += z;
-				blockBB.Max = info.MaxBB[block];
+				blockBB.Max = BlockInfo.MaxBB[block];
 				blockBB.Max.X += x; blockBB.Max.Y += y; blockBB.Max.Z += z;
 				
 				if (!entityExtentBB.Intersects(blockBB)) continue; // necessary for non whole blocks. (slabs)
 				
-				float tx = 0, ty = 0, tz = 0;
+				float tx, ty, tz;
 				CalcTime(ref vel, ref entityBB, ref blockBB, out tx, out ty, out tz);
 				if (tx > 1 || ty > 1 || tz > 1) continue;
-				float tSquared = tx * tx + ty * ty + tz * tz;
-				stateCache[count++] = new State(x, y, z, block, tSquared);
+				
+				state.X = (x << 3) | (block  & 0x007);
+				state.Y = (y << 4) | ((block & 0x078) >> 3);
+				state.Z = (z << 3) | ((block & 0x380) >> 7);
+				state.tSquared = tx * tx + ty * ty + tz * tz;
+				
+				stateCache[count++] = state;
 			}
 			
 			if (count > 0)

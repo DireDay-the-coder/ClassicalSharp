@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Text;
+using ClassicalSharp;
 using ClassicalSharp.Textures;
 
 namespace Launcher.Patcher {
@@ -12,9 +13,12 @@ namespace Launcher.Patcher {
 		
 		BinaryWriter writer;
 		Stream stream;
+		DateTime now;
+		
 		public ZipWriter(Stream stream) {
 			this.stream = stream;
 			writer = new BinaryWriter(stream);
+			now = Utils.LocalNow();
 		}
 		
 		internal ZipEntry[] entries;
@@ -42,11 +46,11 @@ namespace Launcher.Patcher {
 		public void WriteNewEntry(string filename, byte[] data, int dataLength) {
 			ZipEntry entry = new ZipEntry();
 			entry.UncompressedDataSize = dataLength;
-			entry.Crc32 = CRC32(data, dataLength);
+			entry.Crc32 = Utils.CRC32(data, dataLength);
 			entry.CompressedDataSize = dataLength;
 			entry.LocalHeaderOffset = (int)stream.Position;
 			
-			entry.Filename = filename;
+			entry.Path = filename;
 			entries[entriesCount++] = entry;
 			WriteLocalFileEntry(entry, data, dataLength);
 		}
@@ -65,14 +69,14 @@ namespace Launcher.Patcher {
 			writer.Write((ushort)20); // version needed
 			writer.Write((ushort)0);  // bitflags
 			writer.Write((ushort)0);  // compression method
-			writer.Write(0);          // last modified
+			WriteCurrentDate(writer); // last modified
 			writer.Write(entry.Crc32);
 			writer.Write(entry.CompressedDataSize);
 			writer.Write(entry.UncompressedDataSize);
-			writer.Write((ushort)entry.Filename.Length);
+			writer.Write((ushort)entry.Path.Length);
 			writer.Write((ushort)0);  // extra field length
-			for (int i = 0; i < entry.Filename.Length; i++)
-				writer.Write((byte)entry.Filename[i]);
+			for (int i = 0; i < entry.Path.Length; i++)
+				writer.Write((byte)entry.Path[i]);
 			
 			writer.Write(data, 0, length);
 		}
@@ -83,20 +87,28 @@ namespace Launcher.Patcher {
 			writer.Write((ushort)20); // version needed
 			writer.Write((ushort)0);  // bitflags
 			writer.Write((ushort)0);  // compression method
-			writer.Write(0);          // last modified
+			WriteCurrentDate(writer); // last modified
 			writer.Write(entry.Crc32);
 			writer.Write(entry.CompressedDataSize);
 			writer.Write(entry.UncompressedDataSize);
 			
-			writer.Write((ushort)entry.Filename.Length);
+			writer.Write((ushort)entry.Path.Length);
 			writer.Write((ushort)0);  // extra field length
 			writer.Write((ushort)0);  // file comment length
 			writer.Write((ushort)0);  // disk number
 			writer.Write((ushort)0);  // internal attributes
 			writer.Write(0);          // external attributes
 			writer.Write(entry.LocalHeaderOffset);
-			for (int i = 0; i < entry.Filename.Length; i++)
-				writer.Write((byte)entry.Filename[i]);
+			for (int i = 0; i < entry.Path.Length; i++)
+				writer.Write((byte)entry.Path[i]);
+		}
+		
+		void WriteCurrentDate(BinaryWriter writer) {
+			int modTime = (now.Second / 2) | (now.Minute << 5) | (now.Hour << 11);
+			int modDate = (now.Day) | (now.Month << 5) | ((now.Year - 1980) << 9);
+			
+			writer.Write((ushort)modTime);
+			writer.Write((ushort)modDate);
 		}
 		
 		void WriteEndOfCentralDirectoryRecord(ushort entries, int centralDirSize, int centralDirOffset) {
@@ -108,16 +120,6 @@ namespace Launcher.Patcher {
 			writer.Write(centralDirSize);
 			writer.Write(centralDirOffset);
 			writer.Write((ushort)0);  // comment length
-		}
-		
-		static uint CRC32(byte[] data, int length) {
-			uint crc = 0xffffffffU;
-			for (int i = 0; i < length; i++) {
-				crc ^= data[i];
-				for (int j = 0; j < 8; j++)
-					crc = (crc >> 1) ^ (crc & 1) * 0xEDB88320;
-			}
-			return crc ^ 0xffffffffU;
 		}
 	}
 }

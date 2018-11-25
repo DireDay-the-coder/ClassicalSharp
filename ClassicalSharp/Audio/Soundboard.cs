@@ -2,57 +2,70 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using SharpWave;
 
 namespace ClassicalSharp.Audio {
 
 	public class Sound {
-		public int SampleRate, BitsPerSample, Channels;
+		public AudioFormat Format;
 		public byte[] Data;
 	}
 	
+	public class SoundGroup {
+		public string Name;
+		public List<Sound> Sounds;
+	}
+	
 	public class Soundboard {
-		
-		public byte[] Data;
-		Dictionary<string, List<Sound>> allSounds = new Dictionary<string, List<Sound>>();
+		List<SoundGroup> groups = new List<SoundGroup>();
 		Random rnd = new Random();
-		
-		const StringComparison comp = StringComparison.OrdinalIgnoreCase;
-		public void Init(string group, string[] files) {
+
+		public void Init(string sndGroup, string[] files) {
 			for (int i = 0; i < files.Length; i++) {
 				string name = Path.GetFileNameWithoutExtension(files[i]);
-				if (!name.StartsWith(group, comp)) continue;
+				if (!Utils.CaselessStarts(name, sndGroup)) continue;
 				
 				// Convert dig_grass1.wav to grass
-				name = Utils.ToLower(name.Substring(group.Length));
+				name = name.Substring(sndGroup.Length);
 				name = name.Substring(0, name.Length - 1);
 				
-				List<Sound> sounds = null;
-				if (!allSounds.TryGetValue(name, out sounds)) {
-					sounds = new List<Sound>();
-					allSounds[name] = sounds;
+				SoundGroup group = Find(name);
+				if (group == null) {
+					group = new SoundGroup();
+					group.Name = name;
+					group.Sounds = new List<Sound>();
+					groups.Add(group);
 				}
 				
 				try {
 					Sound snd = ReadWave(files[i]);
-					sounds.Add(snd);
+					group.Sounds.Add(snd);
 				} catch (Exception ex) {
 					ErrorHandler.LogError("Soundboard.ReadWave()", ex);
 				}
 			}
 		}
 		
-		public Sound PickRandomSound(SoundType type) {
-			if (type == SoundType.None)  return null;
+		SoundGroup Find(string name) {
+			for (int i = 0; i < groups.Count; i++) {
+				if (Utils.CaselessEq(groups[i].Name, name)) return groups[i];
+			}
+			return null;
+		}
+		
+		public Sound PickRandomSound(byte type) {
+			if (type == SoundType.None || type >= SoundType.Count) return null;
 			if (type == SoundType.Metal) type = SoundType.Stone;
-			string name = soundNames[(int)type];
+			string name = SoundType.Names[type];
 			
-			List<Sound> sounds;
-			if (!allSounds.TryGetValue(name, out sounds)) return null;
-			return sounds[rnd.Next(sounds.Count)];
+			SoundGroup group = Find(name);
+			if (group == null) return null;
+			return group.Sounds[rnd.Next(group.Sounds.Count)];
 		}
 		
 		Sound ReadWave(string file) {
-			using (FileStream fs = File.OpenRead(file))
+			string path = Path.Combine("audio", file);
+			using (Stream fs = Platform.FileOpen(path))
 				using (BinaryReader r = new BinaryReader(fs))
 			{
 				string fourCC = GetFourCC(r);
@@ -85,12 +98,12 @@ namespace ClassicalSharp.Audio {
 		static void HandleFormat(BinaryReader r, ref int size, Sound snd) {
 			if (r.ReadUInt16() != 1)
 				throw new InvalidDataException("Only PCM audio is supported.");
-			size -= 2;
 			
-			snd.Channels = r.ReadUInt16(); size -= 2;
-			snd.SampleRate = r.ReadInt32(); size -= 4;
-			r.ReadInt32(); r.ReadUInt16(); size -= 6;
-			snd.BitsPerSample = r.ReadUInt16(); size -= 2;
+			snd.Format.Channels = r.ReadUInt16();
+			snd.Format.SampleRate = r.ReadInt32();
+			r.ReadInt32(); r.ReadUInt16();
+			snd.Format.BitsPerSample = r.ReadUInt16();
+			size -= 16;
 		}
 		
 		unsafe string GetFourCC(BinaryReader r) {
@@ -98,13 +111,6 @@ namespace ClassicalSharp.Audio {
 			fourCC[0] = r.ReadSByte(); fourCC[1] = r.ReadSByte();
 			fourCC[2] = r.ReadSByte(); fourCC[3] = r.ReadSByte();
 			return new string(fourCC, 0, 4);
-		}
-		
-		static string[] soundNames;
-		static Soundboard() {
-			soundNames = Enum.GetNames(typeof(SoundType));
-			for (int i = 0; i < soundNames.Length; i++)
-				soundNames[i] = soundNames[i].ToLower();
 		}
 	}
 }

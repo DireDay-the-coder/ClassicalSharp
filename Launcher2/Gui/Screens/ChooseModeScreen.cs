@@ -19,16 +19,19 @@ namespace Launcher.Gui.Screens {
 			base.Init();
 			view.Init();
 			
-			widgets[view.nIndex].OnClick = (x, y) => ModeClick(false, false);
-			widgets[view.clIndex].OnClick = (x, y) => ModeClick(true, false);
-			widgets[view.clHaxIndex].OnClick = (x, y) => ModeClick(true, true);
-			
+			widgets[view.nIndex].OnClick = UseModeEnhanced;
+			widgets[view.clIndex].OnClick = UseModeClassicHax;
+			widgets[view.clHaxIndex].OnClick = UseModeClassic;		
 			if (view.backIndex >= 0) {
-				widgets[view.backIndex].OnClick = (x, y)
-					=> game.SetScreen(new SettingsScreen(game));
+				widgets[view.backIndex].OnClick = SwitchToSettings;
 			}
 			Resize();
 		}
+		
+		void UseModeEnhanced(int x, int y) { ModeClick(false, false); }
+		void UseModeClassicHax(int x, int y) { ModeClick(true, false); }
+		void UseModeClassic(int x, int y) { ModeClick(true, true); }
+		void SwitchToSettings(int x, int y) { game.SetScreen(new SettingsScreen(game)); }
 		
 		public override void Tick() { }
 
@@ -40,16 +43,16 @@ namespace Launcher.Gui.Screens {
 		void ModeClick(bool classic, bool classicHacks) {
 			game.ClassicBackground = classic;
 			Options.Load();
-			Options.Set("mode-classic", classic);
+			Options.Set(OptionsKey.ClassicMode, classic);
 			if (classic)
-				Options.Set("nostalgia-hacks", classicHacks);
+				Options.Set(OptionsKey.ClassicHacks, classicHacks);
 			
 			Options.Set("nostalgia-classicbg", classic);
-			Options.Set("nostalgia-customblocks", !classic);
-			Options.Set("nostalgia-usecpe", !classic);
-			Options.Set("nostalgia-servertextures", !classic);
-			Options.Set("nostalgia-classictablist", classic);
-			Options.Set("nostalgia-classicoptions", classic);
+			Options.Set(OptionsKey.CustomBlocks,   !classic);
+			Options.Set(OptionsKey.CPE,            !classic);
+			Options.Set(OptionsKey.ServerTextures, !classic);
+			Options.Set(OptionsKey.ClassicTabList,  classic);
+			Options.Set(OptionsKey.ClassicOptions,  classic);
 			Options.Save();
 			
 			game.SetScreen(new MainScreen(game));

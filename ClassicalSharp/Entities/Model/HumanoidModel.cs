@@ -1,7 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using ClassicalSharp.Entities;
-using ClassicalSharp.GraphicsAPI;
 using ClassicalSharp.Physics;
 using OpenTK;
 
@@ -10,8 +9,9 @@ namespace ClassicalSharp.Model {
 	public class HumanoidModel : IModel {
 		
 		public ModelSet Set, SetSlim, Set64;
-		public HumanoidModel(Game window) : base(window) {
+		public HumanoidModel(Game game) : base(game) {
 			CalcHumanAnims = true;
+			UsesHumanSkin = true;
 		}
 		
 		protected BoxDesc head, torso, lLeg, rLeg, lArm, rArm;
@@ -23,10 +23,10 @@ namespace ClassicalSharp.Model {
 			
 			Set.Head = BuildBox(head.TexOrigin(0, 0));
 			Set.Torso = BuildBox(torso.TexOrigin(16, 16));
-			Set.LeftLeg = BuildBox(lLeg.MirrorX().TexOrigin(0, 16));
+			Set.LeftLeg = BuildBox(lLeg.TexOrigin(0, 16));
 			Set.RightLeg = BuildBox(rLeg.TexOrigin(0, 16));
 			Set.Hat = BuildBox(head.TexOrigin(32, 0).Expand(offset));
-			Set.LeftArm = BuildBox(lArm.MirrorX().TexOrigin(40, 16));
+			Set.LeftArm = BuildBox(lArm.TexOrigin(40, 16));
 			Set.RightArm = BuildBox(rArm.TexOrigin(40, 16));
 			lArm = lArm.MirrorX(); lLeg = lLeg.MirrorX();
 			
@@ -51,9 +51,9 @@ namespace ClassicalSharp.Model {
 			SetSlim.LeftLeg = Set64.LeftLeg;
 			SetSlim.RightLeg = Set64.RightLeg;
 			SetSlim.Hat = Set64.Hat;
-			lArm.BodyW -= 1; lArm.X1 += (offset * 2)/16f;
+			lArm.SizeX -= 1; lArm.X1 += (offset * 2)/16f;
 			SetSlim.LeftArm = BuildBox(lArm.TexOrigin(32, 48));
-			rArm.BodyW -= 1; rArm.X2 -= (offset * 2)/16f;
+			rArm.SizeX -= 1; rArm.X2 -= (offset * 2)/16f;
 			SetSlim.RightArm = BuildBox(rArm.TexOrigin(40, 16));
 			
 			SetSlim.TorsoLayer = Set64.TorsoLayer;
@@ -66,18 +66,17 @@ namespace ClassicalSharp.Model {
 		protected virtual void MakeDescriptions() {
 			head = MakeBoxBounds(-4, 24, -4, 4, 32, 4).RotOrigin(0, 24, 0);
 			torso = MakeBoxBounds(-4, 12, -2, 4, 24, 2);
-			lLeg = MakeBoxBounds(-4, 0, -2, 0, 12, 2).RotOrigin(0, 12, 0);
+			lLeg = MakeBoxBounds(0, 0, -2, -4, 12, 2).RotOrigin(0, 12, 0);
 			rLeg = MakeBoxBounds(0, 0, -2, 4, 12, 2).RotOrigin(0, 12, 0);
-			lArm = MakeBoxBounds(-8, 12, -2, -4, 24, 2).RotOrigin(-5, 22, 0);
+			lArm = MakeBoxBounds(-4, 12, -2, -8, 24, 2).RotOrigin(-5, 22, 0);
 			rArm = MakeBoxBounds(4, 12, -2, 8, 24, 2).RotOrigin(5, 22, 0);
 		}
 		
-		public override float NameYOffset { get { return 32/16f + 0.5f/16f; } }
-		
+		public override float NameYOffset { get { return 32.5f/16f; } }		
 		public override float GetEyeY(Entity entity) { return 26/16f; }
 		
 		public override Vector3 CollisionSize {
-			get { return new Vector3(8/16f + 0.6f/16f, 28.1f/16f, 8/16f + 0.6f/16f); }
+			get { return new Vector3(8.6f/16f, 28.1f/16f, 8.6f/16f); }
 		}
 		
 		public override AABB PickingBounds {
@@ -85,17 +84,11 @@ namespace ClassicalSharp.Model {
 		}
 		
 		public override void DrawModel(Entity p) {
-			game.Graphics.BindTexture(GetTexture(p.TextureId));
+			ApplyTexture(p);
+			// players should not be able to use invisible skins
 			game.Graphics.AlphaTest = false;
 			
-			bool _64x64 = p.SkinType != SkinType.Type64x32;
-			uScale = p.uScale / 64f;
-			vScale = p.vScale / (_64x64 ? 64 : 32);
-			RenderParts(p);
-		}
-		
-		protected virtual void RenderParts(Entity p) {
-			SkinType skinType = p.SkinType;
+			SkinType skinType = IModel.skinType;
 			ModelSet model = skinType == SkinType.Type64x64Slim ? SetSlim :
 				(skinType == SkinType.Type64x64 ? Set64 : Set);
 			
@@ -122,6 +115,18 @@ namespace ClassicalSharp.Model {
 				Rotate = RotateOrder.ZYX;
 			}
 			DrawRotate(-p.HeadXRadians, 0, 0, model.Hat, true);
+			UpdateVB();
+		}
+		
+		public override void DrawArm(Entity p) {
+			SkinType skin = IModel.skinType;
+			ModelSet model = skin == SkinType.Type64x64Slim ? SetSlim : 
+				(skin == SkinType.Type64x64 ? Set64 : Set);
+						
+			DrawArmPart(model.RightArm);
+			if (skin != SkinType.Type64x32) {
+				DrawArmPart(model.RightArmLayer);
+			}
 			UpdateVB();
 		}
 		

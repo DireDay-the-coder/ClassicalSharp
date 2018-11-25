@@ -22,7 +22,6 @@ namespace ClassicalSharp.Map {
 		End, Int8, Int16, Int32, Int64,
 		Real32, Real64, Int8Array, String,
 		List, Compound, Int32Array,
-		Invalid = 255,
 	}
 
 	public sealed class NbtFile {
@@ -41,13 +40,11 @@ namespace ClassicalSharp.Map {
 		
 		public void Write(NbtTagType v) { writer.Write((byte)v); }
 		
-		public void WriteInt64(long v) { writer.Write(IPAddress.HostToNetworkOrder(v)); }
+		public void Write(NbtTagType v, string name) { writer.Write((byte)v); Write(name); }
 		
 		public void WriteInt32(int v) { writer.Write(IPAddress.HostToNetworkOrder(v)); }
 		
 		public void WriteInt16(short v) { writer.Write(IPAddress.HostToNetworkOrder(v)); }
-		
-		public void WriteInt8(sbyte v) { writer.Write((byte)v); }
 		
 		public void WriteUInt8(int v) { writer.Write((byte)v); }
 		
@@ -58,17 +55,15 @@ namespace ClassicalSharp.Map {
 		public void WriteBytes(byte[] v, int index, int count) { writer.Write(v, index, count); }
 		
 		public void Write(string value) {
-			ushort len = (ushort)value.Length;
 			byte[] data = Encoding.UTF8.GetBytes(value);
-			WriteInt16((short)len);
+			WriteInt16((short)data.Length);
 			writer.Write(data);
 		}
 		
 		public void WriteCpeExtCompound(string name, int version) {
-			Write(NbtTagType.Compound); Write(name);
-			
-			Write(NbtTagType.Int32);
-			Write("ExtensionVersion"); WriteInt32(version);
+			Write(NbtTagType.Compound, name);		
+			Write(NbtTagType.Int32, "ExtensionVersion"); 
+			WriteInt32(version);
 		}
 		
 		
@@ -86,9 +81,7 @@ namespace ClassicalSharp.Map {
 		
 		public unsafe NbtTag ReadTag(byte typeId, bool readTagName) {
 			NbtTag tag = default(NbtTag);
-			if (typeId == 0) {
-				tag.TagId = NbtTagType.Invalid; return tag;
-			}
+			if (typeId == 0) return tag;
 			
 			tag.Name = readTagName ? ReadString() : null;
 			tag.TagId = (NbtTagType)typeId;			
@@ -116,21 +109,24 @@ namespace ClassicalSharp.Map {
 					NbtList list = new NbtList();
 					list.ChildTagId = (NbtTagType)reader.ReadByte();
 					list.ChildrenValues = new object[ReadInt32()];
-					for (int i = 0; i < list.ChildrenValues.Length; i++)
+					for (int i = 0; i < list.ChildrenValues.Length; i++) {
 						list.ChildrenValues[i] = ReadTag((byte)list.ChildTagId, false).Value;
+					}
 					tag.Value = list; break;
 					
 				case NbtTagType.Compound:
+					byte childTagId;
 					Dictionary<string, NbtTag> children = new Dictionary<string, NbtTag>();
-					NbtTag child;
-					while ((child = ReadTag(reader.ReadByte(), true)).TagId != NbtTagType.Invalid)
-						children[child.Name] = child;
+					while ((childTagId = reader.ReadByte()) != (byte)NbtTagType.End) {
+						NbtTag child = ReadTag(childTagId, true); children[child.Name] = child;
+					}
 					tag.Value = children; break;
 					
 				case NbtTagType.Int32Array:
 					int[] array = new int[ReadInt32()];
-					for (int i = 0; i < array.Length; i++)
+					for (int i = 0; i < array.Length; i++) {
 						array[i] = ReadInt32();
+					}
 					tag.Value = array; break;
 					
 				default:

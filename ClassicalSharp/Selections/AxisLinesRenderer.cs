@@ -12,22 +12,22 @@ namespace ClassicalSharp.Selections {
 		Game game;
 		const float size = 1/32f;
 		
-		public void Init(Game game) { 
+		void IGameComponent.Init(Game game) { 
 			this.game = game;
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			Events.ContextLost += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 		}
 		
-		public void Dispose() { 
+		void IDisposable.Dispose() { 
 			ContextLost();
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;
+			Events.ContextLost -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 		
-		public void Ready(Game game) { }			
-		public void Reset(Game game) { }
-		public void OnNewMap(Game game) { }
-		public void OnNewMapLoaded(Game game) { }				
+		void IGameComponent.Ready(Game game) { }			
+		void IGameComponent.Reset(Game game) { }
+		void IGameComponent.OnNewMap(Game game) { }
+		void IGameComponent.OnNewMapLoaded(Game game) { }				
 		
 		public void Render(double delta) {
 			if (!game.ShowAxisLines || game.Graphics.LostContext) return;
@@ -39,17 +39,17 @@ namespace ClassicalSharp.Selections {
 			Vector3 P = game.LocalPlayer.Position; P.Y += 0.05f;
 			int index = 0;
 			
-			SelectionBox.HorQuad(vertices, ref index, FastColour.Red.Pack(), 
+			SelectionBox.HorQuad(vertices, ref index, PackedCol.Red,
 			                   P.X, P.Z - size, P.X + 3, P.Z + size, P.Y);
-			SelectionBox.HorQuad(vertices, ref index, FastColour.Blue.Pack(),
+			SelectionBox.HorQuad(vertices, ref index, PackedCol.Blue,
 			                   P.X - size, P.Z, P.X + size, P.Z + 3, P.Y);
 			if (game.Camera.IsThirdPerson) {
-				SelectionBox.VerQuad(vertices, ref index, FastColour.Green.Pack(),
+				SelectionBox.VerQuad(vertices, ref index, PackedCol.Green,
 				                     P.X - size, P.Y, P.Z + size, P.X + size, P.Y + 3, P.Z - size);
 			}
 			
 			game.Graphics.SetBatchFormat(VertexFormat.P3fC4b);
-			game.Graphics.UpdateDynamicIndexedVb(DrawMode.Triangles, vb, vertices, index);
+			game.Graphics.UpdateDynamicVb_IndexedTris(vb, vertices, index);
 		}
 		
 		void ContextLost() { game.Graphics.DeleteVb(ref vb); }

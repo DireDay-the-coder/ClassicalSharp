@@ -3,15 +3,10 @@ using System;
 using ClassicalSharp.Map;
 using ClassicalSharp.Physics;
 using OpenTK;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp {
-	public static class Picking {	
+	public static class Picking {
 		
 		static RayTracer t = new RayTracer();
 		
@@ -34,7 +29,15 @@ namespace ClassicalSharp {
 			if (!Intersection.RayIntersectsBox(t.Origin, t.Dir, t.Min, t.Max, out t0, out t1))
 				return false;
 			Vector3 I = t.Origin + t.Dir * t0;
-			pos.SetAsValid(t.X, t.Y, t.Z, t.Min, t.Max, t.Block, I);
+			
+			// Only pick the block if the block is precisely within reach distance.
+			float lenSq = (I - t.Origin).LengthSquared;
+			float reach = game.LocalPlayer.ReachDistance;
+			if (lenSq <= reach * reach) {
+				pos.SetAsValid(t.X, t.Y, t.Z, t.Min, t.Max, t.Block, I);
+			} else {
+				pos.SetAsInvalid();
+			}
 			return true;
 		}
 		
@@ -47,26 +50,21 @@ namespace ClassicalSharp {
 			}
 		}
 		
+		static Vector3 adjust = new Vector3(0.1f);
 		static bool CameraClip(Game game, PickedPos pos) {
-			BlockInfo info = game.BlockInfo;
-			if (info.Draw[t.Block] == DrawType.Gas || info.Collide[t.Block] != CollideType.Solid)
+			if (BlockInfo.Draw[t.Block] == DrawType.Gas || BlockInfo.Collide[t.Block] != CollideType.Solid)
 				return false;
 			
 			float t0, t1;
-			const float adjust = 0.1f;
 			if (!Intersection.RayIntersectsBox(t.Origin, t.Dir, t.Min, t.Max, out t0, out t1))
 				return false;
+			
+			// Need to collide with slightly outside block, to avoid camera clipping issues
+			t.Min -= adjust; t.Max += adjust;
+			Intersection.RayIntersectsBox(t.Origin, t.Dir, t.Min, t.Max, out t0, out t1);
+			
 			Vector3 I = t.Origin + t.Dir * t0;
 			pos.SetAsValid(t.X, t.Y, t.Z, t.Min, t.Max, t.Block, I);
-			
-			switch (pos.Face) {
-				case BlockFace.XMin: pos.Intersect.X -= adjust; break;
-				case BlockFace.XMax: pos.Intersect.X += adjust; break;
-				case BlockFace.YMin: pos.Intersect.Y -= adjust; break;
-				case BlockFace.YMax: pos.Intersect.Y += adjust; break;
-				case BlockFace.ZMin: pos.Intersect.Z -= adjust; break;
-				case BlockFace.ZMax: pos.Intersect.Z += adjust; break;
-			}
 			return true;
 		}
 
@@ -74,15 +72,19 @@ namespace ClassicalSharp {
 		static bool RayTrace(Game game, Vector3 origin, Vector3 dir, float reach,
 		                     PickedPos pos, bool clipMode) {
 			t.SetVectors(origin, dir);
-			BlockInfo info = game.BlockInfo;
 			float reachSq = reach * reach;
 			Vector3I pOrigin = Vector3I.Floor(origin);
+			bool insideMap = game.World.IsValidPos(pOrigin);
 
-			for (int i = 0; i < 10000; i++) {
+			Vector3 coords;
+			for (int i = 0; i < 25000; i++) {
 				int x = t.X, y = t.Y, z = t.Z;
-				t.Block = GetBlock(game.World, x, y, z, pOrigin);
-				Vector3 min = new Vector3(x, y, z) + info.RenderMinBB[t.Block];
-				Vector3 max = new Vector3(x, y, z) + info.RenderMaxBB[t.Block];
+				coords.X = x; coords.Y = y; coords.Z = z;
+				t.Block = insideMap ?
+					InsideGetBlock(game.World, x, y, z) : OutsideGetBlock(game.World, x, y, z, pOrigin);
+				
+				Vector3 min = coords + BlockInfo.RenderMinBB[t.Block];
+				Vector3 max = coords + BlockInfo.RenderMaxBB[t.Block];
 				
 				float dx = Math.Min(Math.Abs(origin.X - min.X), Math.Abs(origin.X - max.X));
 				float dy = Math.Min(Math.Abs(origin.Y - min.Y), Math.Abs(origin.Y - max.Y));
@@ -95,38 +97,40 @@ namespace ClassicalSharp {
 				t.Step();
 			}
 			
-			throw new InvalidOperationException("did over 10000 iterations in CalculatePickedBlock(). " +
+			throw new InvalidOperationException("did over 25000 iterations in CalculatePickedBlock(). " +
 			                                    "Something has gone wrong. (dir: " + dir + ")");
 		}
 
 		const BlockID border = Block.Bedrock;
-		static BlockID GetBlock(World map, int x, int y, int z, Vector3I origin) {
-			bool sides = map.Env.SidesBlock != Block.Air;
-			int height = Math.Max(1, map.Env.SidesHeight);
-			bool insideMap = map.IsValidPos(origin);
-			
-			// handling of blocks inside the map, above, and on borders
+		static BlockID InsideGetBlock(World map, int x, int y, int z) {
 			if (x >= 0 && z >= 0 && x < map.Width && z < map.Length) {
-				if (y >= map.Height) return 0;
-				if (sides && y == -1 && insideMap) return border;
-				if (sides && y == 0 && origin.Y < 0) return border;
-				
-				if (sides && x == 0 && y >= 0 && y < height && origin.X < 0) return border;
-				if (sides && z == 0 && y >= 0 && y < height && origin.Z < 0) return border;
-				if (sides && x == (map.Width - 1) && y >= 0 && y < height && origin.X >= map.Width)
-					return border;
-				if (sides && z == (map.Length - 1) && y >= 0 && y < height && origin.Z >= map.Length)
-					return border;
+				if (y >= map.Height) return Block.Air;
 				if (y >= 0) return map.GetBlock(x, y, z);
 			}
 			
-			// pick blocks on the map boundaries (when inside the map)
-			if (!sides || !insideMap) return 0;
-			if (y == 0 && origin.Y < 0) return border;
-			bool validX = (x == -1 || x == map.Width) && (z >= 0 && z < map.Length);
-			bool validZ = (z == -1 || z == map.Length) && (x >= 0 && x < map.Width);
-			if (y >= 0 && y < height && (validX || validZ)) return border;
-			return 0;
+			// bedrock on bottom or outside map
+			bool sides = map.Env.SidesBlock != Block.Air;
+			int height = map.Env.SidesHeight; if (height < 1) height = 1;
+			return sides && y < height ? border : Block.Air;
+		}
+		
+		static BlockID OutsideGetBlock(World map, int x, int y, int z, Vector3I origin) {
+			if (x < 0 || z < 0 || x >= map.Width || z >= map.Length) return Block.Air;
+			bool sides = map.Env.SidesBlock != Block.Air;
+			// handling of blocks inside the map, above, and on borders
+			
+			if (y >= map.Height) return Block.Air;
+			if (sides && y == -1 && origin.Y > 0) return border;
+			if (sides && y == 0  && origin.Y < 0) return border;
+			int height = map.Env.SidesHeight; if (height < 1) height = 1;
+			
+			if (sides && x == 0        && y >= 0 && y < height && origin.X < 0)           return border;
+			if (sides && z == 0        && y >= 0 && y < height && origin.Z < 0)           return border;
+			if (sides && x == map.MaxX && y >= 0 && y < height && origin.X >= map.Width)  return border;
+			if (sides && z == map.MaxZ && y >= 0 && y < height && origin.Z >= map.Length) return border;
+			
+			if (y >= 0) return map.GetBlock(x, y, z);
+			return Block.Air;
 		}
 	}
 }

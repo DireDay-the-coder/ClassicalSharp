@@ -15,45 +15,32 @@ using Launcher.Web;
 using OpenTK;
 using OpenTK.Graphics;
 using OpenTK.Input;
+using OpenTK.Platform;
 
 namespace Launcher {
 
 	public sealed partial class LauncherWindow {
 		
-		/// <summary> Underlying native window instance. </summary>
-		public NativeWindow Window;
-		
-		/// <summary> Platform specific class used to draw 2D elements,
-		/// such as text, rounded rectangles and lines. </summary>
-		public IDrawer2D Drawer;
-		
-		/// <summary> Currently active screen. </summary>
+		public INativeWindow Window;
+		public IDrawer2D Drawer;	
 		public Screen Screen;
 		
 		/// <summary> Whether the client drawing area needs to be redrawn/presented to the screen. </summary>
-		public bool Dirty;
-		
-		/// <summary> The specific area/region of the window that needs to be redrawn. </summary>
+		public bool Dirty, pendingRedraw;
+				/// <summary> The specific area/region of the window that needs to be redrawn. </summary>
 		public Rectangle DirtyArea;
 		
-		/// <summary> Currently active logged in session with classicube.net. </summary>
-		public ClassicubeSession Session = new ClassicubeSession();
-		
-		/// <summary> Queue used to download resources asynchronously. </summary>
+		public string Username;
 		public AsyncDownloader Downloader;
 		
-		/// <summary> Returns the width of the client drawing area. </summary>
-		public int Width { get { return Window.Width; } }
-		
-		/// <summary> Returns the height of the client drawing area. </summary>
-		public int Height { get { return Window.Height; } }
-		
-		/// <summary> Bitmap that contains the entire array of pixels that describe the client drawing area. </summary>
+		public int Width, Height;	
 		public Bitmap Framebuffer;
 		
 		/// <summary> Whether at the next tick, the launcher window should proceed to stop displaying frames and subsequently exit. </summary>
 		public bool ShouldExit;
 		public bool ShouldUpdate;
+		
+		public List<ServerListEntry> Servers = new List<ServerListEntry>();
 		
 		public string FontName = "Arial";
 		
@@ -61,10 +48,7 @@ namespace Launcher {
 			get { return Window.WindowState == WindowState.Minimized || (Width == 1 && Height == 1); }
 		}
 		
-		/// <summary> Contains metadata attached for different screen instances,
-		/// typically used to save 'last text entered' text when a screen is disposed. </summary>
-		public Dictionary<string, Dictionary<string, object>> ScreenMetadata =
-			new Dictionary<string, Dictionary<string, object>>();
+		public bool IsKeyDown(Key key) { return Keyboard.Get(key); }
 		
 		internal ResourceFetcher fetcher;
 		internal UpdateCheckTask checkTask;
@@ -74,17 +58,19 @@ namespace Launcher {
 		PlatformDrawer platformDrawer;
 		public void Init() {
 			Window.Resize += Resize;
-			Window.FocusedChanged += FocusedChanged;
+			Window.FocusedChanged += RedrawAll;
 			Window.WindowStateChanged += Resize;
-			Window.Keyboard.KeyDown += KeyDown;
-			LoadFont();
+			Window.Redraw += RedrawPending;
+			Keyboard.KeyDown += KeyDown;
+			
+			LoadSettings();
 			logoFont = new Font(FontName, 32, FontStyle.Regular);
 			
 			string path = Assembly.GetExecutingAssembly().Location;
 			try {
 				Window.Icon = Icon.ExtractAssociatedIcon(path);
 			} catch (Exception ex) {
-				ErrorHandler2.LogError("LauncherWindow.Init() - Icon", ex);
+				ErrorHandler.LogError("LauncherWindow.Init() - Icon", ex);
 			}
 			//Minimised = Window.WindowState == WindowState.Minimized;
 			
@@ -99,12 +85,14 @@ namespace Launcher {
 				platformDrawer = new OSXPlatformDrawer();
 			}
 			
-			Drawer.Colours['g'] = new FastColour(125, 125, 125);
+			IDrawer2D.Cols['g'] = new PackedCol(125, 125, 125);
 		}
 		
-		void LoadFont() {
+		void LoadSettings() {
 			Options.Load();
-			FontName = Options.Get("gui-fontname") ?? "Arial";
+			Client.CClient = Options.GetBool(OptionsKey.CClient, false);
+			FontName = Options.Get("gui-fontname", "Arial");
+			
 			try {
 				using (Font f = new Font(FontName, 16)) { }
 			} catch (Exception) {
@@ -113,26 +101,32 @@ namespace Launcher {
 			}
 		}
 
-		void FocusedChanged(object sender, EventArgs e) {
-			if (Program.ShowingErrorDialog) return;
-			RedrawBackground();
-			Screen.Resize();
-		}
-
-		void Resize(object sender, EventArgs e) {
+		void Resize() {
+			UpdateClientSize();
 			platformDrawer.Resize();
-			RedrawBackground();
-			Screen.Resize();
+			RedrawAll();
+		}
+		
+		void RedrawPending() {
+			// in case we get multiple of these events
+			pendingRedraw = true;
+			Dirty = true;
+		}
+		
+		void RedrawAll() {
+			if (Program.ShowingErrorDialog) return;
+			RedrawBackground();			
+			if (Screen != null) Screen.Resize();
 			fullRedraw = true;
 		}
 		
 		public void SetScreen(Screen screen) {
-			if (this.Screen != null)
-				this.Screen.Dispose();
-			
+			if (Screen != null) Screen.Dispose();
 			RedrawBackground();
-			this.Screen = screen;
+			Screen = screen;
 			screen.Init();
+			// for selecting active button etc
+			Screen.MouseMove(0, 0);
 		}
 		
 		public bool ConnectToServer(List<ServerListEntry> publicServers, string hash) {
@@ -143,17 +137,24 @@ namespace Launcher {
 				ServerListEntry entry = publicServers[i];
 				if (entry.Hash != hash) continue;
 				
-				data = new ClientStartData(Session.Username, entry.Mppass,
-				                           entry.IPAddress, entry.Port);
+				data = new ClientStartData(Username, entry.Mppass,
+				                           entry.IPAddress, entry.Port, entry.Name);
 				Client.Start(data, true, ref ShouldExit);
 				return true;
 			}
 			
 			// Fallback to private server handling
 			try {
-				data = Session.GetConnectInfo(hash);
+				// TODO: Rewrite to be async
+				FetchServerTask task = new FetchServerTask(Username, hash);
+				task.RunAsync(this);
+				
+				while (!task.Completed) { task.Tick(); Thread.Sleep(10); }
+				if (task.WebEx != null) throw task.WebEx;
+				
+				data = task.Info;
 			} catch (WebException ex) {
-				ErrorHandler2.LogError("retrieving server information", ex);
+				ErrorHandler.LogError("retrieving server information", ex);
 				return false;
 			} catch (ArgumentOutOfRangeException) {
 				return false;
@@ -162,24 +163,33 @@ namespace Launcher {
 			return true;
 		}
 		
+		void UpdateClientSize() {
+			Size size = Window.ClientSize;
+			Width  = Math.Max(size.Width,  1);
+			Height = Math.Max(size.Height, 1);
+		}
+		
 		public void Run() {
-			Window = new NativeWindow(640, 400, Program.AppName, 0,
-			                          GraphicsMode.Default, DisplayDevice.Default);
+			Window = Factory.CreateWindow(640, 400, Program.AppName,
+			                              GraphicsMode.Default, DisplayDevice.Default);
 			Window.Visible = true;
-			Drawer = new GdiPlusDrawer2D(null);
+			Drawer = new GdiPlusDrawer2D();
+			UpdateClientSize();
+			
 			Init();
 			TryLoadTexturePack();
-			platformDrawer.info = Window.WindowInfo;
+			platformDrawer.window = Window;
 			platformDrawer.Init();
 			
-			string audioPath = Path.Combine(Program.AppDirectory, "audio");
-			BinUnpacker.Unpack(audioPath, "dig");
-			BinUnpacker.Unpack(audioPath, "step");
+			Downloader = new AsyncDownloader(Drawer);
+			Downloader.Init("");
+			Downloader.Cookies = new CookieContainer();
+			Downloader.KeepAlive = true;
 			
 			fetcher = new ResourceFetcher();
 			fetcher.CheckResourceExistence();
 			checkTask = new UpdateCheckTask();
-			checkTask.CheckForUpdatesAsync();
+			checkTask.RunAsync(this);
 			
 			if (!fetcher.AllResourcesExist) {
 				SetScreen(new ResourcesScreen(this));
@@ -191,11 +201,14 @@ namespace Launcher {
 				Window.ProcessEvents();
 				if (!Window.Exists) break;
 				if (ShouldExit) {
-					if (Screen != null)
+					if (Screen != null) {
 						Screen.Dispose();
+						Screen = null;
+					}
 					break;
 				}
 				
+				checkTask.Tick();
 				Screen.Tick();
 				if (Dirty) Display();
 				Thread.Sleep(10);
@@ -213,6 +226,11 @@ namespace Launcher {
 		}
 		
 		void Display() {
+			if (pendingRedraw) {
+				RedrawAll();
+				pendingRedraw = false;
+			}
+			
 			Screen.OnDisplay();
 			Dirty = false;
 			
@@ -225,28 +243,34 @@ namespace Launcher {
 			fullRedraw = false;
 		}
 		
-		Key lastKey;
-		void KeyDown(object sender, KeyboardKeyEventArgs e) {
-			if (IsShutdown(e.Key))
-				ShouldExit = true;
-			lastKey = e.Key;
+		void KeyDown(Key key) {
+			if (IsShutdown(key)) ShouldExit = true;
 		}
 		
 		public void Dispose() {
 			Window.Resize -= Resize;
-			Window.FocusedChanged -= FocusedChanged;
+			Window.FocusedChanged -= RedrawAll;
 			Window.WindowStateChanged -= Resize;
-			Window.Keyboard.KeyDown -= KeyDown;
+			Window.Redraw -= RedrawPending;
+			Keyboard.KeyDown -= KeyDown;
+			
+			List<FastBitmap> bitmaps = FetchFlagsTask.Bitmaps;
+			for (int i = 0; i < bitmaps.Count; i++) {
+				bitmaps[i].Dispose();
+				bitmaps[i].Bitmap.Dispose();
+			}
 			logoFont.Dispose();
 		}
 		
+		bool WinDown { get { return IsKeyDown(Key.WinLeft) || IsKeyDown(Key.WinRight); } }
+		bool AltDown { get { return IsKeyDown(Key.AltLeft) || IsKeyDown(Key.AltRight); } }
+		
 		bool IsShutdown(Key key) {
-			if (key == Key.F4 && (lastKey == Key.AltLeft || lastKey == Key.AltRight))
-				return true;
+			if (key == Key.F4 && AltDown) return true;
 			
 			// On OSX, Cmd+Q should also terminate the process.
 			if (!OpenTK.Configuration.RunningOnMacOS) return false;
-			return key == Key.Q && (lastKey == Key.WinLeft || lastKey == Key.WinRight);
+			return key == Key.Q && WinDown;
 		}
 		
 		public FastBitmap LockBits() {

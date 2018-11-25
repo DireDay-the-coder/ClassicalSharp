@@ -9,7 +9,7 @@ namespace ClassicalSharp.Physics {
 		public Vector3 Min;
 		public Vector3 Max;
 		
-		public float Width { get { return Max.X - Min.X; } }
+		public float Width  { get { return Max.X - Min.X; } }
 		public float Height { get { return Max.Y - Min.Y; } }
 		public float Length { get { return Max.Z - Min.Z; } }
 		
@@ -32,18 +32,6 @@ namespace ClassicalSharp.Physics {
 		/// of the original bounding box translated by the given vector. </summary>
 		public AABB Offset(Vector3 amount) {
 			return new AABB(Min + amount, Max + amount);
-		}
-		
-		/// <summary> Returns a new bounding box, with the minimum and maximum coordinates
-		/// of the original bounding box expanded away from origin the given vector. </summary>
-		public AABB Expand(Vector3 amount) {
-			return new AABB(Min - amount, Max + amount);
-		}
-		
-		/// <summary> Returns a new bounding box, with the minimum and maximum coordinates
-		/// of the original bounding box scaled away from origin the given value. </summary>
-		public AABB Scale(float scale) {
-			return new AABB(Min * scale, Max * scale);
 		}
 
 		/// <summary> Determines whether this bounding box intersects

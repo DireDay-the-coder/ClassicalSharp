@@ -7,9 +7,10 @@ namespace ClassicalSharp {
 	public sealed class TextAtlas : IDisposable {
 		
 		public Texture tex;
+		internal int offset, curX, fontSize;		
+		float uScale;
+		int[] widths;		
 		Game game;
-		int[] widths;
-		internal int offset, curX, totalWidth, fontSize;
 		
 		public TextAtlas(Game game, int fontSize) {
 			this.game = game;
@@ -22,9 +23,9 @@ namespace ClassicalSharp {
 			
 			using (IDrawer2D drawer = game.Drawer2D) {
 				args.Text = prefix;
-				Size size = game.Drawer2D.MeasureSize(ref args);
+				Size size = game.Drawer2D.MeasureText(ref args);
 				offset = size.Width;
-				size.Width += 16 * chars.Length;
+				size.Width += fontSize * chars.Length;
 				
 				using (Bitmap bmp = IDrawer2D.CreatePow2Bitmap(size)) {
 					drawer.SetBitmap(bmp);
@@ -32,16 +33,16 @@ namespace ClassicalSharp {
 					
 					for (int i = 0; i < chars.Length; i++) {
 						args.Text = new String(chars[i], 1);
-						widths[i] = game.Drawer2D.MeasureSize(ref args).Width;
+						widths[i] = game.Drawer2D.MeasureText(ref args).Width;
 						drawer.DrawText(ref args, offset + fontSize * i, 0);
 					}
 					
 					tex = drawer.Make2DTexture(bmp, size, 0, 0);
-					drawer.ReducePadding(ref tex, Utils.Floor(font.Size));
+					drawer.ReducePadding(ref tex, Utils.Floor(font.Size), 4);
 					
-					tex.U2 = (float)offset / bmp.Width;
-					tex.Width = (short)offset;
-					totalWidth = bmp.Width;
+					uScale = 1.0f / bmp.Width;
+					tex.U2 = offset * uScale;
+					tex.Width = (ushort)offset;
 				}
 			}
 		}
@@ -50,40 +51,27 @@ namespace ClassicalSharp {
 		
 		
 		public void Add(int charIndex, VertexP3fT2fC4b[] vertices, ref int index) {
-			int width = widths[charIndex];			
+			int width = widths[charIndex];
 			Texture part = tex;
-			part.X1 = curX; part.Width = (short)width;
-			part.U1 = (offset + charIndex * fontSize) / (float)totalWidth;
-			part.U2 = part.U1 + width / (float)totalWidth;
+			part.X1 = curX; part.Width = (ushort)width;
+			part.U1 = (offset + charIndex * fontSize) * uScale;
+			part.U2 = part.U1 + width * uScale;
 			
 			curX += width;
-			IGraphicsApi.Make2DQuad(ref part, FastColour.WhitePacked, 
+			IGraphicsApi.Make2DQuad(ref part, PackedCol.White, 
 			                        vertices, ref index);
 		}
 		
 		public void AddInt(int value, VertexP3fT2fC4b[] vertices, ref int index) {
-			if (value < 0) Add(10, vertices, ref index); // - sign
-			
-			int count = 0;
-			value = Reverse(Math.Abs(value), out count);
-			for (int i = 0; i < count; i++) {
-				Add(value % 10, vertices, ref index); value /= 10;
+			if (value < 0) {
+				Add(10, vertices, ref index); value = -value; // - sign
 			}
-		}
-		
-		static int Reverse(int value, out int count) {
-			int orig = value, reversed = 0;
-			count = 1; value /= 10;
-			while (value > 0) {
-				count++; value /= 10;
+
+			char[] digits = StringBuffer.numBuffer;
+			int count = StringBuffer.MakeNum((uint)value);
+			for (int i = count - 1; i >= 0; i--) {
+				Add(digits[i] - '0', vertices, ref index);
 			}
-			
-			for (int i = 0; i < count; i++) {
-				reversed *= 10;
-				reversed += orig % 10;
-				orig /= 10;
-			}
-			return reversed;
 		}
 	}
 }

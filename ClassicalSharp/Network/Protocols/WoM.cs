@@ -11,19 +11,26 @@ namespace ClassicalSharp.Network.Protocols {
 		
 		public WoMProtocol(Game game) : base(game) { }
 		
-		string womEnvIdentifier = "womenv_0";
-		int womCounter = 0;
-		internal bool sendWomId = false, sentWomId = false;
+		string womEnvIdentifier;
+		int womCounter;
+		bool sendWomId, sentWomId;
+		
+		public override void Reset() {
+			womEnvIdentifier = "womenv_0";
+			womCounter = 0;
+			sendWomId = false; sentWomId = false;
+		}
 
 		public override void Tick() {
-			DownloadedItem item;
-			game.AsyncDownloader.TryGetItem(womEnvIdentifier, out item);
+			Request item;
+			game.Downloader.TryGetItem(womEnvIdentifier, out item);
 			if (item != null && item.Data != null) {
 				ParseWomConfig((string)item.Data);
 			}
 		}
 		
 		internal void CheckMotd() {
+			if (net.ServerMotd == null) return;
 			int index = net.ServerMotd.IndexOf("cfg=");
 			if (game.PureClassic || index == -1) return;
 			
@@ -31,18 +38,17 @@ namespace ClassicalSharp.Network.Protocols {
 			string url = "http://" + host;
 			url = url.Replace("$U", game.Username);
 			
-			// NOTE: this (should, I did test this) ensure that if the user quickly changes to a
-			// different world, the environment settings from the last world are not loaded in the
-			// new world if the async 'get request' didn't complete before the new world was loaded.
+			// Ensure that if the user quickly changes to a different world, env settings from old world aren't
+			// applied in the new world if the async 'get env request' didn't complete before the old world was unloaded
 			womCounter++;
 			womEnvIdentifier = "womenv_" + womCounter;
-			game.AsyncDownloader.DownloadPage(url, true, womEnvIdentifier);
+			game.Downloader.AsyncGetString(url, true, womEnvIdentifier);
 			sendWomId = true;
 		}
 		
 		internal void CheckSendWomID() {
 			if (sendWomId && !sentWomId) {
-				net.SendChat("/womid WoMClient-2.0.7", false);
+				game.Chat.Send("/womid WoMClient-2.0.7", false);
 				sentWomId = true;
 			}
 		}
@@ -57,29 +63,29 @@ namespace ClassicalSharp.Network.Protocols {
 				string key = line.Substring(0, sepIndex).TrimEnd();
 				string value = line.Substring(sepIndex + 1).TrimStart();
 				
-				if (key == "environment.cloud") {
-					FastColour col = ParseWomColour(value, WorldEnv.DefaultCloudsColour);
-					game.World.Env.SetCloudsColour(col);
-				} else if (key == "environment.sky") {
-					FastColour col = ParseWomColour(value, WorldEnv.DefaultSkyColour);
-					game.World.Env.SetSkyColour(col);
-				} else if (key == "environment.fog") {
-					FastColour col = ParseWomColour(value, WorldEnv.DefaultFogColour);
-					game.World.Env.SetFogColour(col);
-				} else if (key == "environment.level") {
+				if (Utils.CaselessEq(key, "environment.cloud")) {
+					PackedCol col = ParseWomCol(value, WorldEnv.DefaultCloudsCol);
+					game.World.Env.SetCloudsCol(col);
+				} else if (Utils.CaselessEq(key, "environment.sky")) {
+					PackedCol col = ParseWomCol(value, WorldEnv.DefaultSkyCol);
+					game.World.Env.SetSkyCol(col);
+				} else if (Utils.CaselessEq(key, "environment.fog")) {
+					PackedCol col = ParseWomCol(value, WorldEnv.DefaultFogCol);
+					game.World.Env.SetFogCol(col);
+				} else if (Utils.CaselessEq(key, "environment.level")) {
 					int waterLevel = 0;
 					if (Int32.TryParse(value, out waterLevel))
 						game.World.Env.SetEdgeLevel(waterLevel);
-				} else if (key == "user.detail" && !net.cpeData.useMessageTypes) {
+				} else if (Utils.CaselessEq(key, "user.detail") && !net.cpeData.useMessageTypes) {
 					game.Chat.Add(value, MessageType.Status2);
 				}
 			}
 		}
 		
 		const int fullAlpha = 0xFF << 24;
-		static FastColour ParseWomColour(string value, FastColour defaultCol) {
+		static PackedCol ParseWomCol(string value, PackedCol defaultCol) {
 			int argb;
-			return Int32.TryParse(value, out argb) ? FastColour.Argb(argb | fullAlpha) : defaultCol;
+			return Int32.TryParse(value, out argb) ? PackedCol.Argb(argb | fullAlpha) : defaultCol;
 		}
 		
 		static string ReadLine(ref int start, string value) {

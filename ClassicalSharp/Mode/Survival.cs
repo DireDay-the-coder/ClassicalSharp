@@ -1,16 +1,14 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
+#if SURVIVAL_TEST
 using System;
 using ClassicalSharp.Entities;
 using ClassicalSharp.Entities.Mobs;
+using ClassicalSharp.Gui;
+using ClassicalSharp.Gui.Screens;
 using ClassicalSharp.Gui.Widgets;
 using OpenTK;
 using OpenTK.Input;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Mode {
 	
@@ -23,17 +21,38 @@ namespace ClassicalSharp.Mode {
 		
 		public SurvivalGameMode() { invCount[8] = 10; } // tnt
 		
-		public bool HandlesKeyDown(Key key) { return false; }
+		public bool HandlesKeyDown(Key key) { return false; }		
+		
+		public bool PickingLeft() {
+			// always play delete animations, even if we aren't picking a block.
+			game.HeldBlockRenderer.ClickAnim(true);
+			byte id = game.Entities.GetClosetPlayer(game.LocalPlayer);
+			return id != EntityList.SelfID && PickEntity(id);
+		}
+		
+		public bool PickingRight() {
+			if (game.Inventory.Selected == Block.RedMushroom) {
+				DepleteInventoryHeld();
+				game.LocalPlayer.Health -= 5;
+				CheckPlayerDied();
+				return true;
+			} else if (game.Inventory.Selected == Block.BrownMushroom) {
+				DepleteInventoryHeld();
+				game.LocalPlayer.Health += 5;
+				if (game.LocalPlayer.Health > 20) game.LocalPlayer.Health = 20;
+				return true;
+			}
+			return false; 
+		}
 
 		public void PickLeft(BlockID old) {
 			Vector3I pos = game.SelectedPos.BlockPos;
-			game.UpdateBlock(pos.X, pos.Y, pos.Z, 0);
-			game.UserEvents.RaiseBlockChanged(pos, old, 0);
+			game.UpdateBlock(pos.X, pos.Y, pos.Z, Block.Air);
+			Events.RaiseBlockChanged(pos, old, Block.Air);
 			HandleDelete(old);
 		}
 		
-		public void PickMiddle(BlockID old) {
-		}
+		public void PickMiddle(BlockID old) { }
 		
 		public void PickRight(BlockID old, BlockID block) {
 			int index = game.Inventory.SelectedIndex, offset = game.Inventory.Offset;
@@ -41,23 +60,29 @@ namespace ClassicalSharp.Mode {
 			
 			Vector3I pos = game.SelectedPos.TranslatedPos;
 			game.UpdateBlock(pos.X, pos.Y, pos.Z, block);
-			game.UserEvents.RaiseBlockChanged(pos, old, block);
-			
+			Events.RaiseBlockChanged(pos, old, block);
+			DepleteInventoryHeld();
+		}
+		
+		void DepleteInventoryHeld() {
+			int index = game.Inventory.SelectedIndex, offset = game.Inventory.Offset;
 			invCount[offset + index]--;
 			if (invCount[offset + index] != 0) return;
 			
 			// bypass HeldBlock's normal behaviour
 			game.Inventory[index] = Block.Air;
-			game.Events.RaiseHeldBlockChanged();
+			Events.RaiseHeldBlockChanged();
 		}
 		
-		public bool PickEntity(byte id) {
-			Entity entity = game.Entities[id];
-			Entity player = game.Entities[EntityList.SelfID];
+		bool PickEntity(byte id) {
+			Entity entity = game.Entities.List[id];
+			LocalPlayer p = game.LocalPlayer;
 			
-			Vector3 delta = player.Position - entity.Position;
+			Vector3 delta = p.Position - entity.Position;
+			if (delta.LengthSquared > p.ReachDistance * p.ReachDistance) return true;
+			
 			delta.Y = 0.0f;
-			delta = Vector3.Normalize(delta);
+			delta = Vector3.Normalize(delta) * 0.5f;
 			delta.Y = -0.5f;
 			
 			entity.Velocity -= delta;
@@ -66,7 +91,7 @@ namespace ClassicalSharp.Mode {
 			entity.Health -= 2;
 			if (entity.Health < 0) {
 				game.Entities.RemoveEntity(id);
-				score += GetScore(entity.ModelName);
+				score += entity.Model.SurivalScore;
 				UpdateScore();
 			}
 			return true;
@@ -120,9 +145,13 @@ namespace ClassicalSharp.Mode {
 		}
 
 		
-		public void OnNewMapLoaded(Game game) {
+		void IGameComponent.OnNewMapLoaded(Game game) {
 			UpdateScore();
+			wasOnGround = true;
+			showedDeathScreen = false;
+			game.LocalPlayer.Health = 20;
 			string[] models = { "sheep", "pig", "skeleton", "zombie", "creeper", "spider" };
+			
 			for (int i = 0; i < 254; i++) {
 				MobEntity fail = new MobEntity(game, models[rnd.Next(models.Length)]);
 				float x = rnd.Next(0, game.World.Width) + 0.5f;
@@ -130,27 +159,21 @@ namespace ClassicalSharp.Mode {
 				
 				Vector3 pos = Respawn.FindSpawnPosition(game, x, z, fail.Size);
 				fail.SetLocation(LocationUpdate.MakePos(pos, false), false);
-				game.Entities[i] = fail;
+				game.Entities.List[i] = fail;
 			}
 		}
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
+			ResetInventory();
+			game.Server.AppName += " (survival)";
+		}
+		
+		void ResetInventory() {
 			BlockID[] hotbar = game.Inventory.Hotbar;
 			for (int i = 0; i < hotbar.Length; i++)
 				hotbar[i] = Block.Air;
 			hotbar[Inventory.BlocksPerRow - 1] = Block.TNT;
-			game.Server.AppName += " (survival)";
-		}
-		
-		
-		int GetScore(string model) {
-			if (model == "sheep" || model == "pig") return 10;
-			if (model == "zombie") return 80;
-			if (model == "spider") return 105;
-			if (model == "skeleton") return 120;
-			if (model == "creeper") return 200;
-			return 5;
 		}
 		
 		void UpdateScore() {
@@ -158,9 +181,43 @@ namespace ClassicalSharp.Mode {
 		}
 		
 		
-		public void Ready(Game game) { }
-		public void Reset(Game game) { }
-		public void OnNewMap(Game game) { }
-		public void Dispose() { }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { }
+		void IGameComponent.OnNewMap(Game game) { }
+		void IDisposable.Dispose() { }
+		
+		public void BeginFrame(double delta) { }
+		
+		bool wasOnGround = true;
+		float fallY = -1000;
+		bool showedDeathScreen = false;
+		
+		public void EndFrame(double delta) {
+			LocalPlayer p = game.LocalPlayer;
+			if (p.onGround) {
+				if (wasOnGround) return;
+				short damage = (short)((fallY - p.interp.next.Pos.Y) - 3);
+				// TODO: shouldn't take damage when land in water or lava
+				// TODO: is the damage formula correct
+				if (damage > 0) p.Health -= damage;
+				fallY = -1000;
+			} else {
+				fallY = Math.Max(fallY, p.interp.prev.Pos.Y);
+			}
+			
+			wasOnGround = p.onGround;
+			CheckPlayerDied();
+		}
+		
+		void CheckPlayerDied() {
+			LocalPlayer p = game.LocalPlayer;
+			if (p.Health <= 0 && !showedDeathScreen) {
+				showedDeathScreen = true;
+				game.Gui.SetNewScreen(new DeathScreen(game));
+				// TODO: Should only reset inventory when actually click on 'load' or 'generate'
+				ResetInventory();
+			}
+		}
 	}
 }
+#endif

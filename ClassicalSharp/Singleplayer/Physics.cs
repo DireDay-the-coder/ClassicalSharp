@@ -2,26 +2,19 @@
 using System;
 using System.Collections.Generic;
 using ClassicalSharp.Map;
-using ClassicalSharp.Events;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
+using BlockRaw = System.Byte;
 
 namespace ClassicalSharp.Singleplayer {
+	
+	public delegate void PhysicsAction(int index, BlockRaw block);
 
 	public class PhysicsBase {
 		Game game;
 		World map;
 		Random rnd = new Random();
-		BlockInfo info;
 		int width, length, height, oneY;
-		
-		public const uint tickMask = 0xF8000000;
-		public const uint posMask =  0x07FFFFFF;
-		public const int tickShift = 27;
+
 		FallingPhysics falling;
 		TNTPhysics tnt;
 		FoliagePhysics foliage;
@@ -34,18 +27,17 @@ namespace ClassicalSharp.Singleplayer {
 			set { enabled = value; liquid.Clear(); }
 		}
 		
-		public Action<int, BlockID>[] OnActivate = new Action<int, BlockID>[Block.Count];
-		public Action<int, BlockID>[] OnRandomTick = new Action<int, BlockID>[Block.Count];
-		public Action<int, BlockID>[] OnPlace = new Action<int, BlockID>[Block.Count];
-		public Action<int, BlockID>[] OnDelete = new Action<int, BlockID>[Block.Count];
+		public PhysicsAction[] OnActivate = new PhysicsAction[Block.DefaultCount];
+		public PhysicsAction[] OnRandomTick = new PhysicsAction[Block.DefaultCount];
+		public PhysicsAction[] OnPlace = new PhysicsAction[Block.DefaultCount];
+		public PhysicsAction[] OnDelete = new PhysicsAction[Block.DefaultCount];
 		
 		public PhysicsBase(Game game) {
 			this.game = game;
 			map = game.World;
-			info = game.BlockInfo;
-			game.WorldEvents.OnNewMapLoaded += ResetMap;
-			game.UserEvents.BlockChanged += BlockChanged;
-			enabled = Options.GetBool(OptionsKey.SingleplayerPhysics, true);
+			Events.OnNewMapLoaded += ResetMap;
+			Events.BlockChanged   += BlockChanged;
+			enabled = Options.GetBool(OptionsKey.BlockPhysics, true);
 			
 			falling = new FallingPhysics(game, this);
 			tnt = new TNTPhysics(game, this);
@@ -54,22 +46,9 @@ namespace ClassicalSharp.Singleplayer {
 			other = new OtherPhysics(game, this);
 		}
 		
-		internal static bool CheckItem(Queue<uint> queue, out int posIndex) {
-			uint packed = queue.Dequeue();
-			int tickDelay = (int)((packed & tickMask) >> tickShift);
-			posIndex = (int)(packed & posMask);
-
-			if (tickDelay > 0) {
-				tickDelay--;
-				queue.Enqueue((uint)posIndex | ((uint)tickDelay << tickShift));
-				return false;
-			}
-			return true;
-		}
-		
 		int tickCount = 0;
 		public void Tick() {
-			if (!Enabled || game.World.IsNotLoaded) return;
+			if (!Enabled || !game.World.HasBlocks) return;
 			
 			//if ((tickCount % 5) == 0) {
 			liquid.TickLava();
@@ -79,23 +58,22 @@ namespace ClassicalSharp.Singleplayer {
 			TickRandomBlocks();
 		}
 		
-		void BlockChanged(object sender, BlockChangedEventArgs e) {
+		void BlockChanged(Vector3I p, BlockID old, BlockID now) {
 			if (!Enabled) return;
-			Vector3I p = e.Coords;
 			int index = (p.Y * length + p.Z) * width + p.X;
-			BlockID block = e.Block;
+			BlockRaw nowB = (BlockRaw)now, oldB = (BlockRaw)old;
 			
-			if (block == Block.Air && IsEdgeWater(p.X, p.Y, p.Z)) { 
-				block = Block.StillWater; 
+			if (nowB == Block.Air && IsEdgeWater(p.X, p.Y, p.Z)) { 
+				nowB = Block.StillWater; 
 				game.UpdateBlock(p.X, p.Y, p.Z, Block.StillWater);
 			}
 			
-			if (e.Block == 0) {
-				Action<int, BlockID> delete = OnDelete[e.OldBlock];
-				if (delete != null) delete(index, e.OldBlock);
+			if (nowB == Block.Air) {
+				PhysicsAction delete = OnDelete[oldB];
+				if (delete != null) delete(index, oldB);
 			} else {
-				Action<int, BlockID> place = OnPlace[block];
-				if (place != null) place(index, block);
+				PhysicsAction place = OnPlace[nowB];
+				if (place != null) place(index, nowB);
 			}
 			ActivateNeighbours(p.X, p.Y, p.Z, index);
 		}
@@ -103,17 +81,17 @@ namespace ClassicalSharp.Singleplayer {
 		/// <summary> Activates the direct neighbouring blocks of the given coordinates. </summary>
 		public void ActivateNeighbours(int x, int y, int z, int index) {
 			if (x > 0) Activate(index - 1);
-			if (x < map.Width - 1) Activate(index + 1);
+			if (x < map.MaxX) Activate(index + 1);
 			if (z > 0) Activate(index - map.Width);
-			if (z < map.Length - 1) Activate(index + map.Width);
+			if (z < map.MaxZ) Activate(index + map.Width);
 			if (y > 0) Activate(index - oneY);
-			if (y < map.Height - 1) Activate(index + oneY);
+			if (y < map.MaxY) Activate(index + oneY);
 		}
 		
 		/// <summary> Activates the block at the particular packed coordinates. </summary>
 		public void Activate(int index) {
-			BlockID block = map.blocks[index];
-			Action<int, BlockID> activate = OnActivate[block];
+			BlockRaw block = map.blocks[index];
+			PhysicsAction activate = OnActivate[block];
 			if (activate != null) activate(index, block);
 		}
 		
@@ -123,10 +101,10 @@ namespace ClassicalSharp.Singleplayer {
 				return false;
 			
 			return y >= env.SidesHeight && y < env.EdgeHeight 
-				&& (x == 0 || z == 0 || x == (map.Width - 1) || z == (map.Length - 1));
+				&& (x == 0 || z == 0 || x == map.MaxX || z == map.MaxZ);
 		}
 		
-		void ResetMap(object sender, EventArgs e) {
+		void ResetMap() {
 			falling.ResetMap();
 			liquid.ResetMap();
 			width = map.Width;
@@ -136,8 +114,8 @@ namespace ClassicalSharp.Singleplayer {
 		}
 		
 		public void Dispose() {
-			game.WorldEvents.OnNewMapLoaded -= ResetMap;
-			game.UserEvents.BlockChanged -= BlockChanged;
+			Events.OnNewMapLoaded -= ResetMap;
+			Events.BlockChanged   -= BlockChanged;
 		}
 		
 		void TickRandomBlocks() {
@@ -152,8 +130,8 @@ namespace ClassicalSharp.Singleplayer {
 				
 				// Inlined 3 random ticks for this chunk
 				int index = rnd.Next(lo, hi);
-				BlockID block = map.blocks[index];
-				Action<int, BlockID> tick = OnRandomTick[block];
+				BlockRaw block = map.blocks[index];
+				PhysicsAction tick = OnRandomTick[block];
 				if (tick != null) tick(index, block);
 				
 				index = rnd.Next(lo, hi);

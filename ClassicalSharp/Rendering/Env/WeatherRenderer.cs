@@ -1,25 +1,18 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
-using ClassicalSharp.Events;
 using ClassicalSharp.GraphicsAPI;
 using ClassicalSharp.Map;
 using OpenTK;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
+using BlockRaw = System.Byte;
 
 namespace ClassicalSharp.Renderers {
 
-	public class WeatherRenderer : IGameComponent {
+	public sealed class WeatherRenderer : IGameComponent {
 		Game game;
 		World map;
-		IGraphicsApi gfx;
-		BlockInfo info;
 		
-		public int RainTexId, SnowTexId;
+		int rainTexId, snowTexId;
 		int vb;
 		public short[] heightmap;
 		
@@ -28,24 +21,23 @@ namespace ClassicalSharp.Renderers {
 		double rainAcc;
 		Vector3I lastPos = new Vector3I(Int32.MinValue);
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
 			map = game.World;
-			gfx = game.Graphics;
-			info = game.BlockInfo;
-			game.Events.TextureChanged += TextureChanged;
+			Events.TextureChanged += TextureChanged;
 			
 			ContextRecreated();
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			Events.ContextLost += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 		}
 		
 		public void Render(double deltaTime) {
 			Weather weather = map.Env.Weather;
 			if (weather == Weather.Sunny) return;
 			if (heightmap == null) InitHeightmap();
+			IGraphicsApi gfx = game.Graphics;
 			
-			gfx.BindTexture(weather == Weather.Rainy ? RainTexId : SnowTexId);
+			gfx.BindTexture(weather == Weather.Rainy ? rainTexId : snowTexId);
 			Vector3 camPos = game.CurrentCameraPos;
 			Vector3I pos = Vector3I.Floor(camPos);
 			bool moved = pos != lastPos;
@@ -57,8 +49,8 @@ namespace ClassicalSharp.Renderers {
 			rainAcc += deltaTime;
 			bool particles = weather == Weather.Rainy;
 
-			int index = 0;
-			FastColour col = game.World.Env.Sunlight;
+			int vCount = 0;
+			PackedCol col = game.World.Env.Sun;
 			VertexP3fT2fC4b v = default(VertexP3fT2fC4b);
 			
 			for (int dx = -extent; dx <= extent; dx++)
@@ -77,38 +69,33 @@ namespace ClassicalSharp.Renderers {
 				col.A = (byte)alpha;
 				
 				// NOTE: Making vertex is inlined since this is called millions of times.
-				v.Colour = col.Pack();
+				v.Col = col;
 				float worldV = vOffset + (z & 1) / 2f - (x & 0x0F) / 16f;
 				float v1 = y / 6f + worldV, v2 = (y + height) / 6f + worldV;
+				float x1 = x,     y1 = y,          z1 = z;
+				float x2 = x + 1, y2 = y + height, z2 = z + 1;
 				
-				v.X = x; v.Y = y; v.Z = z; v.U = 0; v.V = v1; vertices[index++] = v;
-				// (x, y, z)                  (0, v1)
-				v.Y = y + height; v.V = v2; 				  vertices[index++] = v;
-				// (x, y + height, z)         (0, v2)
-				v.X = x + 1; v.Z = z + 1; v.U = 1; 			  vertices[index++] = v;
-				// (x + 1, y + height, z + 1) (1, v2)
-				v.Y = y; v.V = v1; 							  vertices[index++] = v;
-				// (x + 1, y, z + 1)          (1, v1)
+				v.X = x1; v.Y = y1; v.Z = z1; v.U = 0; v.V = v1; vertices[vCount++] = v;
+				          v.Y = y2;                    v.V = v2; vertices[vCount++] = v;
+				v.X = x2;           v.Z = z2; v.U = 1; 	         vertices[vCount++] = v;
+				          v.Y = y1;                    v.V = v1; vertices[vCount++] = v;
 				
-				v.Z = z;									  vertices[index++] = v;
-				// (x + 1, y, z)              (1, v1)
-				v.Y = y + height; v.V = v2; 				  vertices[index++] = v;
-				// (x + 1, y + height, z)     (1, v2)
-				v.X = x; v.Z = z + 1; v.U = 0;				  vertices[index++] = v;
-				// (x, y + height, z + 1)     (0, v2)
-				v.Y = y; v.V = v1; 							  vertices[index++] = v;
-				// (x y, z + 1)               (0, v1)
+				v.Z = z1;				  	 vertices[vCount++] = v;
+				          v.Y = y2;                    v.V = v2; vertices[vCount++] = v;
+				v.X = x1;           v.Z = z2; v.U = 0;		     vertices[vCount++] = v;
+				          v.Y = y1;                    v.V = v1; vertices[vCount++] = v;
 			}
-			if (particles && (rainAcc >= 0.25 || moved))
+			if (particles && (rainAcc >= 0.25 || moved)) {
 				rainAcc = 0;
-			if (index == 0) return;
+			}
+			if (vCount == 0) return;
 			
 			gfx.AlphaTest = false;
 			gfx.DepthWrite = false;
 			gfx.AlphaArgBlend = true;
 			
 			gfx.SetBatchFormat(VertexFormat.P3fT2fC4b);
-			gfx.UpdateDynamicIndexedVb(DrawMode.Triangles, vb, vertices, index);
+			gfx.UpdateDynamicVb_IndexedTris(vb, vertices, vCount);
 			
 			gfx.AlphaArgBlend = false;
 			gfx.AlphaTest = true;
@@ -122,36 +109,37 @@ namespace ClassicalSharp.Renderers {
 		}
 
 		int length, width, maxY, oneY;
-		public void Ready(Game game) { }
-		public void Reset(Game game) { OnNewMap(game); }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { OnNewMap(game); }
 		
 		public void OnNewMap(Game game) {
 			heightmap = null;
 			lastPos = new Vector3I(Int32.MaxValue);
 		}
 		
-		public void OnNewMapLoaded(Game game) {
+		void IGameComponent.OnNewMapLoaded(Game game) {
 			length = map.Length;
 			width = map.Width;
 			maxY = map.Height - 1;
 			oneY = length * width;
 		}
 		
-		void TextureChanged(object sender, TextureEventArgs e) {
-			if (e.Name == "snow.png")
-				game.UpdateTexture(ref SnowTexId, e.Name, e.Data, false);
-			else if (e.Name == "rain.png")
-				game.UpdateTexture(ref RainTexId, e.Name, e.Data, false);
+		void TextureChanged(string name, byte[] data) {
+			if (Utils.CaselessEq(name, "snow.png")) {
+				game.LoadTexture(ref snowTexId, name, data);
+			} else if (Utils.CaselessEq(name, "rain.png")) {
+				game.LoadTexture(ref rainTexId, name, data);
+			}
 		}
 		
-		public void Dispose() {
-			game.Graphics.DeleteTexture(ref RainTexId);
-			game.Graphics.DeleteTexture(ref SnowTexId);
+		void IDisposable.Dispose() {
+			game.Graphics.DeleteTexture(ref rainTexId);
+			game.Graphics.DeleteTexture(ref snowTexId);
 			ContextLost();
 			
-			game.Events.TextureChanged -= TextureChanged;
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;
+			Events.TextureChanged -= TextureChanged;
+			Events.ContextLost -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 		
 		void InitHeightmap() {
@@ -166,27 +154,39 @@ namespace ClassicalSharp.Renderers {
 			int index = (x * length) + z;
 			int height = heightmap[index];
 			int y = height == short.MaxValue ? CalcHeightAt(x, maxY, z, index) : height;
-			return y == -1 ? 0 :
-				y + game.BlockInfo.MaxBB[map.GetBlock(x, y, z)].Y;
+			return y == -1 ? 0 : y + BlockInfo.MaxBB[map.GetBlock(x, y, z)].Y;
 		}
 		
 		int CalcHeightAt(int x, int maxY, int z, int index) {
-			int mapIndex = (maxY * length + z) * width + x;
-			for (int y = maxY; y >= 0; y--) {
-				byte draw = info.Draw[map.blocks[mapIndex]];
-				if (!(draw == DrawType.Gas || draw == DrawType.Sprite)) {
-					heightmap[index] = (short)y;
-					return y;
+			int i = (maxY * length + z) * width + x;
+			BlockRaw[] blocks = map.blocks;
+			
+			if (BlockInfo.MaxUsed < 256) {
+				for (int y = maxY; y >= 0; y--, i -= oneY) {
+					byte draw = BlockInfo.Draw[blocks[i]];
+					if (!(draw == DrawType.Gas || draw == DrawType.Sprite)) {
+						heightmap[index] = (short)y;
+						return y;
+					}
 				}
-				mapIndex -= oneY;
-			}
+			} else {
+				BlockRaw[] blocks2 = game.World.blocks2;
+				for (int y = maxY; y >= 0; y--, i -= oneY) {
+					byte draw = BlockInfo.Draw[blocks[i] | (blocks2[i] << 8)];
+					if (!(draw == DrawType.Gas || draw == DrawType.Sprite)) {
+						heightmap[index] = (short)y;
+						return y;
+					}
+				}
+			}		
+			
 			heightmap[index] = -1;
 			return -1;
 		}
 		
 		internal void OnBlockChanged(int x, int y, int z, BlockID oldBlock, BlockID newBlock) {
-			bool didBlock = !(info.Draw[oldBlock] == DrawType.Gas || info.Draw[oldBlock] == DrawType.Sprite);
-			bool nowBlock =  !(info.Draw[newBlock] == DrawType.Gas || info.Draw[newBlock] == DrawType.Sprite);
+			bool didBlock = !(BlockInfo.Draw[oldBlock] == DrawType.Gas || BlockInfo.Draw[oldBlock] == DrawType.Sprite);
+			bool nowBlock = !(BlockInfo.Draw[newBlock] == DrawType.Gas || BlockInfo.Draw[newBlock] == DrawType.Sprite);
 			if (didBlock == nowBlock) return;
 			
 			int index = (x * length) + z;
@@ -209,7 +209,7 @@ namespace ClassicalSharp.Renderers {
 		void ContextLost() { game.Graphics.DeleteVb(ref vb); }
 		
 		void ContextRecreated() {
-			vb = gfx.CreateDynamicVb(VertexFormat.P3fT2fC4b, vertices.Length);
+			vb = game.Graphics.CreateDynamicVb(VertexFormat.P3fT2fC4b, vertices.Length);
 		}
 	}
 }

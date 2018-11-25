@@ -1,10 +1,11 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
+using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
 using ClassicalSharp.Entities;
 using ClassicalSharp.Network;
 using ClassicalSharp.Network.Protocols;
+using Ionic.Zlib;
 using OpenTK;
 using NbtCompound = System.Collections.Generic.Dictionary<string, ClassicalSharp.Map.NbtTag>;
 
@@ -18,11 +19,11 @@ namespace ClassicalSharp.Map {
 		World map;
 		
 		public byte[] Load(Stream stream, Game game, out int width, out int height, out int length) {
-			GZipHeaderReader gsHeader = new GZipHeaderReader();
-			while (!gsHeader.ReadHeader(stream)) { }
+			GZipHeaderReader gzHeader = new GZipHeaderReader();
+			while (!gzHeader.ReadHeader(stream)) { }
 			
-			using (DeflateStream gs = new DeflateStream(stream, CompressionMode.Decompress)) {
-				reader = new BinaryReader(gs);
+			using (DeflateStream s = new DeflateStream(stream)) {
+				reader = new BinaryReader(s);
 				if (reader.ReadByte() != (byte)NbtTagType.Compound)
 					throw new InvalidDataException("Nbt file must start with Tag_Compound");
 				this.game = game;
@@ -45,7 +46,7 @@ namespace ClassicalSharp.Map {
 					p.SpawnHeadX = (float)Utils.PackedToDegrees((byte)spawn["P"].Value);
 				
 				map.Uuid = new Guid((byte[])children["UUID"].Value);
-				width = (short)children["X"].Value;
+				width  = (short)children["X"].Value;
 				height = (short)children["Y"].Value;
 				length = (short)children["Z"].Value;
 				
@@ -69,19 +70,21 @@ namespace ClassicalSharp.Map {
 				p.ReachDistance = (short)curCpeExt["Distance"].Value / 32f;
 			}
 			if (CheckKey("EnvColors", 1, metadata)) {
-				map.Env.SetSkyColour(GetColour("Sky", WorldEnv.DefaultSkyColour));
-				map.Env.SetCloudsColour(GetColour("Cloud", WorldEnv.DefaultCloudsColour));
-				map.Env.SetFogColour(GetColour("Fog", WorldEnv.DefaultFogColour));
-				map.Env.SetSunlight(GetColour("Sunlight", WorldEnv.DefaultSunlight));
-				map.Env.SetShadowlight(GetColour("Ambient", WorldEnv.DefaultShadowlight));
+				map.Env.SetSkyCol(GetCol("Sky", WorldEnv.DefaultSkyCol));
+				map.Env.SetCloudsCol(GetCol("Cloud", WorldEnv.DefaultCloudsCol));
+				map.Env.SetFogCol(GetCol("Fog", WorldEnv.DefaultFogCol));
+				map.Env.SetSunCol(GetCol("Sunlight", WorldEnv.DefaultSunlight));
+				map.Env.SetShadowCol(GetCol("Ambient", WorldEnv.DefaultShadowlight));
 			}
 			if (CheckKey("EnvMapAppearance", 1, metadata)) {
 				string url = null;
 				if (curCpeExt.ContainsKey("TextureURL"))
 					url = (string)curCpeExt["TextureURL"].Value;
 				if (url.Length == 0) url = null;
-				if (game.AllowServerTextures && url != null)
+				
+				if (game.AllowServerTextures && url != null) {
 					game.Server.RetrieveTexturePack(url);
+				}
 				
 				byte sidesBlock = (byte)curCpeExt["SideBlock"].Value;
 				byte edgeBlock = (byte)curCpeExt["EdgeBlock"].Value;
@@ -95,7 +98,7 @@ namespace ClassicalSharp.Map {
 			}
 			
 			if (game.AllowCustomBlocks && CheckKey("BlockDefinitions", 1, metadata)) {
-				foreach (var pair in curCpeExt) {
+				foreach (KeyValuePair<string, NbtTag> pair in curCpeExt) {
 					if (pair.Value.TagId != NbtTagType.Compound) continue;
 					if (!Utils.CaselessStarts(pair.Key, "Block")) continue;
 					ParseBlockDefinition((NbtCompound)pair.Value.Value);
@@ -118,7 +121,7 @@ namespace ClassicalSharp.Map {
 			return false;
 		}
 		
-		FastColour GetColour(string key, FastColour def) {
+		PackedCol GetCol(string key, PackedCol def) {
 			NbtTag tag;
 			if (!curCpeExt.TryGetValue(key, out tag))
 				return def;
@@ -128,55 +131,51 @@ namespace ClassicalSharp.Map {
 			short g = (short)compound["G"].Value;
 			short b = (short)compound["B"].Value;
 			bool invalid = r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255;
-			return invalid ? def : new FastColour(r, g, b);
+			return invalid ? def : new PackedCol(r, g, b);
 		}
 		
 		void ParseBlockDefinition(NbtCompound compound) {
 			byte id = (byte)compound["ID"].Value;
-			BlockInfo info = game.BlockInfo;
-			info.Name[id] = (string)compound["Name"].Value;
-			info.SetCollide(id, (byte)compound["CollideType"].Value);
-			info.SpeedMultiplier[id] = (float)compound["Speed"].Value;
+			BlockInfo.Name[id] = (string)compound["Name"].Value;
+			BlockInfo.SetCollide(id, (byte)compound["CollideType"].Value);
+			BlockInfo.SpeedMultiplier[id] = (float)compound["Speed"].Value;
 			
 			byte[] data = (byte[])compound["Textures"].Value;
-			info.SetTex(data[0], Side.Top, id);
-			info.SetTex(data[1], Side.Bottom, id);
-			info.SetTex(data[2], Side.Left, id);
-			info.SetTex(data[3], Side.Right, id);
-			info.SetTex(data[4], Side.Front, id);
-			info.SetTex(data[5], Side.Back, id);
+			BlockInfo.SetTex(data[0], Side.Top, id);
+			BlockInfo.SetTex(data[1], Side.Bottom, id);
+			BlockInfo.SetTex(data[2], Side.Left, id);
+			BlockInfo.SetTex(data[3], Side.Right, id);
+			BlockInfo.SetTex(data[4], Side.Front, id);
+			BlockInfo.SetTex(data[5], Side.Back, id);
 			
-			info.BlocksLight[id] = (byte)compound["TransmitsLight"].Value == 0;
-			byte soundId = (byte)compound["WalkSound"].Value;
-			info.DigSounds[id] = CPEProtocolBlockDefs.breakSnds[soundId];
-			info.StepSounds[id] = CPEProtocolBlockDefs.stepSnds[soundId];
-			info.FullBright[id] = (byte)compound["FullBright"].Value != 0;
+			BlockInfo.BlocksLight[id] = (byte)compound["TransmitsLight"].Value == 0;
+			byte sound = (byte)compound["WalkSound"].Value;
+			BlockInfo.DigSounds[id]  = sound;
+			BlockInfo.StepSounds[id] = sound;
+			if (sound == SoundType.Glass) BlockInfo.StepSounds[id] = SoundType.Stone;
+			BlockInfo.FullBright[id] = (byte)compound["FullBright"].Value != 0;
 			
 			byte blockDraw = (byte)compound["BlockDraw"].Value;
-			if ((byte)compound["Shape"].Value == 0)
+			if ((byte)compound["Shape"].Value == 0) {
+				BlockInfo.SpriteOffset[id] = blockDraw;
 				blockDraw = DrawType.Sprite;
+			}
+			BlockInfo.Draw[id] = blockDraw;
 			
 			data = (byte[])compound["Fog"].Value;
-			info.FogDensity[id] = (data[0] + 1) / 128f;
+			BlockInfo.FogDensity[id] = (data[0] + 1) / 128f;
 			// Fix for older ClassicalSharp versions which saved wrong fog density value
-			if (data[0] == 0xFF) info.FogDensity[id] = 0;
-			info.FogColour[id] = new FastColour(data[1], data[2], data[3]);
+			if (data[0] == 0xFF) BlockInfo.FogDensity[id] = 0;
+			BlockInfo.FogCol[id] = new PackedCol(data[1], data[2], data[3]);
 
 			data = (byte[])compound["Coords"].Value;
-			info.MinBB[id] = new Vector3(data[0] / 16f, data[1] / 16f, data[2] / 16f);
-			info.MaxBB[id] = new Vector3(data[3] / 16f, data[4] / 16f, data[5] / 16f);
+			BlockInfo.MinBB[id] = new Vector3(data[0] / 16f, data[1] / 16f, data[2] / 16f);
+			BlockInfo.MaxBB[id] = new Vector3(data[3] / 16f, data[4] / 16f, data[5] / 16f);
 			
-			info.SetBlockDraw(id, blockDraw);
-			info.CalcRenderBounds(id);
-			info.UpdateCulling(id);
-			
-			info.LightOffset[id] = info.CalcLightOffset(id);
-			game.Events.RaiseBlockDefinitionChanged();
-			info.DefinedCustomBlocks[id >> 5] |= (1u << (id & 0x1F));
-			
-			game.Inventory.CanPlace.SetNotOverridable(true, id);
-			game.Inventory.CanDelete.SetNotOverridable(true, id);
-			game.Events.RaiseBlockPermissionsChanged();
+			BlockInfo.DefineCustom(game, id);
+			BlockInfo.CanPlace[id] = true;
+			BlockInfo.CanDelete[id] = true;
+			Events.RaiseBlockPermissionsChanged();
 		}
 	}
 }

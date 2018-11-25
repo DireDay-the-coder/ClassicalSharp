@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
-using ClassicalSharp.Events;
 using ClassicalSharp.GraphicsAPI;
 #if ANDROID
 using Android.Graphics;
@@ -15,41 +14,39 @@ namespace ClassicalSharp.Textures {
 	public class Animations : IGameComponent {
 		
 		Game game;
-		IGraphicsApi gfx;
 		Bitmap animBmp;
 		FastBitmap animsBuffer;
 		List<AnimationData> animations = new List<AnimationData>();
 		bool validated = false, useLavaAnim = false, useWaterAnim = false;
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
-			gfx = game.Graphics;
-			game.Events.TexturePackChanged += TexturePackChanged;
-			game.Events.TextureChanged += TextureChanged;
+			Events.TexturePackChanged += TexturePackChanged;
+			Events.TextureChanged     += TextureChanged;
 		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { }
-		public void OnNewMap(Game game) { }
-		public void OnNewMapLoaded(Game game) { }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { }
+		void IGameComponent.OnNewMap(Game game) { }
+		void IGameComponent.OnNewMapLoaded(Game game) { }
 		
-		void TexturePackChanged(object sender, EventArgs e) {
+		void TexturePackChanged() {
 			Clear();
 			useLavaAnim = IsDefaultZip();
 			useWaterAnim = useLavaAnim;
 		}
 		
-		void TextureChanged(object sender, TextureEventArgs e) {
-			if (e.Name == "animations.png" || e.Name == "animation.png") {
-				animBmp = Platform.ReadBmp32Bpp(game.Drawer2D, e.Data);
+		void TextureChanged(string name, byte[] data) {
+			if (Utils.CaselessEq(name, "animations.png")) {
+				animBmp = Platform.ReadBmp(game.Drawer2D, data);
 				animsBuffer = new FastBitmap(animBmp, true, true);
-			} else if (e.Name == "animations.txt" || e.Name == "animation.txt") {
-				MemoryStream stream = new MemoryStream(e.Data);
-				StreamReader reader = new StreamReader(stream);
+			} else if (Utils.CaselessEq(name, "animations.txt")) {
+				MemoryStream stream = new MemoryStream(data);
+				StreamReader reader = new StreamReader(stream, false);
 				ReadAnimationsDescription(reader);
-			} else if (e.Name == "uselavaanim") {
+			} else if (Utils.CaselessEq(name, "uselavaanim")) {
 				useLavaAnim = true;
-			} else if (e.Name == "usewateranim") {
+			} else if (Utils.CaselessEq(name, "usewateranim")) {
 				useWaterAnim = true;
 			}
 		}
@@ -57,15 +54,15 @@ namespace ClassicalSharp.Textures {
 		/// <summary> Runs through all animations and if necessary updates the terrain atlas. </summary>
 		public void Tick(ScheduledTask task) {
 			if (useLavaAnim) {
-				int size = Math.Min(game.TerrainAtlas.TileSize, 64);
+				int size = Math.Min(Atlas2D.TileSize, 64);
 				DrawAnimation(null, 30, size);
-			}			
+			}
 			if (useWaterAnim) {
-				int size = Math.Min(game.TerrainAtlas.TileSize, 64);
+				int size = Math.Min(Atlas2D.TileSize, 64);
 				DrawAnimation(null, 14, size);
 			}
 			
-			if (animations.Count == 0) return;			
+			if (animations.Count == 0) return;
 			if (animsBuffer == null) {
 				game.Chat.Add("&cCurrent texture pack specifies it uses animations,");
 				game.Chat.Add("&cbut is missing animations.png");
@@ -78,36 +75,32 @@ namespace ClassicalSharp.Textures {
 				ApplyAnimation(animations[i]);
 		}
 		
-		/// <summary> Reads a text file that contains a number of lines, with each line describing:<br/>
-		/// 1) the target tile in the terrain atlas  2) the start location of animation frames<br/>
-		/// 3) the size of each animation frame      4) the number of animation frames<br/>
-		/// 5) the delay between advancing animation frames. </summary>
-		public void ReadAnimationsDescription(StreamReader reader) {
+		void ReadAnimationsDescription(StreamReader reader) {
 			string line;
 			while ((line = reader.ReadLine()) != null) {
 				if (line.Length == 0 || line[0] == '#') continue;
 				
 				string[] parts = line.Split(' ');
 				if (parts.Length < 7) {
-					Utils.LogDebug("Not enough arguments for animation: {0}", line); continue;
+					game.Chat.Add("&cNot enough arguments for animation: " + line); continue;
 				}
 				
 				byte tileX, tileY;
 				if (!Byte.TryParse(parts[0], out tileX) || !Byte.TryParse(parts[1], out tileY)
-				   || tileX >= 16 || tileY >= 16) {
-					Utils.LogDebug("Invalid animation tile coordinates: {0}", line); continue;
+				   || tileX >= Atlas2D.TilesPerRow || tileY >= Atlas2D.MaxRowsCount) {
+					game.Chat.Add("&cInvalid animation tile coords: " + line); continue;
 				}
 				
 				int frameX, frameY;
 				if (!Int32.TryParse(parts[2], out frameX) || !Int32.TryParse(parts[3], out frameY)
 				   || frameX < 0 || frameY < 0) {
-					Utils.LogDebug("Invalid animation coordinates: {0}", line); continue;
+					game.Chat.Add("&cInvalid animation coords: " + line); continue;
 				}
 				
 				int frameSize, statesCount, tickDelay;
 				if (!Int32.TryParse(parts[4], out frameSize) || !Int32.TryParse(parts[5], out statesCount) ||
 				   !Int32.TryParse(parts[6], out tickDelay) || frameSize < 0 || statesCount < 0 || tickDelay < 0) {
-					Utils.LogDebug("Invalid animation: {0}", line); continue;
+					game.Chat.Add("&cInvalid animation: " + line); continue;
 				}
 				
 				DefineAnimation(tileX, tileY, frameX, frameY, frameSize, statesCount, tickDelay);
@@ -116,10 +109,9 @@ namespace ClassicalSharp.Textures {
 		
 		/// <summary> Adds an animation described by the arguments to the list of animations
 		/// that are applied to the terrain atlas. </summary>
-		public void DefineAnimation(int tileX, int tileY, int frameX, int frameY, int frameSize,
-		                            int statesNum, int tickDelay) {
+		void DefineAnimation(int tileX, int tileY, int frameX, int frameY, int frameSize, int statesNum, int tickDelay) {
 			AnimationData data = new AnimationData();
-			data.TileX = tileX; data.TileY = tileY;
+			data.TexLoc = tileY * Atlas2D.TilesPerRow + tileX;
 			data.FrameX = frameX; data.FrameY = frameY;
 			data.FrameSize = frameSize; data.StatesCount = statesNum;
 			
@@ -137,41 +129,52 @@ namespace ClassicalSharp.Textures {
 			data.State %= data.StatesCount;
 			data.Tick = data.TickDelay;
 			
-			int texId = (data.TileY << 4) | data.TileX;
-			if (texId == 30 && useLavaAnim) return;
-			if (texId == 14 && useWaterAnim) return;
-			DrawAnimation(data, texId, data.FrameSize);
+			int texLoc = data.TexLoc;
+			if (texLoc == 30 && useLavaAnim)  return;
+			if (texLoc == 14 && useWaterAnim) return;
+			DrawAnimation(data, texLoc, data.FrameSize);
 		}
 		
-		unsafe void DrawAnimation(AnimationData data, int texId, int size) {
-			TerrainAtlas1D atlas = game.TerrainAtlas1D;			
-			int index = atlas.Get1DIndex(texId);
-			int rowNum = atlas.Get1DRowId(texId);			
-			byte* temp = stackalloc byte[size * size * 4];
+		unsafe void DrawAnimation(AnimationData data, int texLoc, int size) {
+			if (size <= 128) {
+				byte* temp = stackalloc byte[size * size * 4];
+				DrawAnimationCore(data, texLoc, size, temp);
+			} else {
+				// cannot allocate memory on the stack for very big animation.png frames
+				byte[] temp = new byte[size * size * 4];
+				fixed (byte* ptr = temp) {
+					DrawAnimationCore(data, texLoc, size, ptr);
+				}
+			}
+		}
+		
+		unsafe void DrawAnimationCore(AnimationData data, int texLoc, int size, byte* temp) {
+			int index_1D = Atlas1D.Get1DIndex(texLoc);
+			int rowId_1D = Atlas1D.Get1DRowId(texLoc);
 			animPart.SetData(size, size, size * 4, (IntPtr)temp, false);
 			
 			if (data == null) {
-				if (texId == 30) {
+				if (texLoc == 30) {
 					lavaAnim.Tick((int*)temp, size);
-				} else if (texId == 14) {
+				} else if (texLoc == 14) {
 					waterAnim.Tick((int*)temp, size);
 				}
 			} else {
 				FastBitmap.MovePortion(data.FrameX + data.State * size, 
 				                       data.FrameY, 0, 0, animsBuffer, animPart, size);
 			}
-			gfx.UpdateTexturePart(atlas.TexIds[index], 0, rowNum * game.TerrainAtlas.TileSize, animPart);
+			
+			int dstY = rowId_1D * Atlas2D.TileSize;
+			game.Graphics.UpdateTexturePart(Atlas1D.TexIds[index_1D], 0, dstY, animPart, game.Graphics.Mipmaps);
 		}
 		
 		bool IsDefaultZip() {
 			if (game.World.TextureUrl != null) return false;
-			string texPack = Options.Get(OptionsKey.DefaultTexturePack);
-			return texPack == null || texPack == "default.zip";
+			string texPack = Options.Get(OptionsKey.DefaultTexturePack, "default.zip");
+			return Utils.CaselessEq(texPack, "default.zip");
 		}
 		
-		/// <summary> Disposes the atlas bitmap that contains animation frames, and clears
-		/// the list of defined animations. </summary>
-		public void Clear() {
+		void Clear() {
 			animations.Clear();
 			
 			if (animBmp == null) return;
@@ -180,14 +183,14 @@ namespace ClassicalSharp.Textures {
 			validated = false;
 		}
 		
-		public void Dispose() {
+		void IDisposable.Dispose() {
 			Clear();
-			game.Events.TextureChanged -= TextureChanged;
-			game.Events.TexturePackChanged -= TexturePackChanged;
+			Events.TextureChanged     -= TextureChanged;
+			Events.TexturePackChanged -= TexturePackChanged;
 		}
 		
 		class AnimationData {
-			public int TileX, TileY; // Tile (not pixel) coordinates in terrain.png
+			public int TexLoc;     // Tile (not pixel) coordinates in terrain.png
 			public int FrameX, FrameY; // Top left pixel coordinates of start frame in animatons.png
 			public int FrameSize; // Size of each frame in pixel coordinates
 			public int State; // Current animation frame index
@@ -195,18 +198,24 @@ namespace ClassicalSharp.Textures {
 			public int Tick, TickDelay;
 		}
 		
-		const string format = "&cOne of the animation frames for tile ({0}, {1}) " +
-			"is at coordinates outside animations.png";
+		const string format = "&cSome of the animation frames for tile ({0}, {1}) are at coordinates outside animations.png";
+		const string terrainFormat = "&cAnimation frames for tile ({0}, {1}) are bigger than the size of a tile in terrain.png";
 		void ValidateAnimations() {
 			validated = true;
 			for (int i = animations.Count - 1; i >= 0; i--) {
 				AnimationData a = animations[i];
+				int tileX = a.TexLoc % Atlas2D.TilesPerRow, tileY = a.TexLoc / Atlas2D.TilesPerRow;
 				int maxY = a.FrameY + a.FrameSize;
 				int maxX = a.FrameX + a.FrameSize * a.StatesCount;
-				if (maxX <= animsBuffer.Width && maxY <= animsBuffer.Height)
-					continue;
 				
-				game.Chat.Add(String.Format(format, a.TileX, a.TileY));
+				if (a.FrameSize > Atlas2D.TileSize || tileY >= Atlas2D.RowsCount) {
+					game.Chat.Add(String.Format(terrainFormat, tileX, tileY));
+				} else if (maxX > animsBuffer.Width || maxY > animsBuffer.Height) {
+					game.Chat.Add(String.Format(format, tileX, tileY));
+				} else {
+					continue;
+				}
+				
 				animations.RemoveAt(i);
 			}
 		}

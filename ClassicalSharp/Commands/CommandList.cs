@@ -4,44 +4,47 @@ using System.Collections.Generic;
 
 namespace ClassicalSharp.Commands {
 	
+	/// <summary> Represents a client side action that optionally accepts arguments. </summary>
+	public abstract class Command {
+		public string Name;
+		public string[] Help;
+		public bool SingleplayerOnly;
+		protected internal Game game;
+		
+		public abstract void Execute(string[] args);
+	}
+	
 	public class CommandList : IGameComponent {
 		
-		const string prefix = "/client";
+		const string prefix = "/client", prefixSpace = "/client ";
 		public bool IsCommandPrefix(string input) {
 			if (game.Server.IsSinglePlayer && Utils.CaselessStarts(input, "/"))
 				return true;
 			
-			return Utils.CaselessStarts(input, prefix + " ")
-				|| Utils.CaselessEquals(input, prefix);
+			return Utils.CaselessStarts(input, prefixSpace)
+				|| Utils.CaselessEq(input, prefix);
 		}
 		
 		protected Game game;
 		public List<Command> RegisteredCommands = new List<Command>();
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
-			Register(new CommandsCommand());
 			Register(new GpuInfoCommand());
 			Register(new HelpCommand());
 			Register(new RenderTypeCommand());
-			
-			if (!game.Server.IsSinglePlayer) return;
+			Register(new ResolutionCommand());
 			Register(new ModelCommand());
 			Register(new CuboidCommand());
 			Register(new TeleportCommand());
 		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { }
-		public void OnNewMap(Game game) { }
-		public void OnNewMapLoaded(Game game) { }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { }
+		void IGameComponent.OnNewMap(Game game) { }
+		void IGameComponent.OnNewMapLoaded(Game game) { }
 		
 		public void Register(Command command) {
 			command.game = game;
-			for (int i = 0; i < RegisteredCommands.Count; i++) {
-				Command cmd = RegisteredCommands[i];
-				if (Utils.CaselessEquals(cmd.Name, command.Name))
-					throw new InvalidOperationException("Another command already has name : " + command.Name);
-			}
 			RegisteredCommands.Add(command);
 		}
 		
@@ -58,15 +61,24 @@ namespace ClassicalSharp.Commands {
 				match = cmd;
 			}
 			
-			if (match == null)
+			if (match == null) {
 				game.Chat.Add("&e/client: Unrecognised command: \"&f" + cmdName + "&e\".");
+				game.Chat.Add("&e/client: Type &a/client &efor a list of commands.");
+				return null;
+			}
+			if (match.SingleplayerOnly && !game.Server.IsSinglePlayer) {
+				game.Chat.Add("&e/client: \"&f" + cmdName + "&e\" can only be used in singleplayer.");
+				return null;
+			}
 			return match;
 		}
 		
-		static char[] splitChar = { ' ' };
+		static char[] splitChar = new char[] { ' ' };
 		public void Execute(string text) {
-			if (Utils.CaselessStarts(text, prefix)) { // /client command args
-				text = text.Substring(prefix.Length).TrimStart(splitChar);
+			if (Utils.CaselessStarts(text, prefixSpace)) { // /client command args
+				text = text.Substring(prefixSpace.Length);
+			} else if (Utils.CaselessStarts(text, prefix)) { // /clientcommand args
+				text = text.Substring(prefix.Length);
 			} else { // /command args
 				text = text.Substring(1);
 			}
@@ -74,7 +86,7 @@ namespace ClassicalSharp.Commands {
 			if (text.Length == 0) { // only / or /client
 				game.Chat.Add("&eList of client commands:");
 				PrintDefinedCommands(game);
-				game.Chat.Add("&eTo see a particular command's help, type /client help [cmd name]");
+				game.Chat.Add("&eTo see help for a command, type &a/client help [cmd name]");
 				return;
 			}
 			
@@ -86,7 +98,6 @@ namespace ClassicalSharp.Commands {
 		
 		public void PrintDefinedCommands(Game game) {
 			StringBuffer sb = new StringBuffer(Utils.StringLength);
-			int index = 0;
 			
 			for (int i = 0; i < RegisteredCommands.Count; i++) {
 				Command cmd = RegisteredCommands[i];
@@ -95,17 +106,16 @@ namespace ClassicalSharp.Commands {
 				if ((sb.Length + name.Length + 2) > sb.Capacity) {
 					game.Chat.Add(sb.ToString());
 					sb.Clear();
-					index = 0;
 				}
-				sb.Append(ref index, name);
-				sb.Append(ref index, ", ");
+				sb.Append(name);
+				sb.Append(", ");
 			}
 			
 			if (sb.Length > 0)
 				game.Chat.Add(sb.ToString());
 		}
 		
-		public void Dispose() {
+		void IDisposable.Dispose() {
 			RegisteredCommands.Clear();
 		}
 	}

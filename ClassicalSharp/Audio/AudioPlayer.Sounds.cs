@@ -1,9 +1,8 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using System.Threading;
-using ClassicalSharp.Events;
 using SharpWave;
-using SharpWave.Codecs;
+using BlockID = System.UInt16;
 
 namespace ClassicalSharp.Audio {
 	
@@ -12,11 +11,9 @@ namespace ClassicalSharp.Audio {
 		Soundboard digBoard, stepBoard;
 		const int maxSounds = 6;
 		
-		public void SetSound(bool enabled) {
-			if (enabled)
-				InitSound();
-			else
-				DisposeSound();
+		public void SetSounds(int volume) {
+			if (volume > 0) InitSound();
+			else DisposeSound();
 		}
 		
 		void InitSound() {
@@ -32,82 +29,76 @@ namespace ClassicalSharp.Audio {
 			stepBoard.Init("step_", files);
 		}
 
-		void PlayBlockSound(object sender, BlockChangedEventArgs e) {
-			if (e.Block == 0)
-				PlayDigSound(game.BlockInfo.DigSounds[e.OldBlock]);
-			else
-				PlayDigSound(game.BlockInfo.StepSounds[e.Block]);
+		void PlayBlockSound(Vector3I coords, BlockID old, BlockID now) {
+			if (now == Block.Air) {
+				PlayDigSound(BlockInfo.DigSounds[old]);
+			} else if (!game.ClassicMode) {
+				PlayDigSound(BlockInfo.StepSounds[now]);
+			}
 		}
 		
-		public void PlayDigSound(SoundType type) { PlaySound(type, digBoard); }
+		public void PlayDigSound(byte type) { PlaySound(type, digBoard); }
 		
-		public void PlayStepSound(SoundType type) { PlaySound(type, stepBoard); }
+		public void PlayStepSound(byte type) { PlaySound(type, stepBoard); }
 		
+		AudioFormat format;
 		AudioChunk chunk = new AudioChunk();
-		void PlaySound(SoundType type, Soundboard board) {
-			if (type == SoundType.None || monoOutputs == null)
-				return;
+		void PlaySound(byte type, Soundboard board) {
+			if (type == SoundType.None || monoOutputs == null) return;
 			Sound snd = board.PickRandomSound(type);
 			if (snd == null) return;
 			
-			chunk.Channels = snd.Channels;
-			chunk.BitsPerSample = snd.BitsPerSample;
-			chunk.BytesOffset = 0;
-			chunk.BytesUsed = snd.Data.Length;
+			format = snd.Format;
 			chunk.Data = snd.Data;
+			chunk.Length = snd.Data.Length;
+			
+			float volume = game.SoundsVolume / 100.0f;
 			if (board == digBoard) {
-				if (type == SoundType.Metal) chunk.SampleRate = (snd.SampleRate * 6) / 5;
-				else chunk.SampleRate = (snd.SampleRate * 4) / 5;
+				if (type == SoundType.Metal) format.SampleRate = (format.SampleRate * 6) / 5;
+				else format.SampleRate = (format.SampleRate * 4) / 5;
 			} else {
-				if (type == SoundType.Metal) chunk.SampleRate = (snd.SampleRate * 7) / 5;
-				else chunk.SampleRate = snd.SampleRate;
+				volume *= 0.50f;
+				if (type == SoundType.Metal) format.SampleRate = (format.SampleRate * 7) / 5;
 			}
 			
-			if (snd.Channels == 1) {
-				PlayCurrentSound(monoOutputs);
-			} else if (snd.Channels == 2) {
-				PlayCurrentSound(stereoOutputs);
+			if (format.Channels == 1) {
+				PlayCurrentSound(monoOutputs, volume);
+			} else if (format.Channels == 2) {
+				PlayCurrentSound(stereoOutputs, volume);
 			}
 		}
 		
-		IAudioOutput firstSoundOut;
-		void PlayCurrentSound(IAudioOutput[] outputs) {
-			for (int i = 0; i < monoOutputs.Length; i++) {
+		void PlayCurrentSound(IAudioOutput[] outputs, float volume) {
+			for (int i = 0; i < outputs.Length; i++) {
 				IAudioOutput output = outputs[i];
-				if (output == null) output = MakeSoundOutput(outputs, i);
-				if (!output.DoneRawAsync()) continue;
+				if (output == null) {
+					output = MakeOutput(1);
+					outputs[i] = output;
+				} else {
+					if (!output.IsFinished()) continue;
+				}
 				
-				LastChunk l = output.Last;
-				if (l.Channels == 0 || (l.Channels == chunk.Channels && l.BitsPerSample == chunk.BitsPerSample 
-				                        && l.SampleRate == chunk.SampleRate)) {
-					PlaySound(output); return;
+				AudioFormat fmt = output.Format;
+				if (fmt.Channels == 0 || fmt.Equals(format)) {
+					PlaySound(output, volume); return;
 				}
 			}
 			
 			// This time we try to play the sound on all possible devices,
 			// even if it requires the expensive case of recreating a device
-			for (int i = 0; i < monoOutputs.Length; i++) {
+			for (int i = 0; i < outputs.Length; i++) {
 				IAudioOutput output = outputs[i];
-				if (!output.DoneRawAsync()) continue;
+				if (!output.IsFinished()) continue;
 				
-				PlaySound(output); return;
+				PlaySound(output, volume); return;
 			}
 		}
 		
-		
-		IAudioOutput MakeSoundOutput(IAudioOutput[] outputs, int i) {
-			IAudioOutput output = GetPlatformOut();
-			output.Create(1, firstSoundOut);
-			if (firstSoundOut == null)
-				firstSoundOut = output;
-			
-			outputs[i] = output;
-			return output;
-		}
-		
-		void PlaySound(IAudioOutput output) {
+		void PlaySound(IAudioOutput output, float volume) {
 			try {
-				output.PlayRawAsync(chunk);
+				output.SetVolume(volume);
+				output.SetFormat(format);
+				output.PlayData(0, chunk);
 			} catch (InvalidOperationException ex) {
 				ErrorHandler.LogError("AudioPlayer.PlayCurrentSound()", ex);
 				if (ex.Message == "No audio devices found")
@@ -115,36 +106,24 @@ namespace ClassicalSharp.Audio {
 				else
 					game.Chat.Add("&cAn error occured when trying to play sounds, disabling sounds.");
 				
-				SetSound(false);
-				game.UseSound = false;
+				SetSounds(0);
+				game.SoundsVolume = 0;
 			}
 		}
 		
 		void DisposeSound() {
 			DisposeOutputs(ref monoOutputs);
 			DisposeOutputs(ref stereoOutputs);
-			if (firstSoundOut != null) {
-				firstSoundOut.Dispose();
-				firstSoundOut = null;
-			}
 		}
 		
 		void DisposeOutputs(ref IAudioOutput[] outputs) {
 			if (outputs == null) return;
-			bool soundPlaying = true;
-			
-			while (soundPlaying) {
-				soundPlaying = false;
-				for (int i = 0; i < outputs.Length; i++) {
-					if (outputs[i] == null) continue;
-					soundPlaying |= !outputs[i].DoneRawAsync();
-				}
-				if (soundPlaying)
-					Thread.Sleep(1);
-			}
-			
+
 			for (int i = 0; i < outputs.Length; i++) {
-				if (outputs[i] == null || outputs[i] == firstSoundOut) continue;
+				if (outputs[i] == null) continue;
+				
+				outputs[i].Stop();
+				outputs[i].IsFinished(); // unqueue buffers
 				outputs[i].Dispose();
 			}
 			outputs = null;

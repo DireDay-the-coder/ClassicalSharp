@@ -7,30 +7,41 @@ using System.Text;
 namespace ClassicalSharp.Textures {
 
 	public struct ZipEntry {
-		public int CompressedDataSize, UncompressedDataSize;
-		public int LocalHeaderOffset, CentralHeaderOffset;
+		public int CompressedDataSize;
+		public int UncompressedDataSize;
+		public int LocalHeaderOffset;
 		public uint Crc32;
-		public string Filename;
+		public string Path;
 	}
+	
+	public delegate void ZipEntryProcessor(string path, byte[] data, ZipEntry entry);	
+	public delegate bool ZipEntrySelector(string path);	
 	
 	/// <summary> Extracts files from a stream that represents a .zip file. </summary>
 	public sealed class ZipReader {
 		
-		public Action<string, byte[], ZipEntry> ProcessZipEntry;
-		public Func<string, bool> ShouldProcessZipEntry;
+		public ZipEntryProcessor ProcessZipEntry;
+		public ZipEntrySelector SelectZipEntry;
 		public ZipEntry[] entries;
 		int index;
 		
 		static Encoding enc = Encoding.ASCII;
 		public void Extract(Stream stream) {
-			
 			BinaryReader reader = new BinaryReader(stream);
-			reader.BaseStream.Seek(-22, SeekOrigin.End);
-			uint sig = reader.ReadUInt32();
+			uint sig = 0;
+			
+			// At -22 for nearly all zips, but try a bit further back in case of comment
+			int len = Math.Min(257, (int)stream.Length);
+			for (int i = 22; i < len; i++) {
+				stream.Seek(-i, SeekOrigin.End);
+				sig = reader.ReadUInt32();
+				if (sig == 0x06054b50) break;
+			}			
 			if (sig != 0x06054b50) {
-				Utils.LogDebug("Comment in .zip file must be empty");
+				Utils.LogDebug("Failed to find end of central directory header");
 				return;
 			}
+			
 			int entriesCount, centralDirectoryOffset;
 			ReadEndOfCentralDirectory(reader, out entriesCount, out centralDirectoryOffset);
 			entries = new ZipEntry[entriesCount];
@@ -44,7 +55,8 @@ namespace ClassicalSharp.Textures {
 				} else if (sig == 0x06054b50) {
 					break;
 				} else {
-					throw new NotSupportedException("Unsupported signature: " + sig.ToString("X8"));
+					Utils.LogDebug("Unsupported signature: " + sig.ToString("X8"));
+					return;
 				}
 			}
 			
@@ -53,8 +65,11 @@ namespace ClassicalSharp.Textures {
 				ZipEntry entry = entries[i];
 				reader.BaseStream.Seek(entry.LocalHeaderOffset, SeekOrigin.Begin);
 				sig = reader.ReadUInt32();
-				if (sig != 0x04034b50)
-					throw new NotSupportedException("Unsupported signature: " + sig.ToString("X8"));
+				
+				if (sig != 0x04034b50) {
+					Utils.LogDebug(entry.Path + " is an invalid entry");
+					continue;
+				}
 				ReadLocalFileHeader(reader, entry);
 			}
 			entries = null;
@@ -62,69 +77,65 @@ namespace ClassicalSharp.Textures {
 		}
 		
 		void ReadLocalFileHeader(BinaryReader reader, ZipEntry entry) {
-			ushort versionNeeded = reader.ReadUInt16();
-			ushort flags = reader.ReadUInt16();
+			reader.ReadUInt16(); // version needed
+			reader.ReadUInt16(); // flags
 			ushort compressionMethod = reader.ReadUInt16();
 			reader.ReadUInt32(); // last modified
-			reader.ReadUInt32(); // CRC 32
+			reader.ReadUInt32(); // CRC32
 			
 			int compressedSize = reader.ReadInt32();
 			if (compressedSize == 0) compressedSize = entry.CompressedDataSize;
 			int uncompressedSize = reader.ReadInt32();
 			if (uncompressedSize == 0) uncompressedSize = entry.UncompressedDataSize;
-			ushort fileNameLen = reader.ReadUInt16();
-			ushort extraFieldLen = reader.ReadUInt16();
-			string fileName = enc.GetString(reader.ReadBytes(fileNameLen));
-			if (!ShouldProcessZipEntry(fileName)) return;
 			
-			reader.ReadBytes(extraFieldLen);
-			if (versionNeeded > 20)
-				Utils.LogDebug("May not be able to properly extract a .zip enty with a version later than 2.0");
+			ushort pathLen  = reader.ReadUInt16();
+			ushort extraLen = reader.ReadUInt16();
+			string path = enc.GetString(reader.ReadBytes(pathLen));
+			if (SelectZipEntry != null && !SelectZipEntry(path)) return;
 			
+			reader.ReadBytes(extraLen);
 			byte[] data = DecompressEntry(reader, compressionMethod, compressedSize, uncompressedSize);
-			if (data != null)
-				ProcessZipEntry(fileName, data, entry);
+			if (data != null) ProcessZipEntry(path, data, entry);
 		}
 		
 		void ReadCentralDirectory(BinaryReader reader, ZipEntry[] entries) {
 			ZipEntry entry;
-			entry.CentralHeaderOffset = (int)(reader.BaseStream.Position - 4);
 			reader.ReadUInt16(); // OS
-			ushort versionNeeded = reader.ReadUInt16();
-			ushort flags = reader.ReadUInt16();
-			ushort compressionMethod = reader.ReadUInt16();
+			reader.ReadUInt16(); // version neede
+			reader.ReadUInt16(); // flags
+			reader.ReadUInt16(); // compression method
 			reader.ReadUInt32(); // last modified
 			uint crc32 = reader.ReadUInt32();
-			int compressedSize = reader.ReadInt32();
+			int compressedSize   = reader.ReadInt32();
 			int uncompressedSize = reader.ReadInt32();
-			ushort fileNameLen = reader.ReadUInt16();
-			ushort extraFieldLen = reader.ReadUInt16();
+			ushort pathLen    = reader.ReadUInt16();
+			ushort extraLen   = reader.ReadUInt16();			
+			ushort commentLen = reader.ReadUInt16();
 			
-			ushort fileCommentLen = reader.ReadUInt16();
-			ushort diskNum = reader.ReadUInt16();
-			ushort internalAttributes = reader.ReadUInt16();
-			uint externalAttributes = reader.ReadUInt32();
+			reader.ReadUInt16(); // disk number
+			reader.ReadUInt16(); // internal attributes
+			reader.ReadUInt32(); // external attributes
 			int localHeaderOffset = reader.ReadInt32();
-			string fileName = enc.GetString(reader.ReadBytes(fileNameLen));
-			reader.ReadBytes(extraFieldLen);
-			reader.ReadBytes(fileCommentLen);
-						
-			entry.CompressedDataSize = compressedSize;
+			string path = enc.GetString(reader.ReadBytes(pathLen));
+			reader.ReadBytes(extraLen);
+			reader.ReadBytes(commentLen);
+			
+			entry.CompressedDataSize   = compressedSize;
 			entry.UncompressedDataSize = uncompressedSize;
 			entry.LocalHeaderOffset = localHeaderOffset;
-			entry.Filename = fileName;
+			entry.Path = path;
 			entry.Crc32 = crc32;
 			entries[index++] = entry;
 		}
 		
 		void ReadEndOfCentralDirectory(BinaryReader reader, out int entriesCount, out int centralDirectoryOffset) {
-			ushort diskNum = reader.ReadUInt16();
-			ushort diskNumStart = reader.ReadUInt16();
-			ushort diskEntries = reader.ReadUInt16();
+			reader.ReadUInt16(); // disk number
+			reader.ReadUInt16(); // disk number start
+			reader.ReadUInt16(); // disk entries
 			entriesCount = reader.ReadUInt16();
-			int centralDirectorySize = reader.ReadInt32();
+			reader.ReadInt32(); // central directory size
 			centralDirectoryOffset = reader.ReadInt32();
-			ushort commentLength = reader.ReadUInt16();
+			reader.ReadUInt16(); // comment length
 		}
 		
 		byte[] DecompressEntry(BinaryReader reader, ushort compressionMethod, int compressedSize, int uncompressedSize) {

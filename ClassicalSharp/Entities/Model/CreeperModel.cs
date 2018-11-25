@@ -8,9 +8,8 @@ namespace ClassicalSharp.Model {
 
 	public class CreeperModel : IModel {
 		
-		public CreeperModel(Game window) : base(window) { }
+		public CreeperModel(Game game) : base(game) { SurivalScore = 200; }
 
-		/// <inheritdoc/>		
 		public override void CreateParts() {
 			vertices = new ModelVertex[boxVertices * 6];
 			Head =  BuildBox(MakeBoxBounds(-4, 18, -4, 4, 26, 4)
@@ -32,26 +31,21 @@ namespace ClassicalSharp.Model {
 			                        .TexOrigin(0, 16)
 			                        .RotOrigin(0, 6, 2));
 		}
-		
-		/// <inheritdoc/>		
+			
 		public override float NameYOffset { get { return 1.7f; } }
-
-		/// <inheritdoc/>		
+	
 		public override float GetEyeY(Entity entity) { return 22/16f; }
-
-		/// <inheritdoc/>		
+		
 		public override Vector3 CollisionSize {
 			get { return new Vector3(8/16f, 26/16f, 8/16f); }
 		}
 
-		/// <inheritdoc/>		
 		public override AABB PickingBounds {
 			get { return new AABB(-4/16f, 0, -6/16f, 4/16f, 26/16f, 6/16f); }
 		}
 
-		/// <inheritdoc/>		
 		public override void DrawModel(Entity p) {
-			game.Graphics.BindTexture(GetTexture(p.MobTextureId));
+			ApplyTexture(p);
 			DrawRotate(-p.HeadXRadians, 0, 0, Head, true);
 
 			DrawPart(Torso);

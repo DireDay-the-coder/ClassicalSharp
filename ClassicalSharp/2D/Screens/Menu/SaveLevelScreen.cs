@@ -7,29 +7,38 @@ using ClassicalSharp.Map;
 using OpenTK.Input;
 
 namespace ClassicalSharp.Gui.Screens {
-	public sealed class SaveLevelScreen : MenuScreen {
+	public class SaveLevelScreen : MenuScreen {
 		
 		public SaveLevelScreen(Game game) : base(game) {
 		}
 		
 		InputWidget input;
-		TextWidget desc;
 		const int overwriteIndex = 2;
-		static FastColour grey = new FastColour(150, 150, 150);
+		static PackedCol grey = new PackedCol(150, 150, 150);
+		
+		void SaveMap(string path) {
+			bool cw = path.EndsWith(".cw");
+			try {
+				using (Stream fs = Platform.FileCreate(path)) {
+					IMapFormatExporter exporter = null;
+					if (cw) exporter = new MapCwExporter();
+					else exporter = new MapSchematicExporter();
+					exporter.Save(fs, game);
+				}
+			} catch (Exception ex) {
+				ErrorHandler.LogError("saving map", ex);
+				MakeDescWidget("&cError while trying to save map");
+				return;
+			}
+			
+			game.Chat.Add("&eSaved map to: " + path);
+			game.Gui.SetNewScreen(new PauseScreen(game));
+		}
 		
 		public override void Render(double delta) {
-			RenderMenuBounds();
-			gfx.Texturing = true;
-			RenderMenuWidgets(delta);
-			input.Render(delta);
-			if (desc != null) desc.Render(delta);
-			gfx.Texturing = false;
-			
-			float cX = game.Width / 2, cY = game.Height / 2;
-			gfx.Draw2DQuad(cX - 250, cY + 90, 500, 2, grey);
-			if (textPath == null) return;
-			SaveMap(textPath);
-			textPath = null;
+			base.Render(delta);			
+			int cX = game.Width / 2, cY = game.Height / 2;
+			game.Graphics.Draw2DQuad(cX - 250, cY + 90, 500, 2, grey);
 		}
 		
 		public override bool HandlesKeyPress(char key) {
@@ -39,11 +48,8 @@ namespace ClassicalSharp.Gui.Screens {
 		
 		public override bool HandlesKeyDown(Key key) {
 			RemoveOverwrites();
-			if (key == Key.Escape) {
-				game.Gui.SetNewScreen(null);
-				return true;
-			}
-			return input.HandlesKeyDown(key);
+			if (input.HandlesKeyDown(key)) return true;
+			return base.HandlesKeyDown(key);
 		}
 		
 		public override bool HandlesKeyUp(Key key) {
@@ -52,20 +58,12 @@ namespace ClassicalSharp.Gui.Screens {
 		
 		public override void Init() {
 			base.Init();
-			game.Keyboard.KeyRepeat = true;
-			titleFont = new Font(game.FontName, 16, FontStyle.Bold);
-			regularFont = new Font(game.FontName, 16, FontStyle.Regular);
+			Keyboard.KeyRepeat = true;
 			ContextRecreated();
 		}
 		
-		protected override void ContextLost() {
-			input.Dispose();
-			DisposeDescWidget();
-			base.ContextLost();
-		}
-		
 		protected override void ContextRecreated() {
-			input = MenuInputWidget.Create(game, 500, 30, "", regularFont, new PathValidator())
+			input = MenuInputWidget.Create(game, 500, 30, "", textFont, new PathValidator())
 				.SetLocation(Anchor.Centre, Anchor.Centre, 0, -30);
 			input.ShowCaret = true;
 			
@@ -74,99 +72,60 @@ namespace ClassicalSharp.Gui.Screens {
 					.SetLocation(Anchor.Centre, Anchor.Centre, 0, 20),
 				ButtonWidget.Create(game, 200, "Save schematic", titleFont, SaveSchematic)
 					.SetLocation(Anchor.Centre, Anchor.Centre, -150, 120),
-				TextWidget.Create(game, "&eCan be imported into MCEdit", regularFont)
-					.SetLocation(Anchor.Centre, Anchor.Centre, 110, 120),
-				null,
-				MakeBack(false, titleFont,
-				         (g, w) => g.Gui.SetNewScreen(new PauseScreen(g))),
+				TextWidget.Create(game, "&eCan be imported into MCEdit", textFont)
+					.SetLocation(Anchor.Centre, Anchor.Centre, 110, 120),				
+				MakeBack("Cancel", titleFont, SwitchPause),
+				input,
+				null, // description widget placeholder				
 			};
 		}
 		
-		
-		public override void OnResize(int width, int height) {
-			input.CalculatePosition();
-			base.OnResize(width, height);
-		}
-		
 		public override void Dispose() {
-			game.Keyboard.KeyRepeat = false;
+			Keyboard.KeyRepeat = false;
 			base.Dispose();
 		}
 		
-		void SaveClassic(Game game, Widget widget, MouseButton btn, int x, int y) {
-			DoSave(widget, btn, ".cw");
-		}
+		void SaveClassic(Game game, Widget widget) { DoSave(widget, ".cw"); }	
+		void SaveSchematic(Game game, Widget widget) { DoSave(widget, ".schematic"); }
 		
-		void SaveSchematic(Game game, Widget widget, MouseButton btn, int x, int y) {
-			DoSave(widget, btn, ".schematic");
-		}
-		
-		void DoSave(Widget widget, MouseButton mouseBtn, string ext) {
-			if (mouseBtn != MouseButton.Left) return;
-			
-			string text = input.Text.ToString();
-			if (text.Length == 0) {
+		void DoSave(Widget widget, string ext) {
+			string file = input.Text.ToString();
+			if (file.Length == 0) {
 				MakeDescWidget("&ePlease enter a filename"); return;
 			}
-			string file = Path.ChangeExtension(text, ext);
-			text = Path.Combine(Program.AppDirectory, "maps");
-			text = Path.Combine(text, file);
 			
-			if (File.Exists(text) && widget.Metadata == null) {
-				((ButtonWidget)widget).SetText("&cOverwrite existing?");
-				((ButtonWidget)widget).Metadata = true;
+			string path = Path.Combine("maps", file + ext);
+			ButtonWidget btn = (ButtonWidget)widget;
+			
+			if (Platform.FileExists(path) && btn.OptName == null) {
+				btn.Set("&cOverwrite existing?", titleFont);
+				btn.OptName = "O";
 			} else {
-				// NOTE: We don't immediately save here, because otherwise the 'saving...'
-				// will not be rendered in time because saving is done on the main thread.
-				MakeDescWidget("Saving..");
-				textPath = text;
 				RemoveOverwrites();
+				SaveMap(path);
 			}
 		}
 		
 		void RemoveOverwrites() {
-			RemoveOverwrite(widgets[0]); RemoveOverwrite(widgets[1]);
+			RemoveOverwrite(widgets[0], "Save"); 
+			RemoveOverwrite(widgets[1], "Save schematic");
 		}
 		
-		void RemoveOverwrite(Widget widget) {
+		void RemoveOverwrite(Widget widget, string defaultText) {
 			ButtonWidget button = (ButtonWidget)widget;
-			if (button.Metadata == null) return;
-			button.Metadata = null;
-			button.SetText("Save");
-		}
-		
-		string textPath;
-		void SaveMap(string path) {
-			bool classic = path.EndsWith(".cw");
-			try {
-				if (File.Exists(path))
-					File.Delete(path);
-				using (FileStream fs = new FileStream(path, FileMode.CreateNew, FileAccess.Write)) {
-					IMapFormatExporter exporter = null;
-					if (classic) exporter = new MapCwExporter();
-					else exporter = new MapSchematicExporter();
-					exporter.Save(fs, game);
-				}
-			} catch (Exception ex) {
-				ErrorHandler.LogError("saving map", ex);
-				MakeDescWidget("&cError while trying to save map");
-				return;
-			}
-			game.Chat.Add("&eSaved map to: " + Path.GetFileName(path));
-			game.Gui.SetNewScreen(new PauseScreen(game));
+			if (button.OptName == null) return;
+			
+			button.OptName = null;
+			button.Set(defaultText, titleFont);
 		}
 		
 		void MakeDescWidget(string text) {
-			DisposeDescWidget();
-			desc = TextWidget.Create(game, text, regularFont)
-				.SetLocation(Anchor.Centre, Anchor.Centre, 0, 65);
-		}
-		
-		void DisposeDescWidget() {
-			if (desc != null) {
-				desc.Dispose();
-				desc = null;
+			if (widgets[widgets.Length - 1] != null) {
+				widgets[widgets.Length - 1].Dispose();
 			}
+			
+			widgets[widgets.Length - 1] = TextWidget.Create(game, text, textFont)
+				.SetLocation(Anchor.Centre, Anchor.Centre, 0, 65);
 		}
 	}
 }

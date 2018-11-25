@@ -5,7 +5,7 @@ using Launcher.Gui.Views;
 using Launcher.Gui.Widgets;
 using OpenTK.Input;
 
-namespace Launcher.Gui.Screens {	
+namespace Launcher.Gui.Screens {
 	public sealed class SettingsScreen : Screen {
 		
 		SettingsView view;
@@ -18,15 +18,33 @@ namespace Launcher.Gui.Screens {
 			base.Init();
 			view.Init();
 			
-			widgets[view.modeIndex].OnClick = (x, y) => 
-				game.SetScreen(new ChooseModeScreen(game, false));
-			widgets[view.updatesIndex].OnClick = (x, y) => 
-				game.SetScreen(new UpdatesScreen(game));
-			widgets[view.coloursIndex].OnClick = (x, y) =>
-				game.SetScreen(new ColoursScreen(game));
-			widgets[view.backIndex].OnClick = (x, y) =>
-				game.SetScreen(new MainScreen(game));
+			widgets[view.modeIndex].OnClick = SwitchToChooseMode;
+			widgets[view.updatesIndex].OnClick = SwitchToUpdates;
+			widgets[view.coloursIndex].OnClick = SwitchToColours;
+			widgets[view.backIndex].OnClick = SwitchToMain;
+			widgets[view.clientIndex].OnClick = UseCClientClick;
 			Resize();
+		}
+		
+		void SwitchToChooseMode(int x, int y) { game.SetScreen(new ChooseModeScreen(game, false)); }
+		void SwitchToUpdates(int x, int y) { game.SetScreen(new UpdatesScreen(game)); }
+		void SwitchToColours(int x, int y) { game.SetScreen(new ColoursScreen(game)); }
+		void SwitchToMain(int x, int y) { game.SetScreen(new MainScreen(game)); }
+		
+		static bool warned;
+		void UseCClientClick(int mouseX, int mouseY) {
+			CheckboxWidget widget = (CheckboxWidget)widgets[view.clientIndex];
+			widget.Value = !widget.Value;
+			RedrawWidget(widget);
+			
+			Options.Set(OptionsKey.CClient, widget.Value);
+			Client.CClient = widget.Value;
+			
+			if (Client.CClient && !Platform.FileExists(Client.GetExeName())) {
+				if (warned) return;
+				warned = true;
+				ErrorHandler.ShowDialog("Note", "You will need to update again to get it");
+			}
 		}
 		
 		public override void Tick() { }

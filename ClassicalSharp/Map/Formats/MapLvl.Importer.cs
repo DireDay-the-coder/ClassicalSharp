@@ -2,10 +2,9 @@
 // Part of fCraft | Copyright (c) 2009-2014 Matvei Stefarov <me@matvei.org> | BSD-3 | See LICENSE.txt
 using System;
 using System.IO;
-using System.IO.Compression;
-using System.Text;
 using ClassicalSharp.Entities;
 using ClassicalSharp.Network;
+using Ionic.Zlib;
 
 namespace ClassicalSharp.Map {
 
@@ -16,11 +15,11 @@ namespace ClassicalSharp.Map {
 		const byte customTile = 163;
 		
 		public byte[] Load(Stream stream, Game game, out int width, out int height, out int length) {
-			GZipHeaderReader gsHeader = new GZipHeaderReader();
-			while (!gsHeader.ReadHeader(stream)) { }
+			GZipHeaderReader gzHeader = new GZipHeaderReader();
+			while (!gzHeader.ReadHeader(stream)) { }
 			
-			using (DeflateStream gs = new DeflateStream(stream, CompressionMode.Decompress)) {
-				BinaryReader r = new BinaryReader(gs);
+			using (DeflateStream s = new DeflateStream(stream)) {
+				BinaryReader r = new BinaryReader(s);
 				ushort header = r.ReadUInt16();
 
 				width = header == Version ? r.ReadUInt16() : header;
@@ -37,36 +36,55 @@ namespace ClassicalSharp.Map {
 				if (header == Version)
 					r.ReadUInt16(); // pervisit and perbuild perms
 				byte[] blocks = new byte[width * height * length];
-				int read = gs.Read(blocks, 0, blocks.Length);
+				int read = s.Read(blocks, 0, blocks.Length);
 				ConvertPhysicsBlocks(blocks);
 				
-				if (gs.ReadByte() != 0xBD) return blocks;
-				ReadCustomBlocks(gs, width, height, length, blocks);
+				if (s.ReadByte() != 0xBD) return blocks;
+				ReadCustomBlocks(s, width, height, length, blocks);
 				return blocks;
 			}
 		}
 		
 		void ReadCustomBlocks(Stream s, int width, int height, int length, byte[] blocks) {
 			byte[] chunk = new byte[16 * 16 * 16];
+			byte[] data = new byte[1];
+			
+			// skip bounds checks when we know chunk is entirely inside map
+			int adjWidth  = width  & ~0x0F;
+			int adjHeight = height & ~0x0F;
+			int adjLength = length & ~0x0F;
 			
 			for (int y = 0; y < height; y += 16)
 				for (int z = 0; z < length; z += 16)
-					for (int x = 0; x < width; x += 16) 
+					for (int x = 0; x < width; x += 16)
 			{
-				if (s.ReadByte() != 1) continue;
-				s.Read(chunk, 0, chunk.Length);
-				
+				int read = s.Read(data, 0, 1);
+				if (read == 0 || data[0] != 1) continue;
+				s.Read(chunk, 0, chunk.Length);				
 				int baseIndex = (y * length + z) * width + x;
-				for (int i = 0; i < chunk.Length; i++) {
-					int bx = i & 0xF, by = (i >> 8) & 0xF, bz = (i >> 4) & 0xF;
-					int index = baseIndex + (by * length + bz) * width + bx;
-					
-					if (blocks[index] != customTile) continue;
-					blocks[index] = chunk[i];
+				
+				if ((x + 16) <= adjWidth && (y + 16) <= adjHeight && (z + 16) <= adjLength) {
+					for (int i = 0; i < chunk.Length; i++) {
+						int xx = i & 0xF, yy = (i >> 8) & 0xF, zz = (i >> 4) & 0xF;
+						int index = baseIndex + (yy * length + zz) * width + xx;
+						
+						if (blocks[index] != customTile) continue;
+						blocks[index] = chunk[i];
+					}
+				} else {
+					for (int i = 0; i < chunk.Length; i++) {
+						int xx = i & 0xF, yy = (i >> 8) & 0xF, zz = (i >> 4) & 0xF;
+						if ((x + xx) >= width || (y + yy) >= height || (z + zz) >= length) continue;
+						int index = baseIndex + (yy * length + zz) * width + xx;
+						
+						if (blocks[index] != customTile) continue;
+						blocks[index] = chunk[i];
+					}
 				}
+				
 			}
 		}
-			
+		
 		unsafe void ConvertPhysicsBlocks(byte[] blocks) {
 			byte* conv = stackalloc byte[256];
 			int count = Block.CpeCount;

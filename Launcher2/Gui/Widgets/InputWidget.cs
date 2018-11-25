@@ -43,7 +43,7 @@ namespace Launcher.Gui.Widgets {
 			if (Password) text = new String('*', text.Length);
 			
 			DrawTextArgs args = new DrawTextArgs(text, font, true);
-			Size size = drawer.MeasureSize(ref args);
+			Size size = drawer.MeasureText(ref args);
 			RealWidth = Math.Max(ButtonWidth, size.Width + 15);
 			textHeight = size.Height;
 		}
@@ -53,7 +53,7 @@ namespace Launcher.Gui.Widgets {
 			if (Password) text = new String('*', text.Length);
 			DrawTextArgs args = new DrawTextArgs("&0" + text, font, false);
 			
-			Size size = drawer.MeasureSize(ref args);
+			Size size = drawer.MeasureText(ref args);
 			RealWidth = Math.Max(ButtonWidth, size.Width + 20);
 			textHeight = size.Height;
 			args.SkipPartsCheck = true;
@@ -62,18 +62,18 @@ namespace Launcher.Gui.Widgets {
 			using (FastBitmap bmp = Window.LockBits()) {
 				DrawOuterBorder(bmp);
 				DrawInnerBorder(bmp);
-				Clear(bmp, FastColour.White, X + 2, Y + 2, RealWidth - 4, Height - 4);
+				Clear(bmp, PackedCol.White, X + 2, Y + 2, RealWidth - 4, Height - 4);
 				BlendBoxTop(bmp);
 			}
 			DrawText(drawer, args);
 		}
 		
-		static FastColour borderIn = new FastColour(165, 142, 168);
-		static FastColour borderOut = new FastColour(97, 81, 110);
+		static PackedCol borderIn = new PackedCol(165, 142, 168);
+		static PackedCol borderOut = new PackedCol(97, 81, 110);
 		const int border = 1;
 		
 		void DrawOuterBorder(FastBitmap bmp) {
-			FastColour col = borderOut;
+			PackedCol col = borderOut;
 			int width = RealWidth;
 			if (Active) {
 				Clear(bmp, col, X, Y, width, border);
@@ -89,7 +89,7 @@ namespace Launcher.Gui.Widgets {
 		}
 		
 		void DrawInnerBorder(FastBitmap bmp) {
-			FastColour col = borderIn;
+			PackedCol col = borderIn;
 			int width = RealWidth;
 			Clear(bmp, col, X + border, Y + border, width - border * 2, border);
 			Clear(bmp, col, X + border, Y + Height - border * 2, width - border * 2, border);
@@ -100,12 +100,12 @@ namespace Launcher.Gui.Widgets {
 		void BlendBoxTop(FastBitmap bmp) {
 			int width = RealWidth;
 			Rectangle r = new Rectangle(X + border, Y, width - border * 2, border);
-			r.Y += border; Gradient.Blend(bmp, r, FastColour.Black, 75);
-			r.Y += border; Gradient.Blend(bmp, r, FastColour.Black, 50);
-			r.Y += border; Gradient.Blend(bmp, r, FastColour.Black, 25);
+			r.Y += border; Gradient.Blend(bmp, r, PackedCol.Black, 75);
+			r.Y += border; Gradient.Blend(bmp, r, PackedCol.Black, 50);
+			r.Y += border; Gradient.Blend(bmp, r, PackedCol.Black, 25);
 		}
 		
-		void Clear(FastBitmap bmp, FastColour col, 
+		void Clear(FastBitmap bmp, PackedCol col, 
 		           int x, int y, int width, int height) {
 			Drawer2DExt.Clear(bmp, new Rectangle(x, y, width, height), col);
 		}
@@ -119,7 +119,7 @@ namespace Launcher.Gui.Widgets {
 				args.Text = HintText;
 				args.Font = hintFont;
 				
-				Size hintSize = drawer.MeasureSize(ref args);
+				Size hintSize = drawer.MeasureText(ref args);
 				int y = Y + (Height - hintSize.Height) / 2;
 				args.SkipPartsCheck = true;
 				drawer.DrawText(ref args, X + 5, y);
@@ -134,13 +134,13 @@ namespace Launcher.Gui.Widgets {
 			DrawTextArgs args = new DrawTextArgs(text, font, true);
 			
 			if (Chars.CaretPos == -1) {
-				Size size = drawer.MeasureSize(ref args);
+				Size size = drawer.MeasureText(ref args);
 				r.X += size.Width; r.Width = 10;
 			} else {
 				args.Text = text.Substring(0, Chars.CaretPos);
-				int trimmedWidth = drawer.MeasureSize(ref args).Width;
+				int trimmedWidth = drawer.MeasureText(ref args).Width;
 				args.Text = new String(text[Chars.CaretPos], 1);
-				int charWidth = drawer.MeasureSize(ref args).Width;
+				int charWidth = drawer.MeasureText(ref args).Width;
 				r.X += trimmedWidth; r.Width = charWidth;
 			}
 			return r;
@@ -164,16 +164,16 @@ namespace Launcher.Gui.Widgets {
 			mouseX -= X; mouseY -= Y;
 			
 			DrawTextArgs args = new DrawTextArgs(text, font, true);
-			Size size = drawer.MeasureSize(ref args);
+			Size size = drawer.MeasureText(ref args);
 			if (mouseX >= size.Width) {
 				Chars.CaretPos = -1; return;
 			}
 			
 			for (int i = 0; i < Text.Length; i++) {
 				args.Text = text.Substring(0, i);
-				int trimmedWidth = drawer.MeasureSize(ref args).Width;
+				int trimmedWidth = drawer.MeasureText(ref args).Width;
 				args.Text = new String(text[i], 1);
-				int charWidth = drawer.MeasureSize(ref args).Width;
+				int charWidth = drawer.MeasureText(ref args).Width;
 				if (mouseX >= trimmedWidth && mouseX < trimmedWidth + charWidth) {
 					Chars.CaretPos = i; return;
 				}

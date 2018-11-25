@@ -1,6 +1,7 @@
 ﻿// ClassicalSharp copyright 2014-2016 UnknownShadow200 | Licensed under MIT
 using System;
 using System.IO;
+using ClassicalSharp;
 using ClassicalSharp.Textures;
 
 namespace Launcher.Patcher {
@@ -8,54 +9,52 @@ namespace Launcher.Patcher {
 	public sealed class ResourceChecker {
 
 		public void CheckResourceExistence() {
-			string audioPath = Path.Combine(Program.AppDirectory, "audio");
-			if (!Directory.Exists(audioPath))
-				Directory.CreateDirectory(audioPath);
+			if (!Platform.DirectoryExists("audio")) {
+				Platform.DirectoryCreate("audio");
+			}
+			
 			DigSoundsExist = CheckDigSoundsExist();
 			StepSoundsExist = CheckStepSoundsExist();
 			AllResourcesExist = DigSoundsExist && StepSoundsExist;
 			
-			string texDir = Path.Combine(Program.AppDirectory, "texpacks");
-			string zipPath = Path.Combine(texDir, "default.zip");
-			bool defaultZipExists = File.Exists(zipPath);
-			if (File.Exists(zipPath))
-				CheckDefaultZip(zipPath);
+			string defPath = Path.Combine("texpacks", "default.zip");
+			if (Platform.FileExists(defPath)) {
+				CheckDefaultZip(defPath);
+			}
 			
 			CheckTexturePack();
-			CheckMusic(audioPath);
+			CheckMusic();
 			CheckSounds();
 		}
 		
 		void CheckTexturePack() {
-			ushort flags = 0;
-			foreach (var entry in ResourceList.Files)
-				flags |= entry.Value;
+			byte flags = ResourceList.GetFetchFlags();
 			if (flags != 0) AllResourcesExist = false;
 			
-			if ((flags & ResourceList.cMask) != 0) {
+			if ((flags & ResourceList.mask_classic) != 0) {
 				DownloadSize += 291/1024f; ResourcesCount++;
 			}
-			if ((flags & ResourceList.mMask) != 0) {
+			if ((flags & ResourceList.mask_modern) != 0) {
 				DownloadSize += 4621/1024f; ResourcesCount++;
 			}
-			if ((flags & ResourceList.tMask) != 0) {
+			if ((flags & ResourceList.mask_terrain) != 0) {
 				DownloadSize += 7/1024f; ResourcesCount++;
 			}
-			if ((flags & ResourceList.gMask) != 0) {
+			if ((flags & ResourceList.mask_gui) != 0) {
 				DownloadSize += 21/1024f; ResourcesCount++;
 			}
 		}
 		
-		void CheckMusic(string audioPath) {
+		void CheckMusic() {
 			string[] files = ResourceList.MusicFiles;
 			for (int i = 0; i < files.Length; i++) {
-				string file = Path.Combine(audioPath, files[i] + ".ogg");
-				musicExists[i] = File.Exists(file);
-				if (!musicExists[i]) {
-					DownloadSize += musicSizes[i] / 1024f;
-					ResourcesCount++;
-					AllResourcesExist = false;
-				}
+				string path = Path.Combine("audio", files[i]);
+				musicExists[i] = Platform.FileExists(path);
+				if (musicExists[i]) continue;
+				
+				DownloadSize += musicSizes[i] / 1024f;
+				ResourcesCount++;
+				AllResourcesExist = false;
 			}
 		}
 		
@@ -75,18 +74,25 @@ namespace Launcher.Patcher {
 		public int ResourcesCount;
 		internal bool[] musicExists = new bool[7];
 		
-		void CheckDefaultZip(string path) {
+		void CheckDefaultZip(string relPath) {
 			ZipReader reader = new ZipReader();
-			reader.ShouldProcessZipEntry = ShouldProcessZipEntry;
+			reader.SelectZipEntry = SelectZipEntry;
 			reader.ProcessZipEntry = ProcessZipEntry;
 			
-			using (Stream src = new FileStream(path, FileMode.Open, FileAccess.Read))
+			using (Stream src = Platform.FileOpen(relPath)) {
 				reader.Extract(src);
+			}
 		}
 
-		bool ShouldProcessZipEntry(string filename) {			
-			string name = ResourceList.GetFile(filename);
-			ResourceList.Files.Remove(name);
+		bool SelectZipEntry(string path) {
+			string name = Utils.GetFilename(path);
+			for (int i = 0; i < ResourceList.Filenames.Length; i++) {
+				if (ResourceList.FilesExist[i]) continue;
+				if (name != ResourceList.Filenames[i]) continue;
+				
+				ResourceList.FilesExist[i] = true;
+				break;
+			}
 			return false;
 		}
 		
@@ -94,20 +100,18 @@ namespace Launcher.Patcher {
 		
 		bool CheckDigSoundsExist() {
 			string[] files = ResourceList.DigSounds;
-			string path = Path.Combine(Program.AppDirectory, "audio");
 			for (int i = 0; i < files.Length; i++) {
-				string file = "dig_" + files[i].Substring(1) + ".wav";
-				if (!File.Exists(Path.Combine(path, file))) return false;
+				string path = Path.Combine("audio", "dig_" + files[i] + ".wav");
+				if (!Platform.FileExists(path)) return false;
 			}
 			return true;
 		}
 		
 		bool CheckStepSoundsExist() {
 			string[] files = ResourceList.StepSounds;
-			string path = Path.Combine(Program.AppDirectory, "audio");
 			for (int i = 0; i < files.Length; i++) {
-				string file = "step_" + files[i].Substring(1) + ".wav";
-				if (!File.Exists(Path.Combine(path, file))) return false;
+				string path = Path.Combine("audio", "step_" + files[i] + ".wav");
+				if (!Platform.FileExists(path)) return false;
 			}
 			return true;
 		}

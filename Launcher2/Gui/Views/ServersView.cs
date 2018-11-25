@@ -4,7 +4,6 @@ using System.Drawing;
 using ClassicalSharp;
 using Launcher.Drawing;
 using Launcher.Gui.Widgets;
-using OpenTK.Input;
 
 namespace Launcher.Gui.Views {
 	public sealed class ServersView : IView {
@@ -20,7 +19,7 @@ namespace Launcher.Gui.Views {
 		}
 		
 		public override void Init() {
-			titleFont = new Font(game.FontName, 15, FontStyle.Bold);
+			titleFont = new Font(game.FontName, 16, FontStyle.Bold);
 			textFont = new Font(game.FontName, 14, FontStyle.Regular);
 			inputHintFont = new Font(game.FontName, 12, FontStyle.Italic);
 			tableFont = new Font(game.FontName, 11, FontStyle.Regular);
@@ -37,18 +36,18 @@ namespace Launcher.Gui.Views {
 		protected override void MakeWidgets() {
 			widgetIndex = 0;
 			MakeInput(Get(0), 370, false, 32, "&gSearch servers..")
-				.SetLocation(Anchor.LeftOrTop, Anchor.LeftOrTop, 10, 10);
+				.SetLocation(Anchor.Min, Anchor.Min, 10, 10);
 			MakeInput(Get(1), 475, false, 32, "&gclassicube.net/server/play/...")
-				.SetLocation(Anchor.LeftOrTop, Anchor.BottomOrRight, 10, -10);
+				.SetLocation(Anchor.Min, Anchor.Max, 10, -10);
 			
 			Makers.Button(this, "Back", 110, 30, titleFont)
-				.SetLocation(Anchor.BottomOrRight, Anchor.LeftOrTop, -10, 10);
-			Makers.Button(this, "Connect", 110, 30, titleFont)
-				.SetLocation(Anchor.BottomOrRight, Anchor.BottomOrRight, -10, -10);
+				.SetLocation(Anchor.Max, Anchor.Min, -10, 10);
+			Makers.Button(this, "Connect", 130, 30, titleFont)
+				.SetLocation(Anchor.Max, Anchor.Max, -10, -10);
 			
 			MakeTableWidget();
 			Makers.Button(this, RefreshText, 110, 30, titleFont)
-				.SetLocation(Anchor.BottomOrRight, Anchor.LeftOrTop, -135, 10);
+				.SetLocation(Anchor.Max, Anchor.Min, -135, 10);
 		}
 		
 		string Get(int index) {
@@ -68,7 +67,7 @@ namespace Launcher.Gui.Views {
 			Rectangle rec = new Rectangle(tableX, tableY, game.Width - tableX, tableHeight);
 			
 			if (!game.ClassicBackground) {
-				FastColour col = TableView.backGridCol;
+				PackedCol col = TableView.backGridCol;
 				Drawer2DExt.Clear(dst, rec, col);
 			} else {
 				game.ResetArea(rec.X, rec.Y, rec.Width, rec.Height, dst);
@@ -80,7 +79,7 @@ namespace Launcher.Gui.Views {
 			TableWidget widget;
 			if (widgets[tableIndex] != null) {
 				widget = (TableWidget)widgets[tableIndex];
-				if (widget.servers != game.Session.Servers) ResetTable(widget);
+				if (widget.servers != game.Servers) ResetTable(widget);
 			} else {
 				widget = new TableWidget(game);
 				ResetTable(widget);
@@ -92,9 +91,9 @@ namespace Launcher.Gui.Views {
 		}
 		
 		void ResetTable(TableWidget widget) {
-			widget.SetEntries(game.Session.Servers);
+			widget.SetEntries(game.Servers);
 			widget.SetDrawData(drawer, tableFont, textFont,
-			                   Anchor.LeftOrTop, Anchor.LeftOrTop, tableX, tableY);
+			                   Anchor.Min, Anchor.Min, tableX, tableY);
 			widget.SortDefault();
 		}
 		

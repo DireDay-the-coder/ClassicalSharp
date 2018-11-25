@@ -1,7 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using ClassicalSharp.Entities;
-using ClassicalSharp.GraphicsAPI;
 using ClassicalSharp.Physics;
 using OpenTK;
 
@@ -9,7 +8,7 @@ namespace ClassicalSharp.Model {
 
 	public class SkeletonModel : IModel {
 		
-		public SkeletonModel(Game window) : base(window) { }
+		public SkeletonModel(Game game) : base(game) { SurivalScore = 120; }
 		
 		public override void CreateParts() {
 			vertices = new ModelVertex[boxVertices * 6];
@@ -29,7 +28,8 @@ namespace ClassicalSharp.Model {
 			                   .RotOrigin(-5, 23, 0));
 			RightArm = BuildBox(MakeBoxBounds(4, 12, -1, 6, 24, 1)
 			                    .TexOrigin(40, 16)
-			                    .RotOrigin(5, 23, 0));
+			                    .RotOrigin(5, 23, 0));			
+			armX = 5;
 		}
 		
 		public override float NameYOffset { get { return 2.075f; } }
@@ -37,7 +37,7 @@ namespace ClassicalSharp.Model {
 		public override float GetEyeY(Entity entity) { return 26/16f; }
 		
 		public override Vector3 CollisionSize {
-			get { return new Vector3(8/16f, 30/16f, 8/16f); }
+			get { return new Vector3(8/16f, 28.1f/16f, 8/16f); }
 		}
 		
 		public override AABB PickingBounds {
@@ -45,7 +45,7 @@ namespace ClassicalSharp.Model {
 		}
 		
 		public override void DrawModel(Entity p) {
-			game.Graphics.BindTexture(GetTexture(p.MobTextureId));
+			ApplyTexture(p);
 			DrawRotate(-p.HeadXRadians, 0, 0, Head, true);
 
 			DrawPart(Torso);
@@ -53,6 +53,11 @@ namespace ClassicalSharp.Model {
 			DrawRotate(p.anim.rightLegX, 0, 0, RightLeg, false);
 			DrawRotate(90 * Utils.Deg2Rad, 0, p.anim.leftArmZ, LeftArm, false);
 			DrawRotate(90 * Utils.Deg2Rad, 0, p.anim.rightArmZ, RightArm, false);
+			UpdateVB();
+		}
+		
+		public override void DrawArm(Entity p) {
+			DrawArmPart(RightArm);
 			UpdateVB();
 		}
 		

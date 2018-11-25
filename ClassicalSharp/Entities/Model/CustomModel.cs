@@ -10,7 +10,7 @@ namespace ClassicalSharp.Model {
 
 	public class CustomModel : IModel {
 		
-		public CustomModel(Game window) : base(window) { }
+		public CustomModel(Game game) : base(game) { }
 		
 		internal override void CreateParts() { }
 		
@@ -30,7 +30,7 @@ namespace ClassicalSharp.Model {
 		public override AABB PickingBounds { get { return pickingBounds; } }
 		
 		public override void DrawModel(Entity p) {
-			int texId = p.TextureId <= 0 ? cache.HumanoidTexId : p.TextureId;
+			int texId = p.TextureId == 0 ? cache.HumanoidTexId : p.TextureId;
 		}
 		
 		internal void ReadSetupPacket() {

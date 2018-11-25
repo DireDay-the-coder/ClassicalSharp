@@ -5,18 +5,13 @@
 // I believe this process adheres to clean room reverse engineering.
 using System;
 using System.Collections.Generic;
-
-#if USE16_BIT
-using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
+using BlockRaw = System.Byte;
 
 namespace ClassicalSharp.Generator {
 	
 	public sealed partial class NotchyGenerator {
 		
-		void FillOblateSpheroid(int x, int y, int z, float radius, BlockID block) {
+		void FillOblateSpheroid(int x, int y, int z, float radius, BlockRaw block) {
 			int xStart = Utils.Floor(Math.Max(x - radius, 0));
 			int xEnd = Utils.Floor(Math.Min(x + radius, Width - 1));
 			int yStart = Utils.Floor(Math.Max(y - radius, 0));
@@ -38,14 +33,14 @@ namespace ClassicalSharp.Generator {
 			}
 		}
 		
-		void FloodFill(int startIndex, BlockID block) {
+		void FloodFill(int startIndex, BlockRaw block) {
 			if (startIndex < 0) return; // y below map, immediately ignore
 			FastIntStack stack = new FastIntStack(4);
-			stack.Push(startIndex);			
+			stack.Push(startIndex);	
 			
 			while (stack.Size > 0) {
 				int index = stack.Pop();
-				if (blocks[index] != 0) continue;
+				if (blocks[index] != Block.Air) continue;
 				blocks[index] = block;
 				
 				int x = index % Width;
@@ -91,7 +86,8 @@ namespace ClassicalSharp.Generator {
 		const long value = 0x5DEECE66DL;
 		const long mask = (1L << 48) - 1;
 		
-		public JavaRandom(int seed) {
+		public JavaRandom(int seed) { SetSeed(seed); }
+		public void SetSeed(int seed) {
 			this.seed = (seed ^ value) & mask;
 		}
 		

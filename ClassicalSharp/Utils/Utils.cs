@@ -2,7 +2,11 @@
 using System;
 using System.Drawing;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using System.Security;
+#if !LAUNCHER
 using ClassicalSharp.Model;
+#endif
 using OpenTK;
 using OpenTK.Input;
 #if ANDROID
@@ -10,25 +14,49 @@ using Android.Graphics;
 using AndroidColor = Android.Graphics.Color;
 #endif
 
+// NOTE: This delegate should be removed when using versions later than NET 2.0.
+public delegate void Action();
+
+public delegate void EmptyEventFunc();
+
 namespace ClassicalSharp {
 
-	// NOTE: These delegates should be removed when using versions later than NET 2.0.
-	// ################################################################
-	public delegate void Action();
-	public delegate void Action<T1, T2>(T1 arg1, T2 arg2);
-	public delegate void Action<T1, T2, T3>(T1 arg1, T2 arg2, T3 arg3);
-	public delegate void Action<T1, T2, T3, T4>(T1 arg1, T2 arg2, T3 arg3, T4 arg4);
-	public delegate TResult Func<TResult>();
-	public delegate TResult Func<T1, TResult>(T1 arg1);
-	public delegate TResult Func<T1, T2, TResult>(T1 arg1, T2 arg2);
-	public delegate TResult Func<T1, T2, T3, TResult>(T1 arg1, T2 arg2, T3 arg3);
-	// ################################################################
+	public enum Anchor {
+		Min,    // left or top
+		Centre, // middle
+		Max,    // right or bottom
+	}
 	
 	public static partial class Utils {
 		
 		public const int StringLength = 64;
 		
-		/// <summary> Returns a string with all the colour codes stripped from it. </summary>
+		[StructLayout(LayoutKind.Sequential, Pack=2)]
+		internal struct SYSTEMTIME {
+			public ushort Year, Month, DayOfWeek, Day;
+			public ushort Hour, Minute, Second, Millis;
+		}
+		
+		[DllImport("kernel32.dll"), SuppressUnmanagedCodeSecurity]
+		static extern void GetLocalTime(out SYSTEMTIME st);	
+		
+		static DateTime LocalNow_Windows() {
+			SYSTEMTIME st; GetLocalTime(out st);
+			return new DateTime(st.Year, st.Month, st.Day, st.Hour, st.Minute, 
+			                    st.Second, st.Millis, DateTimeKind.Local);
+		}
+		
+		public static DateTime LocalNow() {
+			// System.NotSupportedException: Can't get timezone name.
+			// Gets thrown on some platforms with DateTime.Now
+			try {
+				// avoid pinvoke-ing GetLocalTime function on non-windows OS
+				if (OpenTK.Configuration.RunningOnWindows) return LocalNow_Windows();
+			} catch { }
+			return DateTime.Now;
+		}
+
+		
 		public static string StripColours(string value) {
 			if (value.IndexOf('&') == -1) return value;
 			char[] output = new char[value.Length];
@@ -44,8 +72,8 @@ namespace ClassicalSharp {
 			}
 			return new String(output, 0, usedChars);
 		}
-		
-		/// <summary> Returns a string with a + removed if it is the last character in the string. </summary>
+
+		#if !LAUNCHER
 		public static string RemoveEndPlus(string value) {
 			// Workaround for MCDzienny (and others) use a '+' at the end to distinguish classicube.net accounts
 			// from minecraft.net accounts. Unfortunately they also send this ending + to the client.
@@ -54,58 +82,38 @@ namespace ClassicalSharp {
 			return value[value.Length - 1] == '+' ?
 				value.Substring(0, value.Length - 1) : value;
 		}
+		#endif
 		
 		const StringComparison comp = StringComparison.OrdinalIgnoreCase;
-		/// <summary> Returns whether a equals b, ignoring any case differences. </summary>
-		public static bool CaselessEquals(string a, string b) { return a.Equals(b, comp); }
+		public static bool CaselessEq(string a, string b)       { return a.Equals(b, comp); }
+		public static bool CaselessEquals(string a, string b)   { return a.Equals(b, comp); }
+		public static bool CaselessStarts(string a, string b)   { return a.StartsWith(b, comp); }
+		public static bool CaselessEnds(string a, string b)     { return a.EndsWith(b, comp); }
+		public static bool CaselessContains(string a, string b) { return a.IndexOf(b, comp) >= 0; }
 		
-		/// <summary> Returns whether a starts with b, ignoring any case differences. </summary>
-		public static bool CaselessStarts(string a, string b) { return a.StartsWith(b, comp); }
-		
-		/// <summary> Returns whether a ends with b, ignoring any case differences. </summary>
-		public static bool CaselessEnds(string a, string b) { return a.EndsWith(b, comp); }
-		
-		/// <summary> Converts the given byte array of length N to a hex string of length 2N. </summary>
-		public static string ToHexString(byte[] array) {
-			int len = array.Length;
-			char[] hex = new char[len * 2];
-			for (int i = 0; i < array.Length; i++) {
-				int value = array[i];
-				int hi = value >> 4, lo = value & 0x0F;
-				
-				// 48 = index of 0, 55 = index of (A - 10).
-				hex[i * 2 + 0] = hi < 10 ? (char)(hi + 48) : (char)(hi + 55);
-				hex[i * 2 + 1] = lo < 10 ? (char)(lo + 48) : (char)(lo + 55);
-			}
-			return new String(hex);
+		public static void EnsureDirectory(string path) {
+			if (Platform.DirectoryExists(path)) return;
+			Platform.DirectoryCreate(path);
 		}
 		
-		/// <summary> Returns the hex code represented by the given character.
-		/// Throws FormatException if the input character isn't a hex code. </summary>
-		public static int ParseHex(char value) {
-			int hex;
-			if (!TryParseHex(value, out hex))
-				throw new FormatException("Invalid hex code given: " + value);
-			return hex;
+		public static void LogDebug(string text) {
+			try { Console.WriteLine(text); } catch { }
 		}
 		
-		/// <summary> Attempts to return the hex code represented by the given character. </summary>
-		public static bool TryParseHex(char value, out int hex) {
-			hex = 0;
-			if (value >= '0' && value <= '9') {
-				hex = (int)(value - '0');
-			} else if (value >= 'a' && value <= 'f') {
-				hex = (int)(value - 'a') + 10;
-			} else if (value >= 'A' && value <= 'F') {
-				hex = (int)(value - 'A') + 10;
-			} else {
-				return false;
-			}
-			return true;
+		public static void LogDebug(string text, params object[] args) {
+			try { Console.WriteLine(String.Format(text, args)); } catch { }
+		}
+		
+		public static int AccumulateWheelDelta(ref float accmulator, float delta) {
+			// Some mice may use deltas of say (0.2, 0.2, 0.2, 0.2, 0.2)
+			// We must use rounding at final step, not at every intermediate step.
+			accmulator += delta;
+			int steps = (int)accmulator;
+			accmulator -= steps;
+			return steps;
 		}
 
-		/// <summary> Attempts to caselessly parse the given string as a Key enum member,
-		/// returning defValue if there was an error parsing. </summary>
+		#if !LAUNCHER
 		public static bool TryParseEnum<T>(string value, T defValue, out T result) {
 			T mapping;
 			try {
@@ -118,14 +126,6 @@ namespace ClassicalSharp {
 			return true;
 		}
 		
-		public static void LogDebug(string text) {
-			Console.WriteLine(text);
-		}
-		
-		public static void LogDebug(string text, params object[] args) {
-			Console.WriteLine(String.Format(text, args));
-		}
-		
 		public static int AdjViewDist(float value) {
 			return (int)(1.4142135 * value);
 		}
@@ -133,22 +133,6 @@ namespace ClassicalSharp {
 		/// <summary> Returns the number of vertices needed to subdivide a quad. </summary>
 		public static int CountVertices(int axis1Len, int axis2Len, int axisSize) {
 			return CeilDiv(axis1Len, axisSize) * CeilDiv(axis2Len, axisSize) * 4;
-		}
-		
-		public static int Tint(int col, FastColour tint) {
-			FastColour adjCol = FastColour.Unpack(col);
-			adjCol *= tint;
-			return adjCol.Pack();
-		}
-		
-		public static byte FastByte(string s) {
-			int sum = 0;
-			switch (s.Length) {
-				case 1: sum = (s[0] - '0'); break;
-				case 2: sum = (s[0] - '0') * 10 + (s[1] - '0'); break;
-				case 3: sum = (s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0'); break;
-			}
-			return (byte)sum;
 		}
 		
 		/// <summary> Determines the skin type of the specified bitmap. </summary>
@@ -169,48 +153,90 @@ namespace ClassicalSharp {
 			return SkinType.Invalid;
 		}
 		
-		/// <summary> Returns whether the specified string starts with http:// or https:// </summary>
 		public static bool IsUrlPrefix(string value, int index) {
 			int http = value.IndexOf("http://", index);
 			int https = value.IndexOf("https://", index);
 			return http == index || https == index;
 		}
-		
+		#endif
+
 		/// <summary> Conversion for code page 437 characters from index 0 to 31 to unicode. </summary>
-		public const string ControlCharReplacements = "\0☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼";
+		const string ControlCharReplacements = "\0☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼";
 		
 		/// <summary> Conversion for code page 437 characters from index 127 to 255 to unicode. </summary>
-		public const string ExtendedCharReplacements = "⌂ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»" +
+		const string ExtendedCharReplacements = "⌂ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»" +
 			"░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌" +
 			"█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00a0";
 
-		public static bool IsValidInputChar(char c, Game game) {
-			if (c >= ' ' && c <= '~') return true; // ascii
+		public static bool IsValidInputChar(char c, bool supportsCP437) {
+			if (c == '?') return true;
+			byte cp437 = UnicodeToCP437(c);
+			if (cp437 == '?') return false; // not code page 437
 			
-			bool isCP437 = Utils.ControlCharReplacements.IndexOf(c) >= 0 ||
-				Utils.ExtendedCharReplacements.IndexOf(c) >= 0;
-			bool supportsCP437 = game.Server.SupportsFullCP437;
-			return supportsCP437 && isCP437;
+			return supportsCP437 || (cp437 == c);
+		}
+
+		public static byte UnicodeToCP437(char c) {
+			if (c >= ' ' && c <= '~') return (byte)c;
+			
+			int cIndex = ControlCharReplacements.IndexOf(c);
+			if (cIndex >= 0) return (byte)cIndex;
+			int eIndex = ExtendedCharReplacements.IndexOf(c);
+			if (eIndex >= 0) return (byte)(127 + eIndex);
+			return (byte)'?';
 		}
 		
-		public unsafe static string ToLower(string value) {
-			fixed(char* ptr = value) {
-				for (int i = 0; i < value.Length; i++) {
-					char c = ptr[i];
-					if (c < 'A' || c > 'Z') continue;
-					c += ' '; ptr[i] = c;
-				}
+		public static char CP437ToUnicode(byte c) {
+			if (c < 0x20) return ControlCharReplacements[c];
+			if (c < 0x7F) return (char)c;
+			return ExtendedCharReplacements[c - 0x7F];
+		}
+		
+		public static string GetFilename(string path) {
+			// Ignore directories: convert x/name to name and x\name to name
+			for (int i = path.Length - 1; i >= 0; i--) {
+				char c = path[i];
+				if (c == '/' || c == '\\') return path.Substring(i + 1);
 			}
-			return value;
+			return path;
 		}
 		
+		public static string ToLower(string src) {
+			bool hasUpper = false;
+			for (int i = 0; i < src.Length; i++) {
+				char c = src[i];
+				if (c >= 'A' && c <= 'Z') { hasUpper = true; break; }
+			}
+			
+			if (!hasUpper) return src;
+			char[] dst = new char[src.Length];
+			
+			for (int i = 0; i < src.Length; i++) {
+				char c = src[i];
+				if (c >= 'A' && c <= 'Z') { c += ' '; }
+				dst[i] = c;
+			}
+			return new string(dst);
+		}
+		
+		public static uint CRC32(byte[] data, int length) {
+			uint crc = 0xffffffffU;
+			for (int i = 0; i < length; i++) {
+				crc ^= data[i];
+				for (int j = 0; j < 8; j++)
+					crc = (crc >> 1) ^ (crc & 1) * 0xEDB88320;
+			}
+			return crc ^ 0xffffffffU;
+		}
+
+		#if !LAUNCHER
 		// Not all languages use . as their decimal point separator
 		public static bool TryParseDecimal(string s, out float result) {
-			if (s.IndexOf(',') >= 0) 
+			if (s.IndexOf(',') >= 0)
 				s = s.Replace(',', '.');
 			float temp;
 			
-			result = 0;			
+			result = 0;
 			if (!Single.TryParse(s, style, NumberFormatInfo.InvariantInfo, out temp)) return false;
 			if (Single.IsInfinity(temp) || Single.IsNaN(temp)) return false;
 			result = temp;
@@ -218,7 +244,7 @@ namespace ClassicalSharp {
 		}
 		
 		public static float ParseDecimal(string s) {
-			if (s.IndexOf(',') >= 0) 
+			if (s.IndexOf(',') >= 0)
 				s = s.Replace(',', '.');
 			return Single.Parse(s, style, NumberFormatInfo.InvariantInfo);
 		}
@@ -226,21 +252,6 @@ namespace ClassicalSharp {
 		const NumberStyles style = NumberStyles.AllowLeadingWhite | NumberStyles.AllowTrailingWhite
 			| NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint;
 		
-		
-		#if USE16_BIT
-		public static ushort[] UInt8sToUInt16s(byte[] src) {
-			ushort[] dst = new ushort[src.Length];
-			for (int i = 0; i < dst.Length; i++)
-				dst[i] = src[i];
-			return dst;
-		}
-		
-		public static byte[] UInt16sToUInt8s(ushort[] src) {
-			byte[] dst = new byte[src.Length];
-			for (int i = 0; i < dst.Length; i++)
-				dst[i] = (byte)src[i];
-			return dst;
-		}
 		#endif
 	}
 }

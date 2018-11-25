@@ -1,7 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using ClassicalSharp.Entities;
-using ClassicalSharp.GraphicsAPI;
 using ClassicalSharp.Physics;
 using OpenTK;
 
@@ -9,7 +8,7 @@ namespace ClassicalSharp.Model {
 
 	public class ZombieModel : IModel {
 		
-		public ZombieModel(Game window) : base(window) { }
+		public ZombieModel(Game game) : base(game) { SurivalScore = 80; }
 		
 		public override void CreateParts() {
 			vertices = new ModelVertex[boxVertices * 7];
@@ -48,7 +47,7 @@ namespace ClassicalSharp.Model {
 		}
 		
 		public override void DrawModel(Entity p) {
-			game.Graphics.BindTexture(GetTexture(p.MobTextureId));
+			ApplyTexture(p);
 			DrawRotate(-p.HeadXRadians, 0, 0, Head, true);
 			
 			DrawPart(Torso);
@@ -57,6 +56,11 @@ namespace ClassicalSharp.Model {
 			DrawRotate(90 * Utils.Deg2Rad, 0, p.anim.leftArmZ, LeftArm, false);
 			DrawRotate(90 * Utils.Deg2Rad, 0, p.anim.rightArmZ, RightArm, false);
 			DrawRotate(-p.HeadXRadians, 0, 0, Hat, true);
+			UpdateVB();
+		}
+		
+		public override void DrawArm(Entity p) {
+			DrawArmPart(RightArm);
 			UpdateVB();
 		}
 		

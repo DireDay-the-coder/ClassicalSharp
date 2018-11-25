@@ -5,65 +5,68 @@ using ClassicalSharp.Gui.Widgets;
 using OpenTK.Input;
 
 namespace ClassicalSharp.Gui.Screens {
-	public class DisconnectScreen : ClickableScreen {
+	public class DisconnectScreen : Screen {
 		
 		string title, message;
 		readonly Font titleFont, messageFont;
-		Widget[] widgets;
-		DateTime initTime, clearTime;
+		TextWidget titleWidget, messageWidget;
+		ButtonWidget reconnect;
+		DateTime initTime;
 		bool canReconnect;
 		
 		public DisconnectScreen(Game game, string title, string message) : base(game) {
 			this.title = title;
 			this.message = message;
 			
-			string reason = Utils.StripColours(message);
-			canReconnect = !(reason.StartsWith("Kicked ") || reason.StartsWith("Banned "));
+			string why = Utils.StripColours(message);
+			canReconnect = 
+				!(Utils.CaselessStarts(why, "Kicked ") || Utils.CaselessStarts(why, "Banned "));
 			
 			titleFont = new Font(game.FontName, 16, FontStyle.Bold);
-			messageFont = new Font(game.FontName, 16, FontStyle.Regular);
-		}
-		
-		public override void Render(double delta) {
-			if (canReconnect) UpdateDelayLeft(delta);
-			
-			// NOTE: We need to make sure that both the front and back buffers have
-			// definitely been drawn over, so we redraw the background multiple times.
-			if (DateTime.UtcNow < clearTime)
-				Redraw(delta);
+			messageFont = new Font(game.FontName, 16);
+			BlocksWorld = true;
+			HidesHud = true;
 		}
 		
 		public override void Init() {
-			game.SkipClear = true;
-			gfx.ContextLost += ContextLost;
-			gfx.ContextRecreated += ContextRecreated;
+			// NOTE: changing VSync can't be done within frame, causes crash on some GPUs
+			game.limitMillis = 1000 / 5f;			
+			Events.ContextLost      += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 			
 			ContextRecreated();
 			initTime = DateTime.UtcNow;
 			lastSecsLeft = delay;
 		}
-
+		
+		readonly PackedCol top = new PackedCol(64, 32, 32), bottom = new PackedCol(80, 16, 16);
+		public override void Render(double delta) {
+			if (canReconnect) UpdateDelayLeft(delta);
+			game.Graphics.Draw2DQuad(0, 0, game.Width, game.Height, top, bottom);
+			
+			game.Graphics.Texturing = true;
+			titleWidget.Render(delta);
+			messageWidget.Render(delta);
+			
+			if (canReconnect) reconnect.Render(delta);
+			game.Graphics.Texturing = false;
+		}
+		
 		public override void Dispose() {
-			game.SkipClear = false;
-			gfx.ContextLost -= ContextLost;
-			gfx.ContextRecreated -= ContextRecreated;
+			game.limitMillis = game.CalcLimitMillis(game.FpsLimit);
+			Events.ContextLost      -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 			
 			ContextLost();
 			titleFont.Dispose();
 			messageFont.Dispose();
 		}
 		
-		public override void OnResize(int width, int height) {
-			for (int i = 0; i < widgets.Length; i++)
-				widgets[i].CalculatePosition();
-			clearTime = DateTime.UtcNow.AddSeconds(0.5);
+		public override void OnResize() {
+			titleWidget.Reposition();
+			messageWidget.Reposition();
+			reconnect.Reposition();
 		}
-		
-		public override bool BlocksWorld { get { return true; } }
-		
-		public override bool HandlesAllInput { get { return true; } }
-		
-		public override bool HidesHud { get { return true; } }
 		
 		public override bool HandlesKeyDown(Key key) { return key < Key.F1 || key > Key.F35; }
 		
@@ -71,85 +74,67 @@ namespace ClassicalSharp.Gui.Screens {
 		
 		public override bool HandlesKeyUp(Key key) { return true; }
 		
-		public override bool HandlesMouseClick(int mouseX, int mouseY, MouseButton button) {
-			return HandleMouseClick(widgets, mouseX, mouseY, button);
+		public override bool HandlesMouseDown(int mouseX, int mouseY, MouseButton button) {
+			if (button != MouseButton.Left) return true;
+			
+			if (!reconnect.Disabled && reconnect.Contains(mouseX, mouseY)) {
+				string connect = "Connecting to " + game.IPAddress + ":" + game.Port +  "..";
+				game.Gui.SetNewScreen(new LoadingScreen(game, connect, ""));
+				game.Server.BeginConnect();
+			}
+			return true;
 		}
+		
+		public override bool HandlesMouseUp(int mouseX, int mouseY, MouseButton button) { return true; }		
 		
 		public override bool HandlesMouseMove(int mouseX, int mouseY) {
-			return HandleMouseMove(widgets, mouseX, mouseY);
+			reconnect.Active = !reconnect.Disabled && reconnect.Contains(mouseX, mouseY);
+			return true;
 		}
 		
-		public override bool HandlesMouseScroll(int delta) { return true; }
-		
-		public override bool HandlesMouseUp(int mouseX, int mouseY, MouseButton button) { return true; }
-		
+		public override bool HandlesMouseScroll(float delta) { return true; }
 		
 		int lastSecsLeft;
 		const int delay = 5;
 		bool lastActive = false;
 		void UpdateDelayLeft(double delta) {
-			ButtonWidget btn = (ButtonWidget)widgets[2];
 			double elapsed = (DateTime.UtcNow - initTime).TotalSeconds;
 			int secsLeft = Math.Max(0, (int)(delay - elapsed));
-			if (lastSecsLeft == secsLeft && btn.Active == lastActive) return;
+			if (lastSecsLeft == secsLeft && reconnect.Active == lastActive) return;
 			
-			btn.SetText(ReconnectMessage());
-			btn.Disabled = secsLeft != 0;
+			reconnect.Set(ReconnectMessage(), titleFont);
+			reconnect.Disabled = secsLeft != 0;
 			
-			Redraw(delta);
 			lastSecsLeft = secsLeft;
-			lastActive = btn.Active;
-			clearTime = DateTime.UtcNow.AddSeconds(0.5);
-		}
-		
-		readonly FastColour top = new FastColour(64, 32, 32), bottom = new FastColour(80, 16, 16);
-		void Redraw(double delta) {
-			gfx.Draw2DQuad(0, 0, game.Width, game.Height, top, bottom);
-			gfx.Texturing = true;
-			for (int i = 0; i < widgets.Length; i++)
-				widgets[i].Render(delta);
-			gfx.Texturing = false;
-		}
-		
-		void ReconnectClick(Game g, Widget w, MouseButton btn, int x, int y) {
-			if (btn != MouseButton.Left) return;
-			string connectString = "Connecting to " + game.IPAddress + ":" + game.Port +  "..";
-			for (int i = 0; i < game.Components.Count; i++)
-				game.Components[i].Reset(game);
-			game.BlockInfo.Reset(game);
-			
-			game.Gui.SetNewScreen(new LoadingMapScreen(game, connectString, ""));
-			game.Server.Connect(game.IPAddress, game.Port);
+			lastActive = reconnect.Active;
 		}
 		
 		string ReconnectMessage() {
 			if (!canReconnect) return "Reconnect";
 			
 			double elapsed = (DateTime.UtcNow - initTime).TotalSeconds;
-			int secsLeft = Math.Max(0, (int)(delay - elapsed));
-			return secsLeft == 0 ? "Reconnect" : "Reconnect in " + secsLeft;
+			int secsLeft = (int)(delay - elapsed);
+			return secsLeft > 0 ? "Reconnect in " + secsLeft : "Reconnect";
 		}
 		
 		protected override void ContextLost() {
-			if (widgets == null) return;
-			for (int i = 0; i < widgets.Length; i++)
-				widgets[i].Dispose();
+			titleWidget.Dispose();
+			messageWidget.Dispose();
+			reconnect.Dispose();
 		}
 		
 		protected override void ContextRecreated() {
-			if (gfx.LostContext) return;
-			clearTime = DateTime.UtcNow.AddSeconds(0.5);
-			widgets = new Widget[canReconnect ? 3 : 2];
+			if (game.Graphics.LostContext) return;
 			
-			widgets[0] = TextWidget.Create(game, title, titleFont)
+			titleWidget = TextWidget.Create(game, title, titleFont)
 				.SetLocation(Anchor.Centre, Anchor.Centre, 0, -30);
-			widgets[1] = TextWidget.Create(game, message, messageFont)
+			messageWidget = TextWidget.Create(game, message, messageFont)
 				.SetLocation(Anchor.Centre, Anchor.Centre, 0, 10);
 			
 			string msg = ReconnectMessage();
-			if (!canReconnect) return;
-			widgets[2] = ButtonWidget.Create(game, 300, msg, titleFont, ReconnectClick)
+			reconnect = ButtonWidget.Create(game, 300, msg, titleFont, null)
 				.SetLocation(Anchor.Centre, Anchor.Centre, 0, 80);
+			reconnect.Disabled = !canReconnect;
 		}
 	}
 }

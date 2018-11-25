@@ -1,18 +1,16 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using ClassicalSharp.Entities;
+using ClassicalSharp.Gui;
 using ClassicalSharp.Gui.Screens;
 using ClassicalSharp.Hotkeys;
+using ClassicalSharp.Map;
 using OpenTK;
 using OpenTK.Input;
 
 namespace ClassicalSharp {
 
 	public sealed class InputHandler {
-		
-		#if !ANDROID
-		public HotkeyList Hotkeys;
-		#endif
 		
 		Game game;
 		bool[] buttonsDown = new bool[3];
@@ -22,46 +20,38 @@ namespace ClassicalSharp {
 			RegisterInputHandlers();
 			Keys = new KeyMap();
 			picking = new PickingHandler(game, this);
-			
-			#if !ANDROID
-			Hotkeys = new HotkeyList();
-			Hotkeys.LoadSavedHotkeys();
-			#endif
+			HotkeyList.LoadSavedHotkeys();
 		}
 		
 		void RegisterInputHandlers() {
-			game.Keyboard.KeyDown += KeyDownHandler;
-			game.Keyboard.KeyUp += KeyUpHandler;
+			Keyboard.KeyDown += KeyDownHandler;
+			Keyboard.KeyUp += KeyUpHandler;
 			game.window.KeyPress += KeyPressHandler;
-			game.Mouse.WheelChanged += MouseWheelChanged;
-			game.Mouse.Move += MouseMove;
-			game.Mouse.ButtonDown += MouseButtonDown;
-			game.Mouse.ButtonUp += MouseButtonUp;
+			Mouse.WheelChanged += MouseWheelChanged;
+			Mouse.Move += MouseMove;
+			Mouse.ButtonDown += MouseButtonDown;
+			Mouse.ButtonUp += MouseButtonUp;
 		}
 		
+		public bool WinDown { get { return IsKeyDown(Key.WinLeft) || IsKeyDown(Key.WinRight); } }
 		public bool AltDown { get { return IsKeyDown(Key.AltLeft) || IsKeyDown(Key.AltRight); } }
 		public bool ControlDown { get { return IsKeyDown(Key.ControlLeft) || IsKeyDown(Key.ControlRight); } }
 		public bool ShiftDown { get { return IsKeyDown(Key.ShiftLeft) || IsKeyDown(Key.ShiftRight); } }
 		
 		public KeyMap Keys;
-		public bool IsKeyDown(Key key) {
-			return game.Keyboard[key];
-		}
+		public bool IsKeyDown(Key key) { return Keyboard.Get(key); }
 		
 		/// <summary> Returns whether the key associated with the given key binding is currently held down. </summary>
-		public bool IsKeyDown(KeyBind binding) {
-			Key key = Keys[binding];
-			return game.Keyboard[key];
-		}
+		public bool IsKeyDown(KeyBind binding) { return Keyboard.Get(Keys[binding]); }
 		
 		public bool IsMousePressed(MouseButton button) {
-			bool down = game.Mouse[button];
+			bool down = Mouse.Get(button);
 			if (down) return true;
 			
 			// Key --> mouse mappings
-			if (button == MouseButton.Left && IsKeyDown(KeyBind.MouseLeft)) return true;
+			if (button == MouseButton.Left   && IsKeyDown(KeyBind.MouseLeft)) return true;
 			if (button == MouseButton.Middle && IsKeyDown(KeyBind.MouseMiddle)) return true;
-			if (button == MouseButton.Right && IsKeyDown(KeyBind.MouseRight)) return true;
+			if (button == MouseButton.Right  && IsKeyDown(KeyBind.MouseRight)) return true;
 			return false;
 		}
 		
@@ -72,23 +62,22 @@ namespace ClassicalSharp {
 		// defer getting the targeted entity as it's a costly operation
 		internal int pickingId = -1;
 		internal void ButtonStateChanged(MouseButton button, bool pressed) {
-			if (buttonsDown[(int)button]) {
-				if (pickingId == -1) {
-					pickingId = game.Entities.GetClosetPlayer(game.LocalPlayer);
-				}
-				
-				game.Server.SendPlayerClick(button, false, (byte)pickingId, game.SelectedPos);
-				buttonsDown[(int)button] = false;
+			if (pressed) {
+				// Can send multiple Pressed events
+				ButtonStateUpdate(button, true);
+			} else {
+				if (!buttonsDown[(int)button]) return;
+				ButtonStateUpdate(button, false);
+			}
+		}
+		
+		void ButtonStateUpdate(MouseButton button, bool pressed) {
+			if (pickingId == -1) {
+				pickingId = game.Entities.GetClosetPlayer(game.LocalPlayer);
 			}
 			
-			if (pressed) {
-				if (pickingId == -1) {
-					pickingId = game.Entities.GetClosetPlayer(game.LocalPlayer);
-				}
-				
-				game.Server.SendPlayerClick(button, true, (byte)pickingId, game.SelectedPos);
-				buttonsDown[(int)button] = true;
-			}
+			game.Server.SendPlayerClick(button, pressed, (byte)pickingId, game.SelectedPos);
+			buttonsDown[(int)button] = pressed;
 		}
 		
 		internal void ScreenChanged(Screen oldScreen, Screen newScreen) {
@@ -106,144 +95,143 @@ namespace ClassicalSharp {
 		
 		#region Event handlers
 		
-		void MouseButtonUp(object sender, MouseButtonEventArgs e) {
-			if (!game.Gui.ActiveScreen.HandlesMouseUp(e.X, e.Y, e.Button)) {
-				if (game.Server.UsingPlayerClick && e.Button <= MouseButton.Middle) {
+		void MouseButtonUp(MouseButton btn) {
+			int x = Mouse.X, y = Mouse.Y;
+			if (!game.Gui.ActiveScreen.HandlesMouseUp(x, y, btn)) {
+				if (game.Server.UsingPlayerClick && btn <= MouseButton.Middle) {
 					pickingId = -1;
-					ButtonStateChanged(e.Button, false);
+					ButtonStateChanged(btn, false);
 				}
 			}
 		}
 
-		void MouseButtonDown(object sender, MouseButtonEventArgs e) {
-			if (!game.Gui.ActiveScreen.HandlesMouseClick(e.X, e.Y, e.Button)) {
-				bool left = e.Button == MouseButton.Left;
-				bool middle = e.Button == MouseButton.Middle;
-				bool right = e.Button == MouseButton.Right;
+		void MouseButtonDown(MouseButton btn) {
+			int x = Mouse.X, y = Mouse.Y;
+			if (!game.Gui.ActiveScreen.HandlesMouseDown(x, y, btn)) {
+				bool left   = btn == MouseButton.Left;
+				bool middle = btn == MouseButton.Middle;
+				bool right  = btn == MouseButton.Right;
 				PickBlocks(false, left, middle, right);
 			} else {
 				picking.lastClick = DateTime.UtcNow;
 			}
 		}
 
-		void MouseMove(object sender, MouseMoveEventArgs e) {
-			if (!game.Gui.ActiveScreen.HandlesMouseMove(e.X, e.Y)) {
-			}
+		void MouseMove(int deltaX, int deltaY) {
+			int x = Mouse.X, y = Mouse.Y;
+			game.Gui.ActiveScreen.HandlesMouseMove(x, y);
 		}
 
-		float deltaAcc = 0;
-		void MouseWheelChanged(object sender, MouseWheelEventArgs e) {
-			if (game.Gui.ActiveScreen.HandlesMouseScroll(e.Delta)) return;
+		void MouseWheelChanged(float delta) {
+			if (game.Gui.ActiveScreen.HandlesMouseScroll(delta)) return;
 			
 			Inventory inv = game.Inventory;
 			bool hotbar = AltDown || ControlDown || ShiftDown;
-			if ((!hotbar && game.Camera.Zoom(e.DeltaPrecise)) || DoFovZoom(e.DeltaPrecise) || !inv.CanChangeHeldBlock)
+			if ((!hotbar && game.Camera.Zoom(delta)) || DoFovZoom(delta) || !inv.CanChangeHeldBlock)
 				return;
-			ScrollHotbar(e.DeltaPrecise);
-		}
-		
-		void ScrollHotbar(float deltaPrecise) {
-			Inventory inv = game.Inventory;
-			if (AltDown) {
-				int index = inv.Offset / Inventory.BlocksPerRow;
-				inv.Offset = ScrolledIndex(deltaPrecise, index) * Inventory.BlocksPerRow;
-			} else {
-				inv.SelectedIndex = ScrolledIndex(deltaPrecise, inv.SelectedIndex);
-			}
-		}
-		
-		int ScrolledIndex(float deltaPrecise, int currentIndex) {
-			// Some mice may use deltas of say (0.2, 0.2, 0.2, 0.2, 0.2)
-			// We must use rounding at final step, not at every intermediate step.
-			deltaAcc += deltaPrecise;
-			int delta = (int)deltaAcc;
-			deltaAcc -= delta;
 			
-			const int blocksPerRow = Inventory.BlocksPerRow;
-			int diff = -delta % blocksPerRow;
-			int index = currentIndex + diff;
-			
-			if (index < 0) index += blocksPerRow;
-			if (index >= blocksPerRow) index -= blocksPerRow;
-			return index;
+			game.Gui.hudScreen.hotbar.HandlesMouseScroll(delta);
 		}
 
-		void KeyPressHandler(object sender, KeyPressEventArgs e) {
-			char key = e.KeyChar;
-			if (!game.Gui.ActiveScreen.HandlesKeyPress(key)) {
-			}
+		void KeyPressHandler(char keyChar) {
+			game.Gui.ActiveScreen.HandlesKeyPress(keyChar);
 		}
 		
-		void KeyUpHandler(object sender, KeyboardKeyEventArgs e) {
-			Key key = e.Key;
+		void KeyUpHandler(Key key) {
 			if (SimulateMouse(key, false)) return;
 			
-			if (!game.Gui.ActiveScreen.HandlesKeyUp(key)) {
-				if (key == Keys[KeyBind.ZoomScrolling])
-					SetFOV(game.DefaultFov, false);
+			if (key == Keys[KeyBind.ZoomScrolling]) {
+				SetFOV(game.DefaultFov, false);
 			}
+			game.Gui.ActiveScreen.HandlesKeyUp(key);
 		}
 
-		static int[] viewDistances = { 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 };
-		Key lastKey;
-		void KeyDownHandler(object sender, KeyboardKeyEventArgs e) {
-			Key key = e.Key;
+		static int[] normViewDists = new int[] { 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096 };
+		static int[] classicViewDists = new int[] { 8, 32, 128, 512 };
+		void KeyDownHandler(Key key) {
 			if (SimulateMouse(key, true)) return;
-			
 			
 			if (IsShutdown(key)) {
 				game.Exit();
 			} else if (key == Keys[KeyBind.Screenshot]) {
 				game.screenshotRequested = true;
-			} else if (!game.Gui.ActiveScreen.HandlesKeyDown(key)) {
-				if (!HandleBuiltinKey(key) && !game.LocalPlayer.input.Handles(key))
-					HandleHotkey(key);
+			} else if (game.Gui.ActiveScreen.HandlesKeyDown(key)) {
+			} else if (HandleCoreKey(key)) {
+			} else if (game.LocalPlayer.HandlesKey(key)) {
+			} else {
+				int idx = HotkeyList.FindPartial(key, game.Input);
+				if (idx == -1) return;
+				
+				Hotkey hotkey = HotkeyList.Hotkeys[idx];
+				string text = hotkey.Text;
+				
+				if (!hotkey.StaysOpen) {
+					game.Chat.Send(text, false);
+				} else if (game.Gui.activeScreen == null) {
+					game.Gui.hudScreen.OpenInput(text);
+				}
 			}
-			lastKey = key;
 		}
 		
 		bool IsShutdown(Key key) {
-			if (key == Key.F4 && (lastKey == Key.AltLeft || lastKey == Key.AltRight))
-				return true;
+			if (key == Key.F4 && AltDown) return true;
 			// On OSX, Cmd+Q should also terminate the process.
 			if (!OpenTK.Configuration.RunningOnMacOS) return false;
-			return key == Key.Q && (lastKey == Key.WinLeft || lastKey == Key.WinRight);
+			return key == Key.Q && WinDown;
 		}
 		
-		void HandleHotkey(Key key) {
-			string text;
-			bool more;
-			if (!Hotkeys.IsHotkey(key, game.Input, out text, out more)) return;
-			
-			if (!more) {
-				game.Server.SendChat(text, false);
-			} else if (game.Gui.activeScreen == null) {
-				game.Gui.hudScreen.OpenTextInputBar(text);
-			}
-		}
-		
-		MouseButtonEventArgs simArgs = new MouseButtonEventArgs();
 		bool SimulateMouse(Key key, bool pressed) {
 			Key left = Keys[KeyBind.MouseLeft], middle = Keys[KeyBind.MouseMiddle],
 			right = Keys[KeyBind.MouseRight];
 			
-			if (!(key == left || key == middle || key == right))
-				return false;
-			simArgs.Button = key == left ? MouseButton.Left :
-				key == middle ? MouseButton.Middle : MouseButton.Right;
-			simArgs.X = game.Mouse.X;
-			simArgs.Y = game.Mouse.Y;
-			simArgs.IsPressed = pressed;
+			if (!(key == left || key == middle || key == right)) return false;
+			MouseButton btn = key == left ? MouseButton.Left : key == middle ? MouseButton.Middle : MouseButton.Right;
 			
-			if (pressed) MouseButtonDown(null, simArgs);
-			else MouseButtonUp(null, simArgs);
+			if (pressed) MouseButtonDown(btn);
+			else MouseButtonUp(btn);
 			return true;
 		}
 		
-		bool HandleBuiltinKey(Key key) {
+		bool HandleNonClassicKey(Key key) {
 			if (key == Keys[KeyBind.HideGui]) {
 				game.HideGui = !game.HideGui;
-			} else if (key == Keys[KeyBind.HideFps]) {
+			} else if (key == Keys[KeyBind.SmoothCamera]) {
+				Toggle(key, ref game.SmoothCamera,
+				       "  &eSmooth camera is &aenabled",
+				       "  &eSmooth camera is &cdisabled");
+			} else if (key == Keys[KeyBind.AxisLines]) {
+				Toggle(key, ref game.ShowAxisLines,
+				       "  &eAxis lines (&4X&e, &2Y&e, &1Z&e) now show",
+				       "  &eAxis lines no longer show");
+			} else if (key == Keys[KeyBind.Autorotate]) {
+				Toggle(key, ref game.AutoRotate,
+				       "  &eAuto rotate is &aenabled",
+				       "  &eAuto rotate is &cdisabled");
+			} else if (key == Keys[KeyBind.ThirdPerson]) {
+				game.CycleCamera();
+			} else if (key == game.Mapping(KeyBind.DropBlock)) {
+				Inventory inv = game.Inventory;
+				if (inv.CanChangeSelected() && inv.Selected != Block.Air) {
+					// Don't assign Selected directly, because we don't want held block
+					// switching positions if they already have air in their inventory hotbar.
+					inv[inv.SelectedIndex] = Block.Air;
+					Events.RaiseHeldBlockChanged();
+				}
+			} else if (key == Keys[KeyBind.IDOverlay]) {
+				if (game.Gui.overlays.Count > 0) return true;
+				game.Gui.ShowOverlay(new TexIdsOverlay(game), false);
+			} else if (key == Keys[KeyBind.BreakableLiquids]) {
+				Toggle(key, ref game.BreakableLiquids,
+				       "  &eBreakable liquids is &aenabled",
+				       "  &eBreakable liquids is &cdisabled");
+			} else {
+				return false;
+			}
+			return true;
+		}
+		
+		bool HandleCoreKey(Key key) {
+			if (key == Keys[KeyBind.HideFps]) {
 				game.ShowFPS = !game.ShowFPS;
 			} else if (key == Keys[KeyBind.Fullscreen]) {
 				WindowState state = game.window.WindowState;
@@ -251,64 +239,54 @@ namespace ClassicalSharp {
 					game.window.WindowState = state == WindowState.Fullscreen ?
 						WindowState.Normal : WindowState.Fullscreen;
 				}
-			} else if (key == Keys[KeyBind.AxisLines]) {
-				ToggleAxisLines();
-			} else if (key == Keys[KeyBind.Autorotate]) {
-				ToggleAutoRotate();
-			} else if (key == Keys[KeyBind.ThirdPerson]) {
-				game.CycleCamera();
 			} else if (key == Keys[KeyBind.ToggleFog]) {
+				int[] viewDists = game.UseClassicOptions ? classicViewDists : normViewDists;
 				if (game.Input.ShiftDown) {
-					CycleDistanceBackwards();
+					CycleDistanceBackwards(viewDists);
 				} else {
-					CycleDistanceForwards();
+					CycleDistanceForwards(viewDists);
 				}
-			} else if (key == Keys[KeyBind.PauseOrExit] && !game.World.IsNotLoaded) {
+			} else if ((key == Keys[KeyBind.PauseOrExit] || key == Key.Pause) && !game.Gui.ActiveScreen.HandlesAllInput) {
 				game.Gui.SetNewScreen(new PauseScreen(game));
-			} else if (!game.Mode.HandlesKeyDown(key)) {
-				return false;
+			} else if (key == game.Mapping(KeyBind.Inventory) && game.Gui.ActiveScreen == game.Gui.hudScreen) {
+				game.Gui.SetNewScreen(new InventoryScreen(game));
+			} else if (key == Key.F5 && game.ClassicMode) {
+				Weather weather = game.World.Env.Weather == Weather.Sunny ? Weather.Rainy : Weather.Sunny;
+				game.World.Env.SetWeather(weather);
+			} else {
+				if (game.ClassicMode) return false;
+				return HandleNonClassicKey(key);
 			}
 			return true;
 		}
-		
-		void ToggleAxisLines() {
-			game.ShowAxisLines = !game.ShowAxisLines;
-			Key key = Keys[KeyBind.AxisLines];
-			if (game.ShowAxisLines) {
-				game.Chat.Add("  &eAxis lines (&4X&e, &2Y&e, &1Z&e) now show. Press &a" + key + " &eto disable.");
+
+		void Toggle(Key key, ref bool target, string enableMsg, string disableMsg) {
+			target = !target;
+			if (target) {
+				game.Chat.Add(enableMsg + ". &ePress &a" + key + " &eto disable.");
 			} else {
-				game.Chat.Add("  &eAxis lines no longer show. Press &a" + key + " &eto re-enable.");
+				game.Chat.Add(disableMsg + ". &ePress &a" + key + " &eto re-enable.");
 			}
 		}
 		
-		void ToggleAutoRotate() {
-			game.autoRotate = !game.autoRotate;
-			Key key = Keys[KeyBind.Autorotate];
-			if (game.autoRotate) {
-				game.Chat.Add("  &eAuto rotate is &aenabled. &ePress &a" + key + " &eto disable.");
-			} else {
-				game.Chat.Add("  &eAuto rotate is &cdisabled. &ePress &a" + key + " &eto re-enable.");
-			}
-		}
-		
-		void CycleDistanceForwards() {
-			for (int i = 0; i < viewDistances.Length; i++) {
-				int dist = viewDistances[i];
+		void CycleDistanceForwards(int[] viewDists) {
+			for (int i = 0; i < viewDists.Length; i++) {
+				int dist = viewDists[i];
 				if (dist > game.UserViewDistance) {
-					game.SetViewDistance(dist, true); return;
+					game.UserSetViewDistance(dist); return;
 				}
 			}
-			game.SetViewDistance(viewDistances[0], true);
+			game.UserSetViewDistance(viewDists[0]);
 		}
 		
-		void CycleDistanceBackwards() {
-			for (int i = viewDistances.Length - 1; i >= 0; i--) {
-				int dist = viewDistances[i];
+		void CycleDistanceBackwards(int[] viewDists) {
+			for (int i = viewDists.Length - 1; i >= 0; i--) {
+				int dist = viewDists[i];
 				if (dist < game.UserViewDistance) {
-					game.SetViewDistance(dist, true); return;
+					game.UserSetViewDistance(dist); return;
 				}
 			}
-			game.SetViewDistance(viewDistances[viewDistances.Length - 1], true);
+			game.UserSetViewDistance(viewDists[viewDists.Length - 1]);
 		}
 		
 		float fovIndex = -1;

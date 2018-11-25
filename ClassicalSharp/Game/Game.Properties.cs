@@ -7,11 +7,8 @@ using System.Net;
 using ClassicalSharp.Audio;
 using ClassicalSharp.Commands;
 using ClassicalSharp.Entities;
-using ClassicalSharp.Events;
 using ClassicalSharp.GraphicsAPI;
-using ClassicalSharp.Gui;
 using ClassicalSharp.Map;
-using ClassicalSharp.Mode;
 using ClassicalSharp.Model;
 using ClassicalSharp.Network;
 using ClassicalSharp.Particles;
@@ -42,62 +39,37 @@ namespace ClassicalSharp {
 		void OnNewMapLoaded(Game game);
 	}
 	
+	public delegate void ScheduledTaskCallback(ScheduledTask task);	
 	/// <summary> Represents a task that runs on the main thread every certain interval. </summary>
 	public class ScheduledTask {
 		public double Accumulator, Interval;
-		public Action<ScheduledTask> Callback;
+		public ScheduledTaskCallback Callback;
 	}
 	
 	public partial class Game {
 		
-		/// <summary> Abstracts the underlying 3D graphics rendering API. </summary>
 		public IGraphicsApi Graphics;
-		
-		/// <summary> Handles game mode specific functionality. </summary>
-		public IGameMode Mode;
-		
-		/// <summary> Contains the block data and metadata/properties for the player's current world. </summary>
-		public World World;
-		
-		/// <summary> Represents a connection to a multiplayer or a singleplayer server. </summary>
+		public World World;		
 		public IServerConnection Server;
 		
-		/// <summary> List of all entities in the current map, including the player. </summary>
 		public EntityList Entities;
-		
-		/// <summary> Entity representing the player. </summary>
 		public LocalPlayer LocalPlayer;
-		
-		/// <summary> Contains information for each player in the current world 
-		/// (or for whole server if supported). </summary>
 		public TabList TabList;
-		
-		/// <summary> Current camera the player is using to view the world. </summary>
+
 		public Camera Camera;
-		/// <summary> List of all cameras the user can use to view the world. </summary>
 		public List<Camera> Cameras = new List<Camera>();
-		
-		/// <summary> Contains the metadata about each currently defined block. </summary>
-		/// <remarks> e.g. blocks light, height, texture IDs, etc. </remarks>
-		public BlockInfo BlockInfo;
 		
 		/// <summary> Total rendering time(in seconds) elapsed since the client was started. </summary>
 		public double accumulator;
-		public TerrainAtlas2D TerrainAtlas;
-		public TerrainAtlas1D TerrainAtlas1D;
-		public SkinType DefaultPlayerSkinType;
 		
-		/// <summary> Accumulator for the number of chunk updates performed. Reset every second. </summary>
 		public int ChunkUpdates;
 		
-		/// <summary> Whether the third person camera should have their camera position clipped so as to not intersect blocks. </summary>
 		public bool CameraClipping = true;
-		
-		public bool SkipClear = false;
 		
 		public IWorldLighting Lighting;
 		
 		public MapRenderer MapRenderer;
+		public ChunkUpdater ChunkUpdater;
 		public MapBordersRenderer MapBordersRenderer;
 		public EnvRenderer EnvRenderer;
 		public WeatherRenderer WeatherRenderer;
@@ -111,12 +83,7 @@ namespace ClassicalSharp {
 		public PickedPosRenderer Picking;
 		public PickedPos SelectedPos = new PickedPos(), CameraClipPos = new PickedPos();
 		public ModelCache ModelCache;
-		internal string skinServer, chatInInputBuffer = null;
-		internal int defaultIb;
-		public OtherEvents Events = new OtherEvents();
-		public EntityEvents EntityEvents = new EntityEvents();
-		public WorldEvents WorldEvents = new WorldEvents();
-		public UserEvents UserEvents = new UserEvents();
+		internal string skinServer;
 		public InputHandler Input;
 		public Chat Chat;
 		public HeldBlockRenderer HeldBlockRenderer;
@@ -128,44 +95,36 @@ namespace ClassicalSharp {
 		public List<ScheduledTask> Tasks = new List<ScheduledTask>();
 
 		/// <summary> Whether x to stone brick tiles should be used. </summary>
-		public bool UseCPEBlocks = false;
+		public bool SupportsCPEBlocks = false;
 		
-		/// <summary> Account username of the player. </summary>
 		public string Username;
-		
-		/// <summary> Verification key used for multiplayer, unique for the username and individual server. </summary>
 		public string Mppass;
-		
-		/// <summary> IP address of multiplayer server connected to, null if singleplayer. </summary>
+
 		public IPAddress IPAddress;
-		
-		/// <summary> Port of multiplayer server connected to, 0 if singleplayer. </summary>
 		public int Port;
 		
 		/// <summary> Radius of the sphere the player can see around the position of the current camera. </summary>
-		public float ViewDistance = 512;
-		internal float MaxViewDistance = 32768, UserViewDistance = 512;
+		public int ViewDistance = 512;
+		internal int MaxViewDistance = 32768, UserViewDistance = 512;
 		
-		/// <summary> Field of view for the current camera in degrees. </summary>
 		public int Fov = 70;
-		internal int DefaultFov, ZoomFov = 0;
+		internal int DefaultFov, ZoomFov;
 		
-		/// <summary> Strategy used to limit how many frames should be displayed at most each second. </summary>
 		public FpsLimitMethod FpsLimit;
 		
-		/// <summary> Whether lines should be rendered for each axis. </summary>
 		public bool ShowAxisLines;
-		
+	
 		/// <summary> Whether players should animate using simple swinging parallel to their bodies. </summary>
 		public bool SimpleArmsAnim;
-		
-		/// <summary> Whether mouse rotation on the y axis should be inverted. </summary>
+
+		/// <summary> Whether the arm model should use the classic position. </summary>
+		public bool ClassicArmModel;
+
 		public bool InvertMouse;
 		
-		public long Vertices;
+		public int Vertices;
 		public FrustumCulling Culling;
-		public AsyncDownloader AsyncDownloader;
-		public Matrix4 View, Projection;
+		public AsyncDownloader Downloader;
 		
 		/// <summary> How sensitive the client is to changes in the player's mouse position. </summary>
 		public int MouseSensitivity = 30;
@@ -180,30 +139,27 @@ namespace ClassicalSharp {
 		
 		public bool SmoothLighting;
 		
-		public bool ChatLogging = true;
+		public bool ChatLogging;
 		
-		public bool autoRotate = true;
+		public bool AutoRotate = true;
+		
+		public bool SmoothCamera;
 		
 		public string FontName = "Arial";
 		
+		public int MaxChunkUpdates = 30;
+		
 		public int ChatLines = 12;
-		public bool ClickableChat = false, HideGui = false, ShowFPS = true;
+		public bool ClickableChat, HideGui, ShowFPS;
 		internal float HotbarScale = 1, ChatScale = 1, InventoryScale = 1;
 		public bool ViewBobbing, ShowBlockInHand;
-		public bool UseSound, UseMusic, ModifiableLiquids;
+		public bool BreakableLiquids;
+		public int SoundsVolume, MusicVolume;
 		
 		public Vector3 CurrentCameraPos;
 		
 		public Animations Animations;
-		internal int CloudsTex;
 		internal bool screenshotRequested;
-		
-		internal EntryList AcceptedUrls = new EntryList("texturecache", "acceptedurls.txt"); 
-		internal EntryList DeniedUrls = new EntryList("texturecache", "deniedurls.txt");
-		internal EntryList ETags = new EntryList("texturecache", "etags.txt");
-		internal EntryList LastModified = new EntryList("texturecache", "lastmodified.txt");
-		
-		PluginLoader plugins;		
 		
 		/// <summary> Calculates the amount that the hotbar widget should be scaled by when rendered. </summary>
 		/// <remarks> Affected by both the current resolution of the window, as well as the
@@ -213,7 +169,7 @@ namespace ClassicalSharp {
 		/// <summary> Calculates the amount that the block inventory menu should be scaled by when rendered. </summary>
 		/// <remarks> Affected by both the current resolution of the window, as well as the
 		/// scaling specified by the user (field InventoryScale). </remarks>
-		public float GuiInventoryScale { get { return Scale(MinWindowScale  * (InventoryScale * 0.5f)); } }
+		public float GuiInventoryScale { get { return Scale(MinWindowScale * (InventoryScale * 0.5f)); } }
 		
 		/// <summary> Calculates the amount that 2D chat widgets should be scaled by when rendered. </summary>
 		/// <remarks> Affected by both the current resolution of the window, as well as the
@@ -232,9 +188,8 @@ namespace ClassicalSharp {
 		/// this method returns "default.zip". </remarks>
 		public string DefaultTexturePack {
 			get {
-				string path = Path.Combine(Program.AppDirectory, TexturePack.Dir);
-				path = Path.Combine(path, defTexturePack);
-				return File.Exists(path) && !ClassicMode ? defTexturePack : "default.zip"; 
+				string texPath = Path.Combine("texpacks", defTexturePack);
+				return Platform.FileExists(texPath) && !ClassicMode ? defTexturePack : "default.zip"; 
 			}
 			set {
 				defTexturePack = value;
@@ -242,44 +197,7 @@ namespace ClassicalSharp {
 			}
 		}
 		
-		internal IPlatformWindow window;
-		public MouseDevice Mouse;
-		public KeyboardDevice Keyboard;
-		
+		public INativeWindow window;		
 		public int Width, Height;
-		
-		public bool Focused { get { return window.Focused; } }
-		
-		public bool Exists { get { return window.Exists; } }
-		
-		public Point PointToScreen(Point coords) {
-			return window.PointToScreen(coords);
-		}
-		
-		public bool VSync {
-			get { return window.VSync; }
-			set { window.VSync = value; }
-		}
-		
-		bool visible = true;
-		internal bool realVisible = true;
-		public bool CursorVisible { 
-			get { return visible; }
-			set {
-				// Defer mouse visibility changes.
-				realVisible = value;
-				if (Gui.overlays.Count > 0) return;
-				   
-				// Only set the value when it has changes.
-				if (visible == value) return;
-				window.CursorVisible = value;
-				visible = value;
-			}
-		}
-		
-		public Point DesktopCursorPos {
-			get { return window.DesktopCursorPos; }
-			set { window.DesktopCursorPos = value; }
-		}
 	}
 }

@@ -3,6 +3,9 @@ using System;
 using ClassicalSharp;
 
 namespace Launcher.Gui.Widgets {
+	
+	public delegate void WidgetClickHandler(int mouseX, int mouseY);
+	
 	/// <summary> Represents a graphical element/control. </summary>
 	public abstract class Widget {
 		
@@ -33,7 +36,7 @@ namespace Launcher.Gui.Widgets {
 		/// <summary>Whether this widget can be selected via pressing tab. </summary>
 		public bool TabSelectable;
 		
-		public Action<int, int> OnClick;
+		public WidgetClickHandler OnClick;
 		
 		public Widget(LauncherWindow window) {
 			Window = window;
@@ -60,8 +63,8 @@ namespace Launcher.Gui.Widgets {
 		}
 		
 		static int CalcPos(Anchor anchor, int offset, int size, int axisLen) {
-			if (anchor == Anchor.LeftOrTop) return offset;
-			if (anchor == Anchor.BottomOrRight) return offset + axisLen - size;
+			if (anchor == Anchor.Min) return offset;
+			if (anchor == Anchor.Max) return offset + axisLen - size;
 			return offset + axisLen / 2 - size / 2;
 		}
 	}

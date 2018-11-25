@@ -1,12 +1,7 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using OpenTK;
-
-#if USE16_BIT
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Blocks {
 	
@@ -29,16 +24,16 @@ namespace ClassicalSharp.Blocks {
 			if (b == Block.Water || b == Block.StillWater)
 				return 0.1f;
 			if (b == Block.Lava || b == Block.StillLava)
-				return 2f;
+				return 1.8f;
 			return 0;
 		}
 		
-		public static FastColour FogColour(BlockID b) {
+		public static PackedCol FogColour(BlockID b) {
 			if (b == Block.Water || b == Block.StillWater)
-				return new FastColour(5, 5, 51);
+				return new PackedCol(5, 5, 51);
 			if (b == Block.Lava || b == Block.StillLava)
-				return new FastColour(153, 25, 0);
-			return default(FastColour);
+				return new PackedCol(153, 25, 0);
+			return default(PackedCol);
 		}
 		
 		public static byte Collide(BlockID b) {
@@ -54,6 +49,8 @@ namespace ClassicalSharp.Blocks {
 		}
 		
 		public static byte MapOldCollide(BlockID b, byte collide) {
+			if (b == Block.Rope && collide == CollideType.Gas)
+				return CollideType.ClimbRope;
 			if (b == Block.Ice && collide == CollideType.Solid) 
 				return CollideType.Ice;
 			if ((b == Block.Water || b == Block.StillWater) && collide == CollideType.Liquid)
@@ -68,16 +65,16 @@ namespace ClassicalSharp.Blocks {
 			         || b == Block.Air || Draw(b) == DrawType.Sprite);
 		}
 
-		public static SoundType StepSound(BlockID b) {
+		public static byte StepSound(BlockID b) {
 			if (b == Block.Glass) return SoundType.Stone;
-			if (b == Block.Rope) return SoundType.Cloth;			
+			if (b == Block.Rope) return SoundType.Cloth;
 			if (Draw(b) == DrawType.Sprite) return SoundType.None;
 			return DigSound(b);
 		}
 		
 		
 		public static byte Draw(BlockID b) {
-			if (b == Block.Air || b == Block.Invalid) return DrawType.Gas;
+			if (b == Block.Air) return DrawType.Gas;
 			if (b == Block.Leaves) return DrawType.TransparentThick;
 
 			if (b == Block.Ice || b == Block.Water || b == Block.StillWater) 
@@ -92,7 +89,7 @@ namespace ClassicalSharp.Blocks {
 			return DrawType.Opaque;
 		}		
 
-		public static SoundType DigSound(BlockID b) {
+		public static byte DigSound(BlockID b) {
 			if (b >= Block.Red && b <= Block.White) 
 				return SoundType.Cloth;
 			if (b >= Block.LightPink && b <= Block.Turquoise) 

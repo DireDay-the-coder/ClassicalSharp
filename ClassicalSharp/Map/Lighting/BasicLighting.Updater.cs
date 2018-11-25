@@ -1,12 +1,8 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using ClassicalSharp.Renderers;
-
-#if USE16_BIT
+using BlockRaw = System.Byte;
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Map {
 	
@@ -25,13 +21,13 @@ namespace ClassicalSharp.Map {
 			RefreshAffected(x, y, z, newBlock, lightH + 1, newHeight);
 		}
 		
-		MapRenderer renderer;		
-		void UpdateLighting(int x, int y, int z, BlockID oldBlock, 
+		MapRenderer renderer;
+		void UpdateLighting(int x, int y, int z, BlockID oldBlock,
 		                    BlockID newBlock, int index, int lightH) {
-			bool didBlock = info.BlocksLight[oldBlock];
-			bool nowBlocks = info.BlocksLight[newBlock];
-			int oldOffset = (info.LightOffset[oldBlock] >> Side.Top) & 1;
-			int newOffset = (info.LightOffset[newBlock] >> Side.Top) & 1;
+			bool didBlock = BlockInfo.BlocksLight[oldBlock];
+			bool nowBlocks = BlockInfo.BlocksLight[newBlock];
+			int oldOffset = (BlockInfo.LightOffset[oldBlock] >> Side.Top) & 1;
+			int newOffset = (BlockInfo.LightOffset[newBlock] >> Side.Top) & 1;
 			
 			// Two cases we need to handle here:
 			if (didBlock == nowBlocks) {
@@ -51,7 +47,7 @@ namespace ClassicalSharp.Map {
 				// For a solid block on top of an upside down slab, they will both have the same light height.
 				// So we need to account for this particular case.
 				BlockID above = y == (height - 1) ? Block.Air : game.World.GetBlock(x, y + 1, z);
-				if (info.BlocksLight[above]) return;
+				if (BlockInfo.BlocksLight[above]) return;
 				
 				if (nowBlocks) {
 					heightmap[index] = (short)(y - newOffset);
@@ -91,36 +87,50 @@ namespace ClassicalSharp.Map {
 		}
 		
 		bool Needs(BlockID block, BlockID other) {
-			return info.Draw[block] != DrawType.Opaque || info.Draw[other] != DrawType.Gas;
+			return BlockInfo.Draw[block] != DrawType.Opaque || BlockInfo.Draw[other] != DrawType.Gas;
 		}
 		
 		void ResetNeighbour(int x, int y, int z, BlockID block,
 		                    int cx, int cy, int cz, int minCy, int maxCy) {
 			World world = game.World;
 			if (minCy == maxCy) {
-				int index = x + world.Width * (z + y * world.Length);
-				ResetNeighourChunk(cx, cy, cz, block, y, index, y);
+				int minY = cy << 4;
+				int i = x + world.Width * (z + y * world.Length);
+				
+				if (NeedsNeighbour(block, i, minY, y, y)) {
+					renderer.RefreshChunk(cx, cy, cz);
+				}
 			} else {
 				for (cy = maxCy; cy >= minCy; cy--) {
-					int maxY = Math.Min(world.Height - 1, (cy << 4) + 15);
-					int index = x + world.Width * (z + maxY * world.Length);
-					ResetNeighourChunk(cx, cy, cz, block, maxY, index, y);
+					int minY = cy << 4, maxY = Math.Min(world.MaxY, (cy << 4) + 15);
+					int i = x + world.Width * (z + maxY * world.Length);
+					
+					if (NeedsNeighbour(block, i, minY, maxY, y)) {
+						renderer.RefreshChunk(cx, cy, cz);
+					}
 				}
 			}
 		}
 		
-		void ResetNeighourChunk(int cx, int cy, int cz, BlockID block,
-		                        int y, int index, int nY) {
+		bool NeedsNeighbour(BlockID block, int i, int minY, int y, int nY) {
 			World world = game.World;
-			int minY = cy << 4;
+			BlockRaw[] blocks = world.blocks;
 			
 			// Update if any blocks in the chunk are affected by light change
-			for (; y >= minY; y--) {
-				BlockID other = world.blocks[index];
-				bool affected = y == nY ? Needs(block, other) : info.Draw[other] != DrawType.Gas;
-				if (affected) { renderer.RefreshChunk(cx, cy, cz); return; }
-				index -= world.Width * world.Length;
+			if (BlockInfo.MaxUsed < 256) {
+				for (; y >= minY; y--, i -= world.OneY) {
+					BlockID other = blocks[i];
+					bool affected = y == nY ? Needs(block, other) : BlockInfo.Draw[other] != DrawType.Gas;
+					if (affected) return true;
+				}
+			} else {
+				for (; y >= minY; y--, i -= world.OneY) {
+					BlockID other = (BlockID)(blocks[i] | (world.blocks2[i] << 8));
+					bool affected = y == nY ? Needs(block, other) : BlockInfo.Draw[other] != DrawType.Gas;
+					if (affected) return true;
+				}
 			}
+			return false;
 		}
 		
 		void ResetColumn(int cx, int cy, int cz, int minCy, int maxCy) {

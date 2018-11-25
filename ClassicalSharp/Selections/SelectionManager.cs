@@ -9,24 +9,22 @@ namespace ClassicalSharp.Selections {
 	public class SelectionManager : IGameComponent {
 		
 		protected Game game;
-		IGraphicsApi gfx;
 		VertexP3fC4b[] vertices, lineVertices;
 		int vb, lineVb;
 		
-		public void Init(Game game) {
+		void IGameComponent.Init(Game game) {
 			this.game = game;
-			gfx = game.Graphics;
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			Events.ContextLost      += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 		}
 
-		public void Ready(Game game) { }
-		public void Reset(Game game) { selections.Clear(); }
-		public void OnNewMap(Game game) { selections.Clear(); }
-		public void OnNewMapLoaded(Game game) { }
+		void IGameComponent.Ready(Game game) { }
+		void IGameComponent.Reset(Game game) { selections.Clear(); }
+		void IGameComponent.OnNewMap(Game game) { selections.Clear(); }
+		void IGameComponent.OnNewMapLoaded(Game game) { }
 		
 		List<SelectionBox> selections = new List<SelectionBox>(256);
-		public void AddSelection(byte id, Vector3I p1, Vector3I p2, FastColour col) {
+		public void AddSelection(byte id, Vector3I p1, Vector3I p2, PackedCol col) {
 			RemoveSelection(id);
 			SelectionBox selection = new SelectionBox(p1, p2, col);
 			selection.ID = id;
@@ -66,22 +64,23 @@ namespace ClassicalSharp.Selections {
 				box.Render(delta, vertices, lineVertices, ref index, ref lineIndex);
 			}
 			
+			IGraphicsApi gfx = game.Graphics;
 			gfx.SetBatchFormat(VertexFormat.P3fC4b);
-			gfx.UpdateDynamicVb(DrawMode.Lines, lineVb, lineVertices,
-			                    selections.Count * LineVerticesCount);
+			gfx.UpdateDynamicVb_Lines(lineVb, lineVertices,
+			                          selections.Count * LineVerticesCount);
 			
 			gfx.DepthWrite = false;
 			gfx.AlphaBlending = true;
-			gfx.UpdateDynamicIndexedVb(DrawMode.Triangles, vb, vertices,
-			                           selections.Count * VerticesCount);
+			gfx.UpdateDynamicVb_IndexedTris(vb, vertices,
+			                                selections.Count * VerticesCount);
 			gfx.DepthWrite = true;
 			gfx.AlphaBlending = false;
 		}
 		
-		public void Dispose() {
+		void IDisposable.Dispose() {
 			ContextLost();
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;
+			Events.ContextLost      -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 		
 		const int VerticesCount = 6 * 4, LineVerticesCount = 12 * 2;
@@ -92,8 +91,8 @@ namespace ClassicalSharp.Selections {
 		
 		void ContextRecreated() {
 			if (vertices == null) return;
-			vb = gfx.CreateDynamicVb(VertexFormat.P3fC4b, vertices.Length);
-			lineVb = gfx.CreateDynamicVb(VertexFormat.P3fC4b, lineVertices.Length);
+			vb = game.Graphics.CreateDynamicVb(VertexFormat.P3fC4b, vertices.Length);
+			lineVb = game.Graphics.CreateDynamicVb(VertexFormat.P3fC4b, lineVertices.Length);
 		}
 	}
 }

@@ -1,6 +1,6 @@
 ﻿// ClassicalSharp copyright 2014-2016 UnknownShadow200 | Licensed under MIT
 using System;
-using System.IO;
+using ClassicalSharp;
 using ClassicalSharp.Network;
 using Launcher.Gui.Views;
 using Launcher.Patcher;
@@ -27,8 +27,8 @@ namespace Launcher.Gui.Screens {
 		
 		void SetWidgetHandlers() {
 			widgets[view.yesIndex].OnClick = DownloadResources;
-			widgets[view.noIndex].OnClick = (x, y) => GotoNextMenu();
-			widgets[view.cancelIndex].OnClick = (x, y) => GotoNextMenu();
+			widgets[view.noIndex].OnClick = GotoNextMenu;
+			widgets[view.cancelIndex].OnClick = GotoNextMenu;
 		}
 		
 		bool failed;
@@ -40,7 +40,7 @@ namespace Launcher.Gui.Screens {
 				failed = true;
 			
 			if (!fetcher.Done) return;
-			if (ResourceList.Files.Count > 0) {
+			if (ResourceList.GetFetchFlags() != 0) {
 				ResourcePatcher patcher = new ResourcePatcher(fetcher, drawer);
 				patcher.Run();
 			}
@@ -48,7 +48,7 @@ namespace Launcher.Gui.Screens {
 			fetcher = null;
 			GC.Collect();
 			game.TryLoadTexturePack();
-			GotoNextMenu();
+			GotoNextMenu(0, 0);
 		}
 		
 		public override void Resize() {
@@ -74,10 +74,6 @@ namespace Launcher.Gui.Screens {
 		}
 		
 		void DownloadResources(int mouseX, int mouseY) {
-			if (game.Downloader == null) {
-				game.Downloader = new AsyncDownloader(drawer);
-				game.Downloader.Init("");
-			}
 			if (fetcher != null) return;
 			
 			fetcher = game.fetcher;
@@ -92,12 +88,13 @@ namespace Launcher.Gui.Screens {
 			Resize();
 		}
 		
-		void GotoNextMenu() {
-			if (File.Exists("options.txt")) {
+		void GotoNextMenu(int x, int y) {
+			game.Downloader.Clear();
+			if (Platform.FileExists("options.txt")) {
 				game.SetScreen(new MainScreen(game));
 			} else {
 				game.SetScreen(new ChooseModeScreen(game, true));
-			}
+			}			
 		}
 		
 		void SetStatus(string text) {

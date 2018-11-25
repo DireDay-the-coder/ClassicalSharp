@@ -1,106 +1,148 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
-using System.Drawing;
-using System.IO;
-using System.Net;
 using System.Net.Sockets;
 using ClassicalSharp.Entities;
-using ClassicalSharp.Events;
-using ClassicalSharp.Gui;
-using ClassicalSharp.Network;
-using ClassicalSharp.Textures;
 using ClassicalSharp.Network.Protocols;
-
-#if USE16_BIT
+using OpenTK;
+using OpenTK.Input;
 using BlockID = System.UInt16;
-#else
-using BlockID = System.Byte;
-#endif
 
 namespace ClassicalSharp.Network {
 
-	public partial class NetworkProcessor : IServerConnection {
+	public sealed class NetworkProcessor : IServerConnection {
 		
-		public NetworkProcessor(Game window) {
-			game = window;
-			cpeData = game.AddComponent(new CPESupport());
+		public NetworkProcessor(Game game) {
+			this.game = game;
+			cpeData = new CPESupport();
+			cpeData.game = game;
+			IsSinglePlayer = false;
 		}
-		
-		public override bool IsSinglePlayer { get { return false; } }
 		
 		Socket socket;
 		DateTime lastPacket;
 		byte lastOpcode;
-		internal NetReader reader;
-		internal NetWriter writer;
+		public NetReader reader;
+		public NetWriter writer;
+		
+		bool connecting = false;
+		DateTime connectTimeout;
+		const int timeoutSecs = 15;
 		
 		internal ClassicProtocol classic;
 		internal CPEProtocol cpe;
 		internal CPEProtocolBlockDefs cpeBlockDefs;
 		internal WoMProtocol wom;
-
 		internal CPESupport cpeData;
-		internal ScheduledTask task;
-		internal bool receivedFirstPosition;
-		internal byte[] needRemoveNames = new byte[256 >> 3];
 		
-		public override void Connect(IPAddress address, int port) {
-			socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+		public override void BeginConnect() {
+			socket = new Socket(game.IPAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+			Events.BlockChanged += BlockChanged;
+			Disconnected = false;
+			
+			socket.Blocking = false;
+			connecting = true;
+			connectTimeout = DateTime.UtcNow.AddSeconds(timeoutSecs);
+			
 			try {
-				socket.Connect(address, port);
+				socket.Connect(game.IPAddress, game.Port);
 			} catch (SocketException ex) {
-				ErrorHandler.LogError("connecting to server", ex);
-				game.Disconnect("Failed to connect to " + address + ":" + port,
-				                "You failed to connect to the server. It's probably down!");
-				Dispose();
+				SocketError err = ex.SocketErrorCode;
+				if (err == SocketError.InProgress || err == SocketError.WouldBlock) return;
+				FailConnect(ex);
+			}
+		}
+		
+		void TickConnect() {
+			if (socket.Poll(0, SelectMode.SelectError)) {
+				int err = (int)socket.GetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Error);
+				FailConnect(new SocketException(err));
 				return;
 			}
 			
+			DateTime now = DateTime.UtcNow;
+			// socket.Connected doesn't work here on some mono versions (e.g. 5.0.1.1)
+			if (socket.Poll(0, SelectMode.SelectWrite)) {
+				socket.Blocking = true;
+				FinishConnect();
+			} else if (now > connectTimeout) {
+				FailConnect(null);
+			} else {
+				double leftSecs = (connectTimeout - now).TotalSeconds;
+				Events.RaiseLoading((float)leftSecs / timeoutSecs);
+			}
+		}
+		
+		void FinishConnect() {
+			connecting = false;
+			Events.RaiseLoading(0);
 			reader = new NetReader(socket);
 			writer = new NetWriter(socket);
 			
 			classic = new ClassicProtocol(game);
-			classic.Init();
 			cpe = new CPEProtocol(game);
-			cpe.Init();
 			cpeBlockDefs = new CPEProtocolBlockDefs(game);
-			cpeBlockDefs.Init();
 			wom = new WoMProtocol(game);
-			wom.Init();
+			ResetState();
 			
-			Disconnected = false;
-			receivedFirstPosition = false;
-			lastPacket = DateTime.UtcNow;
-			game.WorldEvents.OnNewMap += OnNewMap;
-			game.UserEvents.BlockChanged += BlockChanged;
-
-			classic.SendLogin(game.Username, game.Mppass);
+			classic.WriteLogin(game.Username, game.Mppass);
+			SendPacket();
 			lastPacket = DateTime.UtcNow;
 		}
 		
+		void FailConnect(SocketException ex) {
+			connecting = false;
+			if (ex != null) {
+				ErrorHandler.LogError("connecting to server", ex);
+			}
+			
+			game.Disconnect("Failed to connect to " + game.IPAddress + ":" + game.Port,
+			                "You failed to connect to the server. It's probably down!");
+			Dispose();
+		}
+		
+		public override void SendChat(string text) {
+			if (String.IsNullOrEmpty(text) || connecting) return;
+			
+			while (text.Length > Utils.StringLength) {
+				classic.WriteChat(text.Substring(0, Utils.StringLength), true);
+				SendPacket();
+				text = text.Substring(Utils.StringLength);
+			}
+			classic.WriteChat(text, false);
+			SendPacket();
+		}
+		
+		public override void SendPosition(Vector3 pos, float rotY, float headX) {
+			classic.WritePosition(pos, rotY, headX);
+			SendPacket();
+		}
+		
+		public override void SendPlayerClick(MouseButton button, bool buttonDown, byte targetId, PickedPos pos) {
+			cpe.WritePlayerClick(button, buttonDown, targetId, pos);
+			SendPacket();
+		}
+		
 		public override void Dispose() {
-			game.WorldEvents.OnNewMap -= OnNewMap;
-			game.UserEvents.BlockChanged -= BlockChanged;
+			if (Disconnected) return;
+			Events.BlockChanged -= BlockChanged;
 			socket.Close();
 			Disconnected = true;
 		}
 		
 		public override void Tick(ScheduledTask task) {
 			if (Disconnected) return;
+			if (connecting) { TickConnect(); return; }
+			
 			if ((DateTime.UtcNow - lastPacket).TotalSeconds >= 30) {
 				CheckDisconnection(task.Interval);
 			}
 			if (Disconnected) return;
-			
-			LocalPlayer player = game.LocalPlayer;
-			this.task = task;
 			
 			try {
 				reader.ReadPendingData();
 			} catch (SocketException ex) {
 				ErrorHandler.LogError("reading packets", ex);
 				game.Disconnect("&eLost connection to the server", "I/O error when reading packets");
-				Dispose();
 				return;
 			}
 			
@@ -110,38 +152,50 @@ namespace ClassicalSharp.Network {
 				if (cpeData.needD3Fix && lastOpcode == Opcode.CpeHackControl && (opcode == 0x00 || opcode == 0xFF)) {
 					Utils.LogDebug("Skipping invalid HackControl byte from D3 server.");
 					reader.Skip(1);
+					
+					LocalPlayer player = game.LocalPlayer;
 					player.physics.jumpVel = 0.42f; // assume default jump height
 					player.physics.serverJumpVel = player.physics.jumpVel;
 					continue;
 				}
 				
-				if (opcode > maxHandledPacket) {
-					ErrorHandler.LogError("NetworkProcessor.Tick",
-					                      "received an invalid opcode of " + opcode);
-					reader.Skip(1);
-					continue;
+				if (opcode >= handlers.Length) {
+					game.Disconnect("Disconnected!", "Server sent invalid packet " + opcode + "!"); return;
 				}
-				
 				if ((reader.size - reader.index) < packetSizes[opcode]) break;
-				ReadPacket(opcode);
+				
+				reader.Skip(1); // remove opcode
+				lastOpcode = opcode;			
+				lastPacket = DateTime.UtcNow;
+				
+				Action handler = handlers[opcode];
+				if (handler == null) {
+					game.Disconnect("Disconnected!", "Server sent invalid packet " + opcode + "!"); return;
+				}
+				handler();
 			}
 			
 			reader.RemoveProcessed();
-			if (receivedFirstPosition) {
-				SendPosition(player.Position, player.HeadY, player.HeadX);
-			}
+			// Network is ticked 60 times a second. We only send position updates 20 times a second.
+			if ((netTicks % 3) == 0) CoreTick();
+			netTicks++;
+		}
+		
+		void CoreTick() {
 			CheckAsyncResources();
 			wom.Tick();
+			classic.Tick();
+			cpe.Tick();
+			if (writer.index > 0) SendPacket();
 		}
 		
 		/// <summary> Sets the incoming packet handler for the given packet id. </summary>
 		public void Set(byte opcode, Action handler, int packetSize) {
 			handlers[opcode] = handler;
 			packetSizes[opcode] = (ushort)packetSize;
-			maxHandledPacket = Math.Max(opcode, maxHandledPacket);
 		}
 		
-		internal void SendPacket() {
+		public void SendPacket() {
 			if (Disconnected) {
 				writer.index = 0;
 				return;
@@ -155,61 +209,55 @@ namespace ClassicalSharp.Network {
 			}
 		}
 		
-		void ReadPacket(byte opcode) {
-			reader.Skip(1); // remove opcode
-			lastOpcode = opcode;
-			Action handler = handlers[opcode];
-			lastPacket = DateTime.UtcNow;
-			
-			if (handler == null)
-				throw new NotImplementedException("Unsupported packet:" + opcode);
-			handler();
-		}
 		
-		internal void SkipPacketData(byte opcode) {
-			reader.Skip(packetSizes[opcode] - 1);
-		}
-		
-		internal void Reset() {
+		public override void Reset(Game game) {
 			UsingExtPlayerList = false;
 			UsingPlayerClick = false;
 			SupportsPartialMessages = false;
 			SupportsFullCP437 = false;
-			addEntityHack = true;
 			
 			for (int i = 0; i < handlers.Length; i++) {
 				handlers[i] = null;
 				packetSizes[i] = 0;
 			}
+			
+			BlockInfo.SetMaxUsed(255);
+			ResetState();
+			Dispose();
+		}
+		
+		void ResetState() {
 			if (classic == null) return; // null if no successful connection ever made before
 			
+			cpeData.Reset();
 			classic.Reset();
 			cpe.Reset();
 			cpeBlockDefs.Reset();
+			wom.Reset();
 			
-			reader.ExtendedPositions = false;
-			writer.ExtendedPositions = false;
+			reader.ExtendedPositions = false; reader.ExtendedBlocks = false;
+			writer.ExtendedPositions = false; writer.ExtendedBlocks = false;
 		}
 		
-		internal Action[] handlers = new Action[256];
-		internal ushort[] packetSizes = new ushort[256];
-		int maxHandledPacket = 0;
+		internal Action[] handlers = new Action[Opcode.Count];
+		internal ushort[] packetSizes = new ushort[Opcode.Count];
 		
-		void BlockChanged(object sender, BlockChangedEventArgs e) {
-			Vector3I p = e.Coords;
-			BlockID block = game.Inventory.Selected;
-			
-			if (e.Block == 0) {
-				classic.SendSetBlock(p.X, p.Y, p.Z, false, block);
+		void BlockChanged(Vector3I p, BlockID old, BlockID now) {
+			if (now == Block.Air) {
+				now = game.Inventory.Selected;
+				classic.WriteSetBlock(p.X, p.Y, p.Z, false, now);
 			} else {
-				classic.SendSetBlock(p.X, p.Y, p.Z, true, e.Block);
+				classic.WriteSetBlock(p.X, p.Y, p.Z, true,  now);
 			}
+			SendPacket();
 		}
 		
-		void OnNewMap(object sender, EventArgs e) {
+		public override void OnNewMap(Game game) {
 			// wipe all existing entity states
-			for (int i = 0; i < 256; i++)
-				RemoveEntity((byte)i);
+			if (classic == null) return;
+			for (int i = 0; i < EntityList.MaxCount; i++) {
+				classic.RemoveEntity((byte)i);
+			}
 		}
 		
 		double testAcc = 0;
@@ -218,9 +266,8 @@ namespace ClassicalSharp.Network {
 			if (testAcc < 1) return;
 			testAcc = 0;
 			
-			if (!socket.Connected || (socket.Poll(1000, SelectMode.SelectRead) && socket.Available == 0)) {
+			if (!socket.Connected || (socket.Available == 0 && socket.Poll(0, SelectMode.SelectRead))) {
 				game.Disconnect("Disconnected!", "You've lost connection to the server");
-				Dispose();
 			}
 		}
 	}

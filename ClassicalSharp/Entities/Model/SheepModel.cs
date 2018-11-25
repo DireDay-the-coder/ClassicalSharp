@@ -13,10 +13,10 @@ namespace ClassicalSharp.Model {
 		int furIndex;
 		
 		public SheepModel(Game game) : base(game) {
+			SurivalScore = 10;
 			furIndex = game.ModelCache.GetTextureIndex("sheep_fur.png");
 		}
 		
-		/// <inheritdoc/>
 		public override void CreateParts() {
 			vertices = new ModelVertex[boxVertices * 6 * 2];
 			MakeBaseModel();
@@ -27,7 +27,7 @@ namespace ClassicalSharp.Model {
 			Head = BuildBox(MakeBoxBounds(-3, 16, -14, 3, 22, -6)
 			                .TexOrigin(0, 0)
 			                .RotOrigin(0, 18, -8));
-			Torso = BuildRotatedBox(MakeRotatedBoxBounds(-4, 12, -8, 4, 18, 8)
+			Torso = BuildRotatedBox(MakeBoxBounds(-4, 12, -8, 4, 18, 8)
 			                        .TexOrigin(28, 8));
 			LeftLegFront = BuildBox(MakeBoxBounds(-5, 0, -7, -1, 12, -3)
 			                        .TexOrigin(0, 16)
@@ -48,7 +48,7 @@ namespace ClassicalSharp.Model {
 			                   .TexOrigin(0, 0)
 			                   .SetModelBounds(-3.5f, 15.5f, -12.5f, 3.5f, 22.5f, -5.5f)
 			                   .RotOrigin(0, 18, -8));
-			FurTorso = BuildRotatedBox(MakeRotatedBoxBounds(-4, 12, -8, 4, 18, 8)
+			FurTorso = BuildRotatedBox(MakeBoxBounds(-4, 12, -8, 4, 18, 8)
 			                           .TexOrigin(28, 8)
 			                           .SetModelBounds(-6f, 10.5f, -10f, 6f, 19.5f, 10f));
 			
@@ -64,27 +64,22 @@ namespace ClassicalSharp.Model {
 			                           .RotOrigin(0, 12, 7));
 		}
 		
-		
-		/// <inheritdoc/>		
+			
 		public override float NameYOffset { get { return Fur ? 1.48125f: 1.075f; } }
 
-		/// <inheritdoc/>		
 		public override float GetEyeY(Entity entity) { return 20/16f; }
 		
-		/// <inheritdoc/>		
 		public override Vector3 CollisionSize {
 			get { return new Vector3(10/16f, 20/16f, 10/16f); }
 		}
 		
-		/// <inheritdoc/>		
 		public override AABB PickingBounds {
 			get { return new AABB(-6/16f, 0, -13/16f, 6/16f, 23/16f, 10/16f); }
 		}
 		
-		/// <inheritdoc/>		
 		public override void DrawModel(Entity p) {
 			IGraphicsApi gfx = game.Graphics;
-			gfx.BindTexture(GetTexture(p.MobTextureId));
+			ApplyTexture(p);
 			DrawRotate(-p.HeadXRadians, 0, 0, Head, true);
 			
 			DrawPart(Torso);
@@ -94,7 +89,7 @@ namespace ClassicalSharp.Model {
 			DrawRotate(p.anim.leftLegX, 0, 0, RightLegBack, false);
 			UpdateVB();
 			
-			if (Utils.CaselessEquals(p.ModelName, "sheep_nofur")) return;
+			if (Utils.CaselessEq(p.ModelName, "sheep_nofur")) return;
 			ModelCache cache = game.ModelCache;
 			gfx.BindTexture(cache.Textures[furIndex].TexID);
 			DrawRotate(-p.HeadXRadians, 0, 0, FurHead, true);

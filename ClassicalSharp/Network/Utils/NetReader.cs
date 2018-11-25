@@ -3,6 +3,7 @@ using System;
 using System.Net.Sockets;
 using ClassicalSharp.Entities;
 using OpenTK;
+using BlockID = System.UInt16;
 
 namespace ClassicalSharp.Network {
 
@@ -10,7 +11,7 @@ namespace ClassicalSharp.Network {
 		
 		public byte[] buffer = new byte[4096 * 5];
 		public int index = 0, size = 0;
-		public bool ExtendedPositions;
+		public bool ExtendedPositions, ExtendedBlocks;
 		Socket socket;
 		
 		public NetReader(Socket socket) {
@@ -37,10 +38,13 @@ namespace ClassicalSharp.Network {
 			// We don't need to zero the old bytes, since they will be overwritten when ReadData() is called.
 		}
 		
-		public int ReadInt32() {
-			int value = buffer[index] << 24 | buffer[index + 1] << 16 | 
-				buffer[index + 2] << 8 | buffer[index + 3];
-			index += 4;
+		public byte ReadUInt8() { return buffer[index++]; }
+		
+		public sbyte ReadInt8() { return (sbyte)buffer[index++]; }
+
+		public ushort ReadUInt16() {
+			ushort value = (ushort)(buffer[index] << 8 | buffer[index + 1]);
+			index += 2;
 			return value;
 		}
 		
@@ -49,25 +53,19 @@ namespace ClassicalSharp.Network {
 			index += 2;
 			return value;
 		}
-		
-		public sbyte ReadInt8() {
-			sbyte value = (sbyte)buffer[index];
-			index++;
+
+		public int ReadInt32() {
+			int value = buffer[index] << 24 | buffer[index + 1] << 16 | 
+				buffer[index + 2] << 8 | buffer[index + 3];
+			index += 4;
 			return value;
 		}
-		
-		public ushort ReadUInt16() {
-			ushort value = (ushort)(buffer[index] << 8 | buffer[index + 1]);
-			index += 2;
-			return value;
+
+		public string ReadString() {
+			int length = GetString(Utils.StringLength);
+			return new String(characters, 0, length);
 		}
-		
-		public byte ReadUInt8() {
-			byte value = buffer[index];
-			index++;
-			return value;
-		}
-		
+
 		public byte[] ReadBytes(int length) {
 			byte[] data = new byte[length];
 			Buffer.BlockCopy(buffer, index, data, 0, length);
@@ -87,10 +85,10 @@ namespace ClassicalSharp.Network {
 			if (id == EntityList.SelfID) yAdj += 22/32f;
 			return new Vector3(x / 32f, yAdj, z / 32f);
 		}
-
-		public string ReadString() {
-			int length = GetString(Utils.StringLength);
-			return new String(characters, 0, length);
+		
+		public BlockID ReadBlock() {
+			if (ExtendedBlocks) return ReadUInt16();
+			return buffer[index++];			
 		}
 		
 		internal string ReadChatString(ref byte messageType) {
@@ -106,7 +104,7 @@ namespace ClassicalSharp.Network {
 		}
 		
 		static char[] characters = new char[Utils.StringLength];
-		const string womDetail = "^detail.user=";		
+		const string womDetail = "^detail.user=";
 		static bool IsWomDetailString() {
 			for (int i = 0; i < womDetail.Length; i++) {
 				if (characters[i] != womDetail[i])
@@ -122,15 +120,8 @@ namespace ClassicalSharp.Network {
 				byte code = buffer[index + i];
 				if (length == 0 && !(code == 0 || code == 0x20))
 				   length = i + 1;
-
-				// Treat code as an index in code page 437
-				if (code < 0x20) {
-					characters[i] = Utils.ControlCharReplacements[code];
-				} else if (code < 0x7F) {
-					characters[i] = (char)code;
-				} else {
-					characters[i] = Utils.ExtendedCharReplacements[code - 0x7F];
-				}
+				
+				characters[i] = Utils.CP437ToUnicode(code);
 			}
 			index += maxLength;
 			return length;

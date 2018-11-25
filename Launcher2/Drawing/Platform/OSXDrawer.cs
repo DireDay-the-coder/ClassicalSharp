@@ -3,18 +3,18 @@ using System;
 using System.Drawing;
 using ClassicalSharp;
 using OSStatus = OpenTK.Platform.MacOS.OSStatus;
-using OSX = OpenTK.Platform.MacOS.Carbon;
+using OSX = OpenTK.Platform.MacOS;
 
 namespace Launcher.Drawing {	
 	public sealed class OSXPlatformDrawer : PlatformDrawer {
 		
 		IntPtr windowPort;
 		public override void Init() {
-			windowPort = OSX.API.GetWindowPort(info.WinHandle);
+			windowPort = OSX.API.GetWindowPort(window.WinHandle);
 		}
 		
 		public override void Resize() {
-			windowPort = OSX.API.GetWindowPort(info.WinHandle);
+			windowPort = OSX.API.GetWindowPort(window.WinHandle);
 		}
 		
 		public override void Redraw(Bitmap framebuffer, Rectangle r) {			
@@ -25,7 +25,7 @@ namespace Launcher.Drawing {
 				IntPtr colorSpace = OSX.API.CGColorSpaceCreateDeviceRGB();
 				IntPtr provider = OSX.API.CGDataProviderCreateWithData(IntPtr.Zero, scan0, size, IntPtr.Zero);
 				const uint flags = 4 | (2 << 12);
-				IntPtr image = OSX.API.CGImageCreate(bmp.Width, bmp.Height, 8, 8 * 4, bmp.Stride,
+				IntPtr image = OSX.API.CGImageCreate(bmp.Width, bmp.Height, 8, 32, bmp.Stride,
 				                                     colorSpace, flags, provider, IntPtr.Zero, 0, 0);
 				IntPtr context = IntPtr.Zero;
 				OSStatus err = OSX.API.QDBeginCGContext(windowPort, ref context);

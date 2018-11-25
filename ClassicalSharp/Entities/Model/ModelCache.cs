@@ -1,7 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
 using System.Collections.Generic;
-using ClassicalSharp.Events;
 using ClassicalSharp.GraphicsAPI;
 
 namespace ClassicalSharp.Model {
@@ -9,11 +8,7 @@ namespace ClassicalSharp.Model {
 	public class ModelCache : IDisposable {
 		
 		Game game;
-		IGraphicsApi gfx;
-		public ModelCache(Game window) {
-			this.game = window;
-			gfx = game.Graphics;
-		}
+		public ModelCache(Game game) { this.game = game; }
 		
 		#if FALSE
 		public CustomModel[] CustomModels = new CustomModel[256];
@@ -26,11 +21,11 @@ namespace ClassicalSharp.Model {
 		public void InitCache() {
 			vertices = new VertexP3fT2fC4b[24 * 12];
 			RegisterDefaultModels();
-			game.Events.TextureChanged += TextureChanged;
-			
 			ContextRecreated();
-			game.Graphics.ContextLost += ContextLost;
-			game.Graphics.ContextRecreated += ContextRecreated;
+			
+			Events.TextureChanged += TextureChanged;
+			Events.ContextLost += ContextLost;
+			Events.ContextRecreated += ContextRecreated;
 		}
 		
 		public void Register(string modelName, string texName, IModel instance) {
@@ -38,8 +33,6 @@ namespace ClassicalSharp.Model {
 			model.Name = modelName;
 			model.Instance = instance;
 			Models.Add(model);
-			
-			instance.data = model;
 			instance.texIndex = GetTextureIndex(texName);
 		}
 		
@@ -53,45 +46,39 @@ namespace ClassicalSharp.Model {
 		
 		public int GetTextureIndex(string texName) {
 			for (int i = 0; i < Textures.Count; i++) {
-				if (Textures[i].Name == texName) return i;
+				if (Utils.CaselessEq(Textures[i].Name, texName)) return i;
 			}
 			return -1;
 		}
 
 		
 		public IModel Get(string modelName) {
-			if (modelName == "block") return Models[0].Instance;
-			byte blockId;
-			if (Byte.TryParse(modelName, out blockId))
-				modelName = "block";
-
 			for (int i = 0; i < Models.Count; i++) {
 				CachedModel m = Models[i];
-				if (m.Name != modelName) continue;
+				if (!Utils.CaselessEq(m.Name, modelName)) continue;
+				
 				if (!m.Instance.initalised) InitModel(m);
 				return m.Instance;
 			}
-			return Models[0].Instance;
+			return null;
 		}
 		
-		public void Dispose() {
-			game.Events.TextureChanged -= TextureChanged;
-			for (int i = 0; i < Models.Count; i++)
-				Models[i].Instance.Dispose();
-			
+		public void Dispose() {			
 			for (int i = 0; i < Textures.Count; i++) {
 				CachedTexture tex = Textures[i];
-				gfx.DeleteTexture(ref tex.TexID);
+				game.Graphics.DeleteTexture(ref tex.TexID);
 				Textures[i] = tex;
 			}
-			
 			ContextLost();
-			game.Graphics.ContextLost -= ContextLost;
-			game.Graphics.ContextRecreated -= ContextRecreated;
+			
+			Events.TextureChanged -= TextureChanged;
+			Events.ContextLost -= ContextLost;
+			Events.ContextRecreated -= ContextRecreated;
 		}
 		
 		void InitModel(CachedModel m) {
 			m.Instance.CreateParts();
+			m.Instance.index = 0;
 			m.Instance.initalised = true;
 		}
 		
@@ -114,35 +101,38 @@ namespace ClassicalSharp.Model {
 			
 			Register("block", null, new BlockModel(game));
 			Register("chibi", "char.png", new ChibiModel(game));
-			Register("head", "char.png", new HumanoidHeadModel(game));
+			Register("head", "char.png", new HeadModel(game));
 			Register("sit", "char.png", new SittingModel(game));
 			Register("sitting", "char.png", new SittingModel(game));
+			Register("corpse", "char.png", new CorpseModel(game));
 		}
 
-		void TextureChanged(object sender, TextureEventArgs e) {
+		void TextureChanged(string name, byte[] data) {
 			for (int i = 0; i < Textures.Count; i++) {
 				CachedTexture tex = Textures[i];
-				if (tex.Name != e.Name) continue;
+				if (!Utils.CaselessEq(tex.Name, name)) continue;
 				
-				game.UpdateTexture(ref tex.TexID, e.Name, e.Data, e.Name == "char.png");
-				Textures[i] = tex; break;
+				game.UpdateTexture(ref tex.TexID, name, data, ref tex.SkinType);	
+				Textures[i] = tex; 
+				break;
 			}
 		}
 		
 		void ContextLost() { game.Graphics.DeleteVb(ref vb); }
 		
 		void ContextRecreated() {
-			vb = gfx.CreateDynamicVb(VertexFormat.P3fT2fC4b, vertices.Length);
+			vb = game.Graphics.CreateDynamicVb(VertexFormat.P3fT2fC4b, vertices.Length);
 		}
 	}
 	
 	public struct CachedModel {
-		public string Name;
 		public IModel Instance;
+		public string Name;	
 	}
 	
 	public struct CachedTexture {
-		public string Name;
+		public SkinType SkinType;
 		public int TexID;
+		public string Name;		
 	}
 }
