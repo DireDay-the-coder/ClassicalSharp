@@ -8,7 +8,7 @@ using Launcher.Web;
 namespace Launcher.Gui.Widgets {
 
 	internal struct TableEntry {
-		public string Hash, Name, Players, IP, Uptime, Software, RawUptime, Flag;
+		public string Hash, Name, Players, Online, Max, IP, Uptime, Software, RawUptime, Flag;
 		public int Y, Height;
 		public bool Featured;
 	}
@@ -46,6 +46,8 @@ namespace Launcher.Gui.Widgets {
 				tableEntry.Hash = e.Hash;
 				tableEntry.Name = e.Name;
 				tableEntry.Players = e.Players + "/" + e.MaxPlayers;
+                tableEntry.Online = e.Players;
+                tableEntry.Max = e.MaxPlayers;
                 tableEntry.IP = e.IPAddress;
 				tableEntry.Software = e.Software;
 				tableEntry.Uptime = MakeUptime(e.Uptime);
@@ -129,8 +131,8 @@ namespace Launcher.Gui.Widgets {
 		}
 		
 		
-		public int[] ColumnWidths = new int[] { 30, 320, 65, 65, 65, 190 };
-		public int[] DesiredColumnWidths = new int[] { 30, 320, 65, 65, 65, 190 };
+		public int[] ColumnWidths = new int[] { 30, 320, 65, 65, 65, 65, 65, 190 };
+		public int[] DesiredColumnWidths = new int[] { 30, 320, 65, 65, 65, 65, 65, 190 };
 
 		public void SetDrawData(IDrawer2D drawer, Font font, Font titleFont,
 		                        Anchor horAnchor, Anchor verAnchor, int x, int y) {
@@ -149,9 +151,13 @@ namespace Launcher.Gui.Widgets {
 		
 
 		DefaultComparer defComp = new DefaultComparer();
+        FlagComparer flagComp = new FlagComparer();
 		NameComparer nameComp = new NameComparer();
 		PlayersComparer playerComp = new PlayersComparer();
+        OnlineComparer onlineComp = new OnlineComparer();
+        MaxComparer maxComp = new MaxComparer();
 		UptimeComparer uptimeComp = new UptimeComparer();
+        IPComparer ipComp = new IPComparer();
 		SoftwareComparer softwareComp = new SoftwareComparer();
 		internal int DraggingColumn = -1;
 		internal bool DraggingScrollbar = false;
@@ -176,20 +182,42 @@ namespace Launcher.Gui.Widgets {
 		void TrySortColumns(int mouseX) {
 			int x = X + TableView.flagPadding;
 			if (mouseX >= x && mouseX < x + ColumnWidths[0]) {
-				SortEntries(nameComp, false); return;
+				SortEntries(flagComp, false); return;
 			}
 			
 			x += ColumnWidths[0] + 10;
 			if (mouseX >= x && mouseX < x + ColumnWidths[1]) {
-				SortEntries(playerComp, false); return;
+				SortEntries(nameComp, false); return;
 			}
 			
 			x += ColumnWidths[1] + 10;
 			if (mouseX >= x && mouseX < x + ColumnWidths[2]) {
-				SortEntries(uptimeComp, false); return;
+				SortEntries(playerComp, false); return;
 			}
-			
-			x += ColumnWidths[2] + 10;
+
+            x += ColumnWidths[2] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[3])
+            {
+                SortEntries(onlineComp, false); return;
+            }
+
+            x += ColumnWidths[3] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[4])
+            {
+                SortEntries(maxComp, false); return;
+            }
+
+            x += ColumnWidths[4] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[5]) {
+                SortEntries(uptimeComp, false); return;
+            }
+
+            x += ColumnWidths[5] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[6]) {
+                SortEntries(ipComp, false); return;
+            }
+
+            x += ColumnWidths[6] + 10;
 			if (mouseX >= x) {
 				SortEntries(softwareComp, false); return;
 			}
