@@ -62,10 +62,12 @@ namespace Launcher.Gui.Widgets {
 		public void RedrawData(IDrawer2D drawer) {
 			DrawGrid(drawer);
 			int x = table.X + flagPadding + 5;
-			x += DrawColumn(drawer, "Name",     0, x, filterName)     + 5;
-			x += DrawColumn(drawer, "Players",  1, x, filterPlayers)  + 5;
-			x += DrawColumn(drawer, "Uptime",   2, x, filterUptime)   + 5;
-			x += DrawColumn(drawer, "Software", 3, x, filterSoftware) + 5;
+            x += DrawColumn(drawer, "Flag",         0, x, filterFlag)     + 5;
+            x += DrawColumn(drawer, "Name",         1, x, filterName)     + 5;
+			x += DrawColumn(drawer, "Players",      2, x, filterPlayers)  + 5;
+            x += DrawColumn(drawer, "Uptime",       3, x, filterUptime)   + 5;
+            x += DrawColumn(drawer, "IP Address",   4, x, filterIP)       + 5;
+			x += DrawColumn(drawer, "Software",     5, x, filterSoftware) + 5;
 			
 			DrawScrollbar(drawer);
 			DrawFlags();
@@ -77,11 +79,13 @@ namespace Launcher.Gui.Widgets {
 		}
 		
 		delegate string ColumnFilter(TableEntry entry);
-		// cache to avoid allocations every redraw
-		static string FilterName(TableEntry e)     { return e.Name; }     static ColumnFilter filterName     = FilterName;
+        // cache to avoid allocations every redraw
+        static string FilterFlag(TableEntry e)     { return e.Flag; }     static ColumnFilter filterFlag     = FilterFlag;
+        static string FilterName(TableEntry e)     { return e.Name; }     static ColumnFilter filterName     = FilterName;
 		static string FilterPlayers(TableEntry e)  { return e.Players; }  static ColumnFilter filterPlayers  = FilterPlayers;
 		static string FilterUptime(TableEntry e)   { return e.Uptime; }   static ColumnFilter filterUptime   = FilterUptime;
-		static string FilterSoftware(TableEntry e) { return e.Software; } static ColumnFilter filterSoftware = FilterSoftware;
+        static string FilterIP(TableEntry e)       { return e.IP; }       static ColumnFilter filterIP       = FilterIP;
+        static string FilterSoftware(TableEntry e) { return e.Software; } static ColumnFilter filterSoftware = FilterSoftware;
 		
 		static FastBitmap GetFlag(string flag) {
 			List<string> flags = FetchFlagsTask.Flags;

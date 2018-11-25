@@ -8,7 +8,7 @@ using Launcher.Web;
 namespace Launcher.Gui.Widgets {
 
 	internal struct TableEntry {
-		public string Hash, Name, Players, Uptime, Software, RawUptime, Flag;
+		public string Hash, Name, Players, IP, Uptime, Software, RawUptime, Flag;
 		public int Y, Height;
 		public bool Featured;
 	}
@@ -46,6 +46,7 @@ namespace Launcher.Gui.Widgets {
 				tableEntry.Hash = e.Hash;
 				tableEntry.Name = e.Name;
 				tableEntry.Players = e.Players + "/" + e.MaxPlayers;
+                tableEntry.IP = e.IPAddress;
 				tableEntry.Software = e.Software;
 				tableEntry.Uptime = MakeUptime(e.Uptime);
 				tableEntry.RawUptime = e.Uptime;
@@ -128,8 +129,8 @@ namespace Launcher.Gui.Widgets {
 		}
 		
 		
-		public int[] ColumnWidths = new int[] { 320, 65, 65, 140 };
-		public int[] DesiredColumnWidths = new int[] { 320, 65, 65, 140 };
+		public int[] ColumnWidths = new int[] { 30, 320, 65, 65, 65, 190 };
+		public int[] DesiredColumnWidths = new int[] { 30, 320, 65, 65, 65, 190 };
 
 		public void SetDrawData(IDrawer2D drawer, Font font, Font titleFont,
 		                        Anchor horAnchor, Anchor verAnchor, int x, int y) {
