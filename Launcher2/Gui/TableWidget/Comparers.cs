@@ -24,8 +24,17 @@ namespace Launcher.Gui.Widgets {
 			return timeY.CompareTo(timeX);
 		}
 	}
-	
-	sealed class NameComparer : TableEntryComparer {
+
+    sealed class FlagComparer : TableEntryComparer {
+
+        public override int Compare(TableEntry a, TableEntry b) {
+            StringComparison comparison = StringComparison.CurrentCultureIgnoreCase;
+            int value = String.Compare(a.Flag, b.Flag, comparison);
+            return Invert ? -value : value;
+        }
+    }
+
+    sealed class NameComparer : TableEntryComparer {
 		
 		public override int Compare(TableEntry a, TableEntry b) {
 			StringComparison comparison = StringComparison.CurrentCultureIgnoreCase;
@@ -43,8 +52,26 @@ namespace Launcher.Gui.Widgets {
 			return Invert ? -value : value;
 		}
 	}
-	
-	sealed class UptimeComparer : TableEntryComparer {
+
+    sealed class OnlineComparer : TableEntryComparer {
+
+        public override int Compare(TableEntry a, TableEntry b) {
+            StringComparison comparison = StringComparison.CurrentCultureIgnoreCase;
+            int value = String.Compare(a.Online, b.Online, comparison);
+            return Invert ? -value : value;
+        }
+    }
+
+    sealed class MaxComparer : TableEntryComparer {
+
+        public override int Compare(TableEntry a, TableEntry b) {
+            StringComparison comparison = StringComparison.CurrentCultureIgnoreCase;
+            int value = String.Compare(a.Max, b.Max, comparison);
+            return Invert ? -value : value;
+        }
+    }
+
+    sealed class UptimeComparer : TableEntryComparer {
 		
 		public override int Compare(TableEntry a, TableEntry b) {
 			long timeX = Int64.Parse(a.RawUptime);
@@ -53,8 +80,17 @@ namespace Launcher.Gui.Widgets {
 			return Invert ? -value : value;
 		}
 	}
-	
-	sealed class SoftwareComparer : TableEntryComparer {
+
+    sealed class IPComparer : TableEntryComparer {
+
+        public override int Compare(TableEntry a, TableEntry b) {
+            StringComparison comparison = StringComparison.InvariantCulture;
+            int value = String.Compare(a.IP, b.IP, comparison);
+            return Invert ? -value : value;
+        }
+    }
+
+    sealed class SoftwareComparer : TableEntryComparer {
 		
 		public override int Compare(TableEntry a, TableEntry b) {
 			StringComparison comparison = StringComparison.CurrentCultureIgnoreCase;
