@@ -1,13 +1,39 @@
 #include "Block.h"
 #include "Funcs.h"
 #include "ExtMath.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Game.h"
 #include "Entity.h"
 #include "Inventory.h"
 #include "Event.h"
 #include "Platform.h"
-#include "Bitmap.h"
+#include "GameStructs.h"
+
+bool Block_IsLiquid[BLOCK_COUNT];
+bool Block_BlocksLight[BLOCK_COUNT];
+bool Block_FullBright[BLOCK_COUNT];
+PackedCol Block_FogCol[BLOCK_COUNT];
+
+float   Block_FogDensity[BLOCK_COUNT];
+uint8_t Block_Collide[BLOCK_COUNT];
+uint8_t Block_ExtendedCollide[BLOCK_COUNT];
+float   Block_SpeedMultiplier[BLOCK_COUNT];
+uint8_t Block_LightOffset[BLOCK_COUNT];
+uint8_t Block_Draw[BLOCK_COUNT];
+uint8_t Block_DigSounds[BLOCK_COUNT], Block_StepSounds[BLOCK_COUNT];
+uint8_t Block_Tinted[BLOCK_COUNT];
+bool    Block_FullOpaque[BLOCK_COUNT];
+uint8_t Block_SpriteOffset[BLOCK_COUNT];
+
+Vector3 Block_MinBB[BLOCK_COUNT], Block_RenderMinBB[BLOCK_COUNT];
+Vector3 Block_MaxBB[BLOCK_COUNT], Block_RenderMaxBB[BLOCK_COUNT];
+
+TextureLoc Block_Textures[BLOCK_COUNT * FACE_COUNT];
+bool Block_CanPlace[BLOCK_COUNT], Block_CanDelete[BLOCK_COUNT];
+
+uint8_t Block_Hidden[BLOCK_COUNT * BLOCK_COUNT];
+uint8_t Block_CanStretch[BLOCK_COUNT];
+int Block_UsedCount, Block_IDMask;
 
 const char* Sound_Names[SOUND_COUNT] = {
 	"none", "wood", "gravel", "grass", "stone",
@@ -147,38 +173,6 @@ void Block_SetUsedCount(int count) {
 	Block_IDMask    = Math_NextPowOf2(count) - 1;
 }
 #endif
-
-void Block_Reset(void) {
-	Block_Init();
-	Block_RecalculateAllSpriteBB();
-}
-
-void Block_Init(void) {
-	int i, block;
-	for (i = 0; i < Array_Elems(Block_DefinedCustomBlocks); i++) {
-		Block_DefinedCustomBlocks[i] = 0;
-	}
-
-	for (block = BLOCK_AIR; block < BLOCK_COUNT; block++) {
-		Block_ResetProps((BlockID)block);
-	}
-	Block_UpdateAllCulling();
-}
-
-void Block_SetDefaultPerms(void) {
-	int block;
-	for (block = BLOCK_AIR; block <= BLOCK_MAX_DEFINED; block++) {
-		Block_CanPlace[block]  = true;
-		Block_CanDelete[block] = true;
-	}
-
-	Block_CanPlace[BLOCK_AIR] = false;         Block_CanDelete[BLOCK_AIR] = false;
-	Block_CanPlace[BLOCK_LAVA] = false;        Block_CanDelete[BLOCK_LAVA] = false;
-	Block_CanPlace[BLOCK_WATER] = false;       Block_CanDelete[BLOCK_WATER] = false;
-	Block_CanPlace[BLOCK_STILL_LAVA] = false;  Block_CanDelete[BLOCK_STILL_LAVA] = false;
-	Block_CanPlace[BLOCK_STILL_WATER] = false; Block_CanDelete[BLOCK_STILL_WATER] = false;
-	Block_CanPlace[BLOCK_BEDROCK] = false;     Block_CanDelete[BLOCK_BEDROCK] = false;
-}
 
 bool Block_IsCustomDefined(BlockID block) {
 	return (Block_DefinedCustomBlocks[block >> 5] & (1u << (block & 0x1F))) != 0;
@@ -438,8 +432,8 @@ static float Block_GetSpriteBB_MaxY(int size, int tileX, int tileY, Bitmap* bmp)
 }
 
 void Block_RecalculateBB(BlockID block) {
-	Bitmap* bmp  = &Atlas2D_Bitmap;
-	int tileSize = Atlas2D_TileSize;
+	Bitmap* bmp  = &Atlas_Bitmap;
+	int tileSize = Atlas_TileSize;
 	TextureLoc texLoc = Block_GetTex(block, FACE_XMAX);
 	int x = Atlas2D_TileX(texLoc), y = Atlas2D_TileY(texLoc);
 
@@ -447,7 +441,7 @@ void Block_RecalculateBB(BlockID block) {
 	float minX = 0, minY = 0, maxX = 1, maxY = 1;
 	Vector3 minRaw, maxRaw;
 
-	if (y < Atlas2D_RowsCount) {
+	if (y < Atlas_RowsCount) {
 		minX = Block_GetSpriteBB_MinX(tileSize, x, y, bmp);
 		minY = Block_GetSpriteBB_MinY(tileSize, x, y, bmp);
 		maxX = Block_GetSpriteBB_MaxX(tileSize, x, y, bmp);
@@ -666,3 +660,52 @@ BlockID AutoRotate_RotateBlock(BlockID block) {
 	}
 	return block;
 }
+
+
+/*########################################################################################################################*
+*----------------------------------------------------Blocks component-----------------------------------------------------*
+*#########################################################################################################################*/
+static void Blocks_Reset(void) {
+	int i, block;
+	for (i = 0; i < Array_Elems(Block_DefinedCustomBlocks); i++) {
+		Block_DefinedCustomBlocks[i] = 0;
+	}
+
+	for (block = BLOCK_AIR; block < BLOCK_COUNT; block++) {
+		Block_ResetProps((BlockID)block);
+	}
+	Block_UpdateAllCulling();
+
+#ifdef EXTENDED_BLOCKS
+	Block_SetUsedCount(256);
+#endif
+	Block_RecalculateAllSpriteBB();
+}
+
+static void Blocks_AtlasChanged(void* obj) { Block_RecalculateAllSpriteBB(); }
+static void Blocks_Init(void) {
+	int block;
+	for (block = BLOCK_AIR; block <= BLOCK_MAX_DEFINED; block++) {
+		Block_CanPlace[block]  = true;
+		Block_CanDelete[block] = true;
+	}
+	Blocks_Reset();
+	Event_RegisterVoid(&TextureEvents_AtlasChanged, NULL, Blocks_AtlasChanged);
+
+	Block_CanPlace[BLOCK_AIR] = false;         Block_CanDelete[BLOCK_AIR] = false;
+	Block_CanPlace[BLOCK_LAVA] = false;        Block_CanDelete[BLOCK_LAVA] = false;
+	Block_CanPlace[BLOCK_WATER] = false;       Block_CanDelete[BLOCK_WATER] = false;
+	Block_CanPlace[BLOCK_STILL_LAVA] = false;  Block_CanDelete[BLOCK_STILL_LAVA] = false;
+	Block_CanPlace[BLOCK_STILL_WATER] = false; Block_CanDelete[BLOCK_STILL_WATER] = false;
+	Block_CanPlace[BLOCK_BEDROCK] = false;     Block_CanDelete[BLOCK_BEDROCK] = false;
+}
+
+static void Blocks_Free(void) {
+	Event_UnregisterVoid(&TextureEvents_AtlasChanged, NULL, Blocks_AtlasChanged);
+}
+
+struct IGameComponent Blocks_Component = {
+	Blocks_Init,  /* Init  */
+	Blocks_Free,  /* Free  */
+	Blocks_Reset, /* Reset */
+};

@@ -12,7 +12,7 @@ struct Model;
 struct IGameComponent;
 struct ScheduledTask;
 extern struct IGameComponent TabList_Component;
-extern struct IGameComponent LocalPlayer_Component;
+extern struct IGameComponent Entities_Component;
 
 /* Offset used to avoid floating point roundoff errors. */
 #define ENTITY_ADJUSTMENT 0.001f
@@ -25,13 +25,13 @@ extern struct IGameComponent LocalPlayer_Component;
 typedef enum NameMode_ {
 	NAME_MODE_NONE, NAME_MODE_HOVERED, NAME_MODE_ALL, NAME_MODE_ALL_HOVERED, NAME_MODE_ALL_UNSCALED, NAME_MODE_COUNT
 } NameMode;
-NameMode Entities_NameMode;
+extern NameMode Entities_NameMode;
 extern const char* NameMode_Names[NAME_MODE_COUNT];
 
 typedef enum ShadowMode_ {
 	SHADOW_MODE_NONE, SHADOW_MODE_SNAP_TO_BLOCK, SHADOW_MODE_CIRCLE, SHADOW_MODE_CIRCLE_ALL, SHADOW_MODE_COUNT
 } ShadowMode;
-ShadowMode Entities_ShadowMode;
+extern ShadowMode Entities_ShadowMode;
 extern const char* ShadowMode_Names[SHADOW_MODE_COUNT];
 
 #define ENTITY_TYPE_NONE 0
@@ -105,23 +105,21 @@ bool Entity_TouchesAnyRope(struct Entity* e);
 bool Entity_TouchesAnyLava(struct Entity* e);
 bool Entity_TouchesAnyWater(struct Entity* e);
 
-struct Entity* Entities_List[ENTITIES_MAX_COUNT];
+extern struct Entity* Entities_List[ENTITIES_MAX_COUNT];
 void Entities_Tick(struct ScheduledTask* task);
 void Entities_RenderModels(double delta, float t);
 void Entities_RenderNames(double delta);
 void Entities_RenderHoveredNames(double delta);
-void Entities_Init(void);
-void Entities_Free(void);
 void Entities_Remove(EntityID id);
 EntityID Entities_GetCloset(struct Entity* src);
 void Entities_DrawShadows(void);
 
 #define TABLIST_MAX_NAMES 256
-StringsBuffer TabList_Buffer;
-uint16_t TabList_PlayerNames[TABLIST_MAX_NAMES];
-uint16_t TabList_ListNames[TABLIST_MAX_NAMES];
-uint16_t TabList_GroupNames[TABLIST_MAX_NAMES];
-uint8_t  TabList_GroupRanks[TABLIST_MAX_NAMES];
+extern StringsBuffer TabList_Buffer;
+extern uint16_t TabList_PlayerNames[TABLIST_MAX_NAMES];
+extern uint16_t TabList_ListNames[TABLIST_MAX_NAMES];
+extern uint16_t TabList_GroupNames[TABLIST_MAX_NAMES];
+extern uint8_t  TabList_GroupRanks[TABLIST_MAX_NAMES];
 bool TabList_Valid(EntityID id);
 bool TabList_Remove(EntityID id);
 void TabList_Set(EntityID id, const String* player, const String* list, const String* group, uint8_t rank);
@@ -144,7 +142,7 @@ struct NetPlayer {
 	bool ShouldRender;
 };
 void NetPlayer_Init(struct NetPlayer* player, const String* displayName, const String* skinName);
-struct NetPlayer NetPlayers_List[ENTITIES_SELF_ID];
+extern struct NetPlayer NetPlayers_List[ENTITIES_SELF_ID];
 
 /* Represents the user/player's own entity. */
 struct LocalPlayer {
@@ -159,8 +157,7 @@ struct LocalPlayer {
 	bool _WarnedRespawn, _WarnedFly, _WarnedNoclip;
 };
 
-struct LocalPlayer LocalPlayer_Instance;
-void LocalPlayer_Init(void);
+extern struct LocalPlayer LocalPlayer_Instance;
 float LocalPlayer_JumpHeight(void);
 void LocalPlayer_CheckHacksConsistency(void);
 void LocalPlayer_SetInterpPosition(float t);

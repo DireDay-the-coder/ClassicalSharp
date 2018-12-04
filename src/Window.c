@@ -5,6 +5,10 @@
 #include "ErrorHandler.h"
 #include "Funcs.h"
 
+bool Window_Exists, Window_Focused;
+Rect2D Window_Bounds;
+Size2D Window_ClientSize;
+
 static bool win_cursorVisible = true;
 bool Window_GetCursorVisible(void) { return win_cursorVisible; }
 
@@ -590,6 +594,33 @@ void Window_SetCursorVisible(bool visible) {
 	ShowCursor(visible ? 1 : 0);
 }
 
+void Window_ShowDialog(const char* title, const char* msg) {
+	MessageBoxA(win_handle, msg, title, 0);
+}
+
+static HGDIOBJ draw_DC;
+static HBITMAP draw_DIB;
+void Window_InitRaw(Bitmap* bmp) {
+	BITMAPINFO hdr = { 0 };
+
+	if (!draw_DC) draw_DC = CreateCompatibleDC(win_DC);
+	if (draw_DIB) DeleteObject(draw_DIB);
+	
+	hdr.bmiHeader.biSize = sizeof(BITMAPINFO);
+	hdr.bmiHeader.biWidth    =  bmp->Width;
+	hdr.bmiHeader.biHeight   = -bmp->Height;
+	hdr.bmiHeader.biBitCount = 32;
+	hdr.bmiHeader.biPlanes   = 1;
+
+	draw_DIB = CreateDIBSection(draw_DC, &hdr, 0, &bmp->Scan0, NULL, 0);
+}
+
+void Window_DrawRaw(Rect2D r) {
+	HGDIOBJ oldSrc = SelectObject(draw_DC, draw_DIB);
+	BOOL success = BitBlt(win_DC, r.X, r.Y, r.Width, r.Height, draw_DC, r.X, r.Y, SRCCOPY);
+	SelectObject(draw_DC, oldSrc);
+}
+
 
 /*########################################################################################################################*
 *-----------------------------------------------------OpenGL context------------------------------------------------------*
@@ -900,7 +931,7 @@ void Window_Create(int x, int y, int width, int height, struct GraphicsMode* mod
 	win_handle = XCreateWindow(win_display, win_rootWin, x, y, width, height,
 		0, win_visual.depth /* CopyFromParent*/, InputOutput, win_visual.visual, 
 		CWColormap | CWEventMask | CWBackPixel | CWBorderPixel, &attributes);
-	if (!win_handle) ErrorHandler_Fail("XCreateWindow call failed");
+	if (!win_handle) ErrorHandler_Fail("XCreateWindow failed");
 
 	hints.base_width  = width;
 	hints.base_height = height;
@@ -1350,6 +1381,264 @@ void Window_SetCursorVisible(bool visible) {
 
 
 /*########################################################################################################################*
+*-----------------------------------------------------X11 message box-----------------------------------------------------*
+*#########################################################################################################################*/
+static Display* dpy;
+static unsigned long X11_Col(uint8_t r, uint8_t g, uint8_t b) {
+    Colormap cmap = XDefaultColormap(dpy, DefaultScreen(dpy));
+    XColor col = { 0 };
+    col.red   = r << 8;
+    col.green = g << 8;
+    col.blue  = b << 8;
+    col.flags = DoRed | DoGreen | DoBlue;
+
+    XAllocColor(dpy, cmap, &col);
+    return col.pixel;
+}
+
+typedef struct {
+    Window win;
+    GC gc;
+    unsigned long white, black, background;
+    unsigned long btnBorder, highlight, shadow;
+} X11Window;
+
+static void X11Window_Init(X11Window* w) {
+    w->black = BlackPixel(dpy, DefaultScreen(dpy));
+    w->white = WhitePixel(dpy, DefaultScreen(dpy));
+    w->background = X11_Col(206, 206, 206);
+
+    w->btnBorder = X11_Col(60,  60,  60);
+    w->highlight = X11_Col(144, 144, 144);
+    w->shadow    = X11_Col(49,  49,  49);
+
+    w->win = XCreateSimpleWindow(dpy, DefaultRootWindow(dpy), 0, 0, 100, 100,
+                                0, w->black, w->background);
+    XSelectInput(dpy, w->win, ExposureMask     | StructureNotifyMask |
+                               KeyReleaseMask  | PointerMotionMask |
+                               ButtonPressMask | ButtonReleaseMask );
+
+    w->gc = XCreateGC(dpy, w->win, 0, NULL);
+    XSetForeground(dpy, w->gc, w->black);
+    XSetBackground(dpy, w->gc, w->background);
+}
+
+static void X11Window_Free(X11Window* w) {
+    XFreeGC(dpy, w->gc);
+    XDestroyWindow(dpy, w->win);
+}
+
+typedef struct {
+    int X, Y, Width, Height;
+    int LineHeight, Descent;
+    const char* Text;
+} X11Textbox;
+
+static void X11Textbox_Measure(X11Textbox* t, XFontStruct* font) {
+    String str = String_FromReadonly(t->Text);
+    XCharStruct overall;
+	int direction, ascent, descent;
+	int end, len, lines = 0;
+
+    for (end = 0; end >= 0; lines++) {
+        end = String_IndexOf(&str, '\n', 0);
+		len = end == -1 ? str.length : end;
+
+        XTextExtents(font, str.buffer, len, &direction, &ascent, &descent, &overall);
+        t->Width = max(overall.width, t->Width);
+        if (end >= 0) str = String_UNSAFE_SubstringAt(&str, end + 1);
+    }
+
+    t->LineHeight = ascent + descent;
+    t->Descent    = descent;
+    t->Height     = t->LineHeight * lines;
+}
+
+static void X11Textbox_Draw(X11Textbox* t, X11Window* w) {
+    String str = String_FromReadonly(t->Text);
+    int y = t->Y + t->LineHeight - t->Descent; /* TODO: is -Descent even right? */
+	int end, len;
+
+    for (end = 0; end >= 0; y += t->LineHeight) {
+        end = String_IndexOf(&str, '\n', 0);
+		len = end == -1 ? str.length : end;
+
+        XDrawString(dpy, w->win, w->gc, t->X, y, str.buffer, len);
+        if (end >= 0) str = String_UNSAFE_SubstringAt(&str, end + 1);
+    }
+}
+
+typedef struct {
+    int X, Y, Width, Height;
+    bool Clicked;
+    X11Textbox Text;
+} X11Button;
+
+static void X11Button_Draw(X11Button* b, X11Window* w) {
+	X11Textbox* t;
+	int begX, endX, begY, endY;
+
+    XSetForeground(dpy, w->gc, w->btnBorder);
+    XDrawRectangle(dpy, w->win, w->gc, b->X, b->Y,
+                    b->Width, b->Height);
+
+	t = &b->Text;
+	begX = b->X + 1; endX = b->X + b->Width - 1;
+	begY = b->Y + 1; endY = b->Y + b->Height - 1;
+
+    if (b->Clicked) {
+        XSetForeground(dpy, w->gc, w->highlight);
+        XDrawRectangle(dpy, w->win, w->gc, begX, begY,
+                        endX - begX, endY - begY);
+    } else {
+        XSetForeground(dpy, w->gc, w->white);
+        XDrawLine(dpy, w->win, w->gc, begX, begY,
+                    endX - 1, begY);
+        XDrawLine(dpy, w->win, w->gc, begX, begY,
+                    begX, endY - 1);
+
+        XSetForeground(dpy, w->gc, w->highlight);
+        XDrawLine(dpy, w->win, w->gc, begX + 1, endY - 1,
+                    endX - 1, endY - 1);
+        XDrawLine(dpy, w->win, w->gc, endX - 1, begY + 1,
+                    endX - 1, endY - 1);
+
+        XSetForeground(dpy, w->gc, w->shadow);
+        XDrawLine(dpy, w->win, w->gc, begX, endY, endX, endY);
+        XDrawLine(dpy, w->win, w->gc, endX, begY, endX, endY);
+    }
+
+    XSetForeground(dpy, w->gc, w->black);
+    t->X = b->X + b->Clicked + (b->Width  - t->Width)  / 2;
+    t->Y = b->Y + b->Clicked + (b->Height - t->Height) / 2;
+    X11Textbox_Draw(t, w);
+}
+
+static int X11Button_Contains(X11Button* b, int x, int y) {
+    return x >= b->X && x < (b->X + b->Width) &&
+           y >= b->Y && y < (b->Y + b->Height);
+}
+
+static void X11_MessageBox(const char* title, const char* text, X11Window* w) {
+    X11Button ok    = { 0 };
+    X11Textbox body = { 0 };
+
+	XFontStruct* font;
+	Atom wmDelete;
+	int x, y, width, height;
+	XSizeHints hints = { 0 };
+	int mouseX = -1, mouseY = -1, over;
+	XEvent e;
+
+    X11Window_Init(w);
+    XMapWindow(dpy, w->win);
+    XStoreName(dpy, w->win, title);
+
+    wmDelete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(dpy, w->win, &wmDelete, 1);
+
+    font = XQueryFont(dpy, XGContextFromGC(w->gc));
+    if (!font) return;
+
+    /* Compute size of widgets */
+    body.Text = text;
+    X11Textbox_Measure(&body, font);
+    ok.Text.Text = "OK";
+    X11Textbox_Measure(&ok.Text, font);
+    ok.Width  = ok.Text.Width  + 70;
+    ok.Height = ok.Text.Height + 10;
+
+    /* Compute size and position of window */
+    width  = body.Width                   + 20;
+    height = body.Height + 20 + ok.Height + 20;
+    x = DisplayWidth (dpy, DefaultScreen(dpy))/2 -  width/2;
+    y = DisplayHeight(dpy, DefaultScreen(dpy))/2 - height/2;
+    XMoveResizeWindow(dpy, w->win, x, y, width, height);
+
+    /* Adjust bounds of widgets */
+    body.X = 10; body.Y = 10;
+    ok.X = width/2 - ok.Width/2;
+    ok.Y = height  - ok.Height - 10;
+
+    XFreeFontInfo(NULL, font, 1);
+    XUnmapWindow(dpy, w->win); /* Make window non resizeable */
+
+    hints.flags      = PSize | PMinSize | PMaxSize;
+    hints.min_width  = hints.max_width  = hints.base_width  = width;
+    hints.min_height = hints.max_height = hints.base_height = height;
+
+    XSetWMNormalHints(dpy, w->win, &hints);
+    XMapRaised(dpy, w->win);
+    XFlush(dpy);
+
+    for (;;) {
+        XNextEvent(dpy, &e);
+
+        switch (e.type)
+        {
+        case ButtonPress:
+        case ButtonRelease:
+            if (e.xbutton.button != Button1) break;
+            over = X11Button_Contains(&ok, mouseX, mouseY);
+
+            if (ok.Clicked && e.type == ButtonRelease) {
+                if (over) return;
+            }
+            ok.Clicked = e.type == ButtonPress && over;
+            /* fallthrough to redraw window */
+
+        case Expose:
+        case MapNotify:
+            XClearWindow(dpy, w->win);
+            X11Textbox_Draw(&body, w);
+            X11Button_Draw(&ok, w);
+            XFlush(dpy);
+            break;
+
+        case KeyRelease:
+            if (XLookupKeysym(&e.xkey, 0) == XK_Escape) return;
+            break;
+
+        case ClientMessage:
+            if (e.xclient.data.l[0] == wmDelete) return;
+            break;
+
+        case MotionNotify:
+            mouseX = e.xmotion.x; mouseY = e.xmotion.y;
+            break;
+        }
+    }
+}
+
+void Window_ShowDialog(const char* title, const char* msg) {
+	X11Window w = { 0 };
+	dpy = DisplayDevice_Meta;
+
+	X11_MessageBox(title, msg, &w);
+	X11Window_Free(&w);
+}
+
+static GC win_gc;
+static XImage* win_image;
+void Window_InitRaw(Bitmap* bmp) {
+	if (!win_gc) win_gc = XCreateGC(win_display, win_handle, NULL, NULL);
+	if (win_image) XFree(win_image);
+
+	Mem_Free(bmp->Scan0);
+	bmp->Scan0 = Mem_Alloc(bmp->Width * bmp->Height, 4, "window pixels");
+
+	win_image = XCreateImage(win_display, win_visual.visual,
+		win_visual.depth, ZPixmap, 0, bmp->Scan0,
+		bmp->Width, bmp->Height, 32, 0);
+}
+
+void Window_DrawRaw(Rect2D r) {
+	XPutImage(win_display, win_handle, win_gc, win_image,
+		r.X, r.Y, r.X, r.Y, r.Width, r.Height);
+}
+
+
+/*########################################################################################################################*
 *-----------------------------------------------------OpenGL context------------------------------------------------------*
 *#########################################################################################################################*/
 static GLXContext ctx_Handle;
@@ -1369,13 +1658,13 @@ void GLContext_Init(struct GraphicsMode* mode) {
 		Platform_LogConst("Context create failed. Trying indirect...");
 		ctx_Handle = glXCreateContext(win_display, &win_visual, NULL, false);
 	}
-	if (!ctx_Handle) ErrorHandler_Fail("Failed to create context");
+	if (!ctx_Handle) ErrorHandler_Fail("Failed to create OpenGL context");
 
 	if (!glXIsDirect(win_display, ctx_Handle)) {
 		Platform_LogConst("== WARNING: Context is not direct ==");
 	}
 	if (!glXMakeCurrent(win_display, win_handle, ctx_Handle)) {
-		ErrorHandler_Fail("Failed to make context current.");
+		ErrorHandler_Fail("Failed to make OpenGL context current.");
 	}
 
 	/* GLX may return non-null function pointers that don't actually work */
@@ -2060,6 +2349,59 @@ void Window_SetCursorVisible(bool visible) {
 	} else {
 		CGDisplayHideCursor(CGMainDisplayID());
 	}
+}
+
+void Window_ShowDialog(const char* title, const char* msg) {
+	CFStringRef titleCF = CFStringCreateWithCString(NULL, title, kCFStringEncodingASCII);
+	CFStringRef msgCF   = CFStringCreateWithCString(NULL, msg,   kCFStringEncodingASCII);
+	DialogRef dialog;
+	DialogItemIndex itemHit;
+
+	CreateStandardAlert(kAlertPlainAlert, titleCF, msgCF, NULL, &dialog);
+	CFRelease(titleCF);
+	CFRelease(msgCF);
+	RunStandardAlert(dialog, NULL, &itemHit);
+}
+
+static CGrafPtr win_winPort;
+static CGImageRef win_image;
+
+void Window_InitRaw(Bitmap* bmp) {
+	CGColorSpaceRef colorSpace;
+	CGDataProviderRef provider;
+	
+	if (!win_winPort) win_winPort = GetWindowPort(win_handle);
+	Mem_Free(bmp->Scan0);
+	bmp->Scan0 = Mem_Alloc(bmp->Width * bmp->Height, 4, "window pixels");
+	
+	colorSpace = CGColorSpaceCreateDeviceRGB();
+	provider   = CGDataProviderCreateWithData(NULL, bmp->Scan0, 
+					Bimap_DataSize(bmp->Width, bmp->Height), NULL);
+	
+	win_image = CGImageCreate(bmp->Width, bmp->Height, 8, 32, bmp->Width * 4, colorSpace, 
+					kCGBitmapByteOrder32Little | kCGImageAlphaFirst, provider, NULL, 0, 0);
+	
+	CGColorSpaceRelease(colorSpace);
+	CGDataProviderRelease(provider);
+}
+
+void Window_DrawRaw(Rect2D r) {
+	CGContextRef context = NULL;
+	CGRect rect;
+	OSStatus err;
+	
+	err = QDBeginCGContext(win_winPort, &context);
+	if (err) ErrorHandler_Fail2(err, "Begin draw");
+	
+	/* TODO: Only update changed bit.. */
+	rect.origin.x = 0; rect.origin.y = 0;
+	rect.size.x   = Window_ClientSize.Width;
+	rect.size.y   = Window_ClientSize.Height;
+	
+	CGContextDrawImage(context, rect, win_image);
+	CGContextSynchronize(context);
+	err = QDEndCGContext(win_winPort, &context);
+	if (err) ErrorHandler_Fail2(err, "End draw");
 }
 
 

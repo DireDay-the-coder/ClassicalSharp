@@ -7,7 +7,7 @@
 #include "Drawer2D.h"
 #include "Graphics.h"
 #include "Funcs.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Model.h"
 #include "MapGenerator.h"
 #include "ServerConnection.h"
@@ -30,7 +30,7 @@ struct InventoryScreen {
 struct StatusScreen {
 	Screen_Layout
 	FontDesc Font;
-	struct TextWidget Status, HackStates;
+	struct TextWidget Line1, Line2;
 	struct TextAtlas PosAtlas;
 	double Accumulator;
 	int Frames, FPS;
@@ -343,7 +343,7 @@ static void StatusScreen_UpdateHackState(struct StatusScreen* s) {
 	if (speeding)      String_AppendConst(&status, "Speed ON   ");
 	if (hacks->Noclip) String_AppendConst(&status, "Noclip ON   ");
 
-	TextWidget_Set(&s->HackStates, &status, &s->Font);
+	TextWidget_Set(&s->Line2, &status, &s->Font);
 }
 
 static void StatusScreen_Update(struct StatusScreen* s, double delta) {
@@ -356,7 +356,7 @@ static void StatusScreen_Update(struct StatusScreen* s, double delta) {
 	String_InitArray(status, statusBuffer);
 	StatusScreen_MakeText(s, &status);
 
-	TextWidget_Set(&s->Status, &status, &s->Font);
+	TextWidget_Set(&s->Line1, &status, &s->Font);
 	s->Accumulator = 0.0;
 	s->Frames = 0;
 	Game_ChunkUpdates = 0;
@@ -371,34 +371,46 @@ static void StatusScreen_FontChanged(void* screen) {
 static void StatusScreen_ContextLost(void* screen) {
 	struct StatusScreen* s = screen;
 	TextAtlas_Free(&s->PosAtlas);
-	Elem_TryFree(&s->Status);
-	Elem_TryFree(&s->HackStates);
+	Elem_TryFree(&s->Line1);
+	Elem_TryFree(&s->Line2);
 }
 
 static void StatusScreen_ContextRecreated(void* screen) {	
-	static String chars  = String_FromConst("0123456789-, ()");
-	static String prefix = String_FromConst("Position: ");
+	static String chars   = String_FromConst("0123456789-, ()");
+	static String prefix  = String_FromConst("Position: ");
+	static String version = String_FromConst("0.30");
 
 	struct StatusScreen* s = screen;
-	struct TextWidget* status = &s->Status;
-	struct TextWidget* hacks  = &s->HackStates;
+	struct TextWidget* line1 = &s->Line1;
+	struct TextWidget* line2 = &s->Line2;
 	int y;
 
 	y = 2;
-	TextWidget_Make(status);
-	Widget_SetLocation(status, ANCHOR_MIN, ANCHOR_MIN, 2, y);
-	status->ReducePadding = true;
+	TextWidget_Make(line1);
+	Widget_SetLocation(line1, ANCHOR_MIN, ANCHOR_MIN, 2, y);
+	line1->ReducePadding = true;
 	StatusScreen_Update(s, 1.0);
 
-	y += status->Height;
+	y += line1->Height;
 	TextAtlas_Make(&s->PosAtlas, &chars, &s->Font, &prefix);
 	s->PosAtlas.Tex.Y = y;
 
 	y += s->PosAtlas.Tex.Height;
-	TextWidget_Make(hacks);
-	Widget_SetLocation(hacks, ANCHOR_MIN, ANCHOR_MIN, 2, y);
-	hacks->ReducePadding = true;
-	StatusScreen_UpdateHackState(s);
+	TextWidget_Make(line2);
+	Widget_SetLocation(line2, ANCHOR_MIN, ANCHOR_MIN, 2, y);
+	line2->ReducePadding = true;
+
+	if (Game_ClassicMode) {
+		/* Swap around so 0.30 version is at top */
+		line2->YOffset = 2;
+		line1->YOffset = s->PosAtlas.Tex.Y;
+		TextWidget_Set(line2, &version, &s->Font);
+
+		Widget_Reposition(line1);
+		Widget_Reposition(line2);
+	} else {
+		StatusScreen_UpdateHackState(s);
+	}
 }
 
 static bool StatusScreen_Key(void* elem, Key key) { return false; }
@@ -415,15 +427,18 @@ static void StatusScreen_Init(void* screen) {
 static void StatusScreen_Render(void* screen, double delta) {
 	struct StatusScreen* s = screen;
 	StatusScreen_Update(s, delta);
-	if (Game_HideGui || !Game_ShowFPS) return;
+	if (Game_HideGui) return;
 
+	/* TODO: If Game_ShowFps is off and not classic mode, we should just return here */
 	Gfx_SetTexturing(true);
-	Elem_Render(&s->Status, delta);
+	if (Game_ShowFPS) Elem_Render(&s->Line1, delta);
 
-	if (!Game_ClassicMode && !Gui_Active) {
+	if (Game_ClassicMode) {
+		Elem_Render(&s->Line2, delta);
+	} else if (!Gui_Active && Game_ShowFPS) {
 		if (StatusScreen_HacksChanged(s)) { StatusScreen_UpdateHackState(s); }
 		StatusScreen_DrawPosition(s);
-		Elem_Render(&s->HackStates, delta);
+		Elem_Render(&s->Line2, delta);
 	}
 	Gfx_SetTexturing(false);
 }
@@ -782,26 +797,23 @@ static void ChatScreen_ConstructWidgets(struct ChatScreen* s) {
 }
 
 static void ChatScreen_SetInitialMessages(struct ChatScreen* s) {
-	String msg;
 	int i;
 
 	s->ChatIndex = Chat_Log.Count - Game_ChatLines;
 	ChatScreen_ResetChat(s);
-#define ChatScreen_Set(group, idx, src) msg = String_FromRawArray(src.Buffer); TextGroupWidget_SetText(group, idx, &msg);
 
-	ChatScreen_Set(&s->Status, 2, Chat_Status[0]);
-	ChatScreen_Set(&s->Status, 3, Chat_Status[1]);
-	ChatScreen_Set(&s->Status, 4, Chat_Status[2]);
+	TextGroupWidget_SetText(&s->Status, 2, &Chat_Status[0]);
+	TextGroupWidget_SetText(&s->Status, 3, &Chat_Status[1]);
+	TextGroupWidget_SetText(&s->Status, 4, &Chat_Status[2]);
 
-	ChatScreen_Set(&s->BottomRight, 2, Chat_BottomRight[0]);
-	ChatScreen_Set(&s->BottomRight, 1, Chat_BottomRight[1]);
-	ChatScreen_Set(&s->BottomRight, 0, Chat_BottomRight[2]);
+	TextGroupWidget_SetText(&s->BottomRight, 2, &Chat_BottomRight[0]);
+	TextGroupWidget_SetText(&s->BottomRight, 1, &Chat_BottomRight[1]);
+	TextGroupWidget_SetText(&s->BottomRight, 0, &Chat_BottomRight[2]);
 
-	msg = String_FromRawArray(Chat_Announcement.Buffer);
-	TextWidget_Set(&s->Announcement, &msg, &s->AnnouncementFont);
+	TextWidget_Set(&s->Announcement, &Chat_Announcement, &s->AnnouncementFont);
 	
 	for (i = 0; i < s->ClientStatus.LinesCount; i++) {
-		ChatScreen_Set(&s->ClientStatus, i, Chat_ClientStatus[i]);
+		TextGroupWidget_SetText(&s->ClientStatus, i, &Chat_ClientStatus[i]);
 	}
 
 	if (s->HandlesAllInput) {
@@ -1167,7 +1179,7 @@ static void ChatScreen_Render(void* screen, double delta) {
 		}
 	}
 
-	if (s->Announcement.Texture.ID && now > Chat_Announcement.Received + (5 * 1000)) {
+	if (s->Announcement.Texture.ID && now > Chat_AnnouncementReceived + (5 * 1000)) {
 		Elem_TryFree(&s->Announcement);
 	}
 }
@@ -1521,7 +1533,7 @@ static bool DisconnectScreen_MouseDown(void* screen, int x, int y, MouseButton b
 
 		Gui_FreeActive();
 		Gui_SetActive(LoadingScreen_MakeInstance(&title, &String_Empty));
-		ServerConnection_BeginConnect();
+		ServerConnection.BeginConnect();
 	}
 	return true;
 }

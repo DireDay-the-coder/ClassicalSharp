@@ -5,6 +5,8 @@
 #include "Stream.h"
 #include "Utils.h"
 
+const String String_Empty;
+
 String String_Init(STRING_REF char* buffer, int length, int capacity) {
 	String s; 
 	s.buffer = buffer; s.length = length; s.capacity = capacity; 
@@ -90,8 +92,8 @@ bool String_UNSAFE_Separate(STRING_REF const String* str, char c, String* key, S
 	*value = String_UNSAFE_SubstringAt(str, idx);
 
 	/* Trim key [c] value to just key[c]value */
-	String_TrimEnd(key);
-	String_TrimStart(value);
+	String_UNSAFE_TrimEnd(key);
+	String_UNSAFE_TrimStart(value);
 	return key->length > 0 && value->length > 0;
 }
 
@@ -336,7 +338,7 @@ void String_DeleteAt(String* str, int offset) {
 	str->length--;
 }
 
-void String_TrimStart(String* str) {
+void String_UNSAFE_TrimStart(String* str) {
 	int i;
 	for (i = 0; i < str->length; i++) {
 		if (str->buffer[i] != ' ') break;
@@ -346,7 +348,7 @@ void String_TrimStart(String* str) {
 	}
 }
 
-void String_TrimEnd(String* str) {
+void String_UNSAFE_TrimEnd(String* str) {
 	int i;
 	for (i = str->length - 1; i >= 0; i--) {
 		if (str->buffer[i] != ' ') break;

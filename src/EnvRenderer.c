@@ -13,10 +13,12 @@
 #include "Stream.h"
 #include "Block.h"
 #include "Event.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Platform.h"
 #include "Camera.h"
 #include "Particle.h"
+
+bool EnvRenderer_Legacy, EnvRenderer_Minimal;
 
 #define ENV_SMALL_VERTICES 4096
 static float EnvRenderer_BlendFactor(float x) {
@@ -356,13 +358,14 @@ static void EnvRenderer_UpdateSkybox(void) {
 /*########################################################################################################################*
 *----------------------------------------------------------Weather--------------------------------------------------------*
 *#########################################################################################################################*/
+int16_t* Weather_Heightmap;
 static GfxResourceID rain_tex, snow_tex, weather_vb;
-#define WEATHER_EXTENT 4
-#define WEATHER_VERTS_COUNT 8 * (WEATHER_EXTENT * 2 + 1) * (WEATHER_EXTENT * 2 + 1)
-
-#define Weather_Pack(x, z) ((x) * World_Length + (z))
 static double weather_accumulator;
 static Vector3I weather_lastPos;
+
+#define WEATHER_EXTENT 4
+#define WEATHER_VERTS_COUNT 8 * (WEATHER_EXTENT * 2 + 1) * (WEATHER_EXTENT * 2 + 1)
+#define Weather_Pack(x, z) ((x) * World_Length + (z))
 
 static void EnvRenderer_InitWeatherHeightmap(void) {
 	int i;
@@ -577,7 +580,7 @@ static void EnvRenderer_MakeBorderTex(GfxResourceID* texId, BlockID block) {
 	if (Gfx_LostContext) return;
 
 	Gfx_DeleteTexture(texId);
-	*texId = Atlas2D_LoadTile(loc);
+	*texId = Atlas_LoadTile(loc);
 }
 
 static Rect2D EnvRenderer_Rect(int x, int y, int width, int height) {
@@ -891,6 +894,15 @@ static void EnvRenderer_EnvVariableChanged(void* obj, int envVar) {
 *--------------------------------------------------EnvRenderer component--------------------------------------------------*
 *#########################################################################################################################*/
 static void EnvRenderer_Init(void) {
+	String renderType;
+	int flags;
+	Options_UNSAFE_Get(OPT_RENDER_TYPE, &renderType);
+
+	flags = Game_CalcRenderType(&renderType);
+	if (flags == -1) flags = 0;
+	EnvRenderer_Legacy  = (flags & 1);
+	EnvRenderer_Minimal = (flags & 2);
+
 	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, EnvRenderer_FileChanged);
 	Event_RegisterVoid(&TextureEvents_PackChanged,  NULL, EnvRenderer_TexturePackChanged);
 	Event_RegisterVoid(&TextureEvents_AtlasChanged, NULL, EnvRenderer_TerrainAtlasChanged);
@@ -926,21 +938,14 @@ static void EnvRenderer_Free(void) {
 static void EnvRenderer_Reset(void) {
 	Gfx_SetFog(false);
 	EnvRenderer_DeleteVbs();
+
 	Mem_Free(Weather_Heightmap);
 	Weather_Heightmap = NULL;
-	weather_lastPos = Vector3I_MaxValue();
+	weather_lastPos   = Vector3I_MaxValue();
 }
 
 static void EnvRenderer_OnNewMapLoaded(void) {
 	EnvRenderer_ContextRecreated(NULL);
-}
-
-void EnvRenderer_MakeComponent(struct IGameComponent* comp) {
-	comp->Init     = EnvRenderer_Init;
-	comp->Reset    = EnvRenderer_Reset;
-	comp->OnNewMap = EnvRenderer_Reset;
-	comp->OnNewMapLoaded = EnvRenderer_OnNewMapLoaded;
-	comp->Free     = EnvRenderer_Free;
 }
 
 struct IGameComponent EnvRenderer_Component = {

@@ -7,20 +7,22 @@
    Also sorts chunks so nearest chunks are rendered first, and calculates chunk visibility.
    Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 */
+struct IGameComponent;
+extern struct IGameComponent MapRenderer_Component;
 
-int MapRenderer_ChunksX, MapRenderer_ChunksY, MapRenderer_ChunksZ;
+extern int MapRenderer_ChunksX, MapRenderer_ChunksY, MapRenderer_ChunksZ;
 #define MapRenderer_Pack(cx, cy, cz) (((cz) * MapRenderer_ChunksY + (cy)) * MapRenderer_ChunksX + (cx))
 /* TODO: Swap Y and Z? Make sure to update ChunkUpdater's ResetChunkCache and ClearChunkCache methods! */
 
-/* Count of actual used 1D atlases. (i.e. 1DIndex(maxTextureLoc) + 1 */
-int MapRenderer_1DUsedCount;
+/* Max used 1D atlases. (i.e. Atlas1D_Index(maxTextureLoc) + 1) */
+extern int MapRenderer_1DUsedCount;
 /* Number of chunks in the world, or ChunksX * ChunksY * ChunksZ */
-int MapRenderer_ChunksCount;
+extern int MapRenderer_ChunksCount;
 
 /* Buffer for all chunk parts. There are (MapRenderer_ChunksCount * Atlas1D_Count) parts in the buffer,
 with parts for 'normal' buffer being in lower half. */
-struct ChunkPartInfo* MapRenderer_PartsNormal; /* TODO: THAT DESC SUCKS */
-struct ChunkPartInfo* MapRenderer_PartsTranslucent;
+extern struct ChunkPartInfo* MapRenderer_PartsNormal; /* TODO: THAT DESC SUCKS */
+extern struct ChunkPartInfo* MapRenderer_PartsTranslucent;
 
 /* Describes a portion of the data needed for rendering a chunk. */
 struct ChunkPartInfo {
@@ -36,9 +38,9 @@ struct ChunkPartInfo {
 struct ChunkInfo {	
 	uint16_t CentreX, CentreY, CentreZ; /* Centre coordinates of the chunk */
 
-	uint8_t Visible : 1;       /* Whether chunk is visibile to the player */
+	uint8_t Visible : 1;       /* Whether chunk is visible to the player */
 	uint8_t Empty : 1;         /* Whether the chunk is empty of data */
-	uint8_t PendingDelete : 1; /* Whether chunk is pending deletion*/
+	uint8_t PendingDelete : 1; /* Whether chunk is pending deletion */
 	uint8_t AllAir : 1;        /* Whether chunk is completely air */
 	uint8_t : 0;               /* pad to next byte*/
 
@@ -88,8 +90,5 @@ void MapRenderer_BuildChunk(struct ChunkInfo* info, int* chunkUpdates);
 void MapRenderer_RefreshBorders(int maxHeight);
 /* Deletes all chunks and resets internal state. */
 void MapRenderer_Refresh(void);
-
-void MapRenderer_Init(void);
-void MapRenderer_Free(void);
 void MapRenderer_ApplyMeshBuilder(void);
 #endif

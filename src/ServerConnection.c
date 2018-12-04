@@ -8,6 +8,7 @@
 #include "AsyncDownloader.h"
 #include "Funcs.h"
 #include "Entity.h"
+#include "Graphics.h"
 #include "Gui.h"
 #include "Screens.h"
 #include "Formats.h"
@@ -22,18 +23,24 @@
 #include "Platform.h"
 #include "GameStructs.h"
 
-/*########################################################################################################################*
-*-----------------------------------------------------Common handlers-----------------------------------------------------*
-*#########################################################################################################################*/
 static char server_nameBuffer[STRING_SIZE];
 static char server_motdBuffer[STRING_SIZE];
 static char server_appBuffer[STRING_SIZE];
 static int server_ticks;
 
+struct ServerConnectionFuncs ServerConnection;
+bool ServerConnection_IsSinglePlayer, ServerConnection_Disconnected;
 String ServerConnection_ServerName = String_FromArray(server_nameBuffer);
 String ServerConnection_ServerMOTD = String_FromArray(server_motdBuffer);
 String ServerConnection_AppName    = String_FromArray(server_appBuffer);
 
+uint8_t* ServerConnection_WriteBuffer; 
+bool ServerConnection_SupportsExtPlayerList, ServerConnection_SupportsPlayerClick;
+bool ServerConnection_SupportsPartialMessages, ServerConnection_SupportsFullCP437;
+
+/*########################################################################################################################*
+*-----------------------------------------------------Common handlers-----------------------------------------------------*
+*#########################################################################################################################*/
 static void ServerConnection_ResetState(void) {
 	ServerConnection_Disconnected = false;
 	ServerConnection_SupportsExtPlayerList = false;
@@ -136,6 +143,7 @@ int PingList_AveragePingMs(void) {
 /*########################################################################################################################*
 *-------------------------------------------------Singleplayer connection-------------------------------------------------*
 *#########################################################################################################################*/
+#define SP_HasDir(path) (String_IndexOf(&path, '/', 0) >= 0 || String_IndexOf(&path, '\\', 0) >= 0)
 static void SPConnection_BeginConnect(void) {
 	static String logName = String_FromConst("Singleplayer");
 	String path;
@@ -154,7 +162,7 @@ static void SPConnection_BeginConnect(void) {
 
 	/* For when user drops a map file onto ClassiCube.exe */
 	path = Game_Username;
-	if (String_IndexOf(&path, Directory_Separator, 0) >= 0 && File_Exists(&path)) {
+	if (SP_HasDir(path) && File_Exists(&path)) {
 		Map_LoadFrom(&path);
 		Gui_CloseActive();
 		return;
@@ -186,11 +194,15 @@ static void SPConnection_AddPart(const String* text) {
 	for (i = 0; i < tmp.length; i++) {
 		if (tmp.buffer[i] == '%') tmp.buffer[i] = '&';
 	}
-	String_TrimEnd(&tmp);
+	String_UNSAFE_TrimEnd(&tmp);
 
 	col = Drawer2D_LastCol(&tmp, tmp.length);
 	if (col) SPConnection_LastCol = col;
 	Chat_Add(&tmp);
+}
+
+static void SPConnection_SendBlock(int x, int y, int z, BlockID old, BlockID now) {
+	Physics_OnBlockChanged(x, y, z, old, now);
 }
 
 static void SPConnection_SendChat(const String* text) {
@@ -220,19 +232,21 @@ static void SPConnection_Tick(struct ScheduledTask* task) {
 	server_ticks++;
 }
 
-void ServerConnection_InitSingleplayer(void) {
+static struct ServerConnectionFuncs SPConnection = {
+	SPConnection_BeginConnect, SPConnection_Tick,
+	SPConnection_SendBlock,    SPConnection_SendChat,
+	SPConnection_SendPosition, SPConnection_SendPlayerClick
+};
+
+static void SPConnection_Init(void) {
 	ServerConnection_ResetState();
 	Physics_Init();
+	
 	ServerConnection_SupportsFullCP437 = !Game_ClassicMode;
 	ServerConnection_SupportsPartialMessages = true;
 	ServerConnection_IsSinglePlayer = true;
 
-	ServerConnection_BeginConnect = SPConnection_BeginConnect;
-	ServerConnection_SendChat = SPConnection_SendChat;
-	ServerConnection_SendPosition = SPConnection_SendPosition;
-	ServerConnection_SendPlayerClick = SPConnection_SendPlayerClick;
-	ServerConnection_Tick = SPConnection_Tick;
-
+	ServerConnection = SPConnection;
 	ServerConnection_WriteBuffer = NULL;
 }
 
@@ -240,6 +254,9 @@ void ServerConnection_InitSingleplayer(void) {
 /*########################################################################################################################*
 *--------------------------------------------------Multiplayer connection-------------------------------------------------*
 *#########################################################################################################################*/
+uint16_t Net_PacketSizes[OPCODE_COUNT];
+Net_Handler Net_Handlers[OPCODE_COUNT];
+
 static SocketHandle net_socket;
 static uint8_t  net_readBuffer[4096 * 5];
 static uint8_t  net_writeBuffer[131];
@@ -253,16 +270,6 @@ static double net_discAccumulator;
 static bool net_connecting;
 static TimeMS net_connectTimeout;
 #define NET_TIMEOUT_MS (15 * 1000)
-
-static void MPConnection_BlockChanged(void* obj, Vector3I p, BlockID old, BlockID now) {
-	if (now == BLOCK_AIR) {
-		now = Inventory_SelectedBlock;
-		Classic_WriteSetBlock(p.X, p.Y, p.Z, false, now);
-	} else {
-		Classic_WriteSetBlock(p.X, p.Y, p.Z, true, now);
-	}
-	Net_SendPacket();
-}
 
 static void ServerConnection_Free(void);
 static void MPConnection_FinishConnect(void) {
@@ -319,7 +326,6 @@ static void MPConnection_TickConnect(void) {
 
 static void MPConnection_BeginConnect(void) {
 	ReturnCode res;
-	Event_RegisterBlock(&UserEvents_BlockChanged, NULL, MPConnection_BlockChanged);
 	Socket_Create(&net_socket);
 	ServerConnection_Disconnected = false;
 
@@ -331,6 +337,16 @@ static void MPConnection_BeginConnect(void) {
 	if (res && res != ReturnCode_SocketInProgess && res != ReturnCode_SocketWouldBlock) {
 		MPConnection_FailConnect(res);
 	}
+}
+
+static void MPConnection_SendBlock(int x, int y, int z, BlockID old, BlockID now) {
+	if (now == BLOCK_AIR) {
+		now = Inventory_SelectedBlock;
+		Classic_WriteSetBlock(x, y, z, false, now);
+	} else {
+		Classic_WriteSetBlock(x, y, z, true, now);
+	}
+	Net_SendPacket();
 }
 
 static void MPConnection_SendChat(const String* text) {
@@ -476,11 +492,6 @@ static void MPConnection_Tick(struct ScheduledTask* task) {
 	server_ticks++;
 }
 
-void Net_Set(uint8_t opcode, Net_Handler handler, int packetSize) {
-	Net_Handlers[opcode]    = handler;
-	Net_PacketSizes[opcode] = packetSize;
-}
-
 void Net_SendPacket(void) {
 	uint32_t left, wrote;
 	uint8_t* cur;
@@ -499,17 +510,18 @@ void Net_SendPacket(void) {
 	}
 }
 
-void ServerConnection_InitMultiplayer(void) {
+static struct ServerConnectionFuncs MPConnection = {
+	MPConnection_BeginConnect, MPConnection_Tick,
+	MPConnection_SendBlock,    MPConnection_SendChat,
+	MPConnection_SendPosition, MPConnection_SendPlayerClick
+};
+
+static void MPConnection_Init(void) {
 	ServerConnection_ResetState();
 	ServerConnection_IsSinglePlayer = false;
 
-	ServerConnection_BeginConnect = MPConnection_BeginConnect;
-	ServerConnection_SendChat = MPConnection_SendChat;
-	ServerConnection_SendPosition = MPConnection_SendPosition;
-	ServerConnection_SendPlayerClick = MPConnection_SendPlayerClick;
-	ServerConnection_Tick = MPConnection_Tick;
-
-	net_readCurrent = net_readBuffer;
+	ServerConnection = MPConnection;
+	net_readCurrent  = net_readBuffer;
 	ServerConnection_WriteBuffer = net_writeBuffer;
 }
 
@@ -539,19 +551,30 @@ static void MPConnection_Reset(void) {
 	ServerConnection_Free();
 }
 
+static void ServerConnection_Init(void) {
+	if (!Game_IPAddress.length) {
+		SPConnection_Init();
+	} else {
+		MPConnection_Init();
+	}
+
+	Gfx_LostContextFunction = ServerConnection.Tick;
+	ScheduledTask_Add(GAME_NET_TICKS, ServerConnection.Tick);
+	String_AppendConst(&ServerConnection_AppName, PROGRAM_APP_NAME);
+}
+
 static void ServerConnection_Free(void) {
 	if (ServerConnection_IsSinglePlayer) {
 		Physics_Free();
 	} else {
 		if (ServerConnection_Disconnected) return;
-		Event_UnregisterBlock(&UserEvents_BlockChanged, NULL, MPConnection_BlockChanged);
 		Socket_Close(net_socket);
 		ServerConnection_Disconnected = true;
 	}
 }
 
 struct IGameComponent ServerConnection_Component = {
-	NULL,                  /* Init  */
+	ServerConnection_Init, /* Init  */
 	ServerConnection_Free, /* Free  */
 	MPConnection_Reset,    /* Reset */
 	MPConnection_OnNewMap  /* OnNewMap */

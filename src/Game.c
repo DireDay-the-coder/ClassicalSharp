@@ -19,7 +19,6 @@
 #include "Model.h"
 #include "Particle.h"
 #include "AsyncDownloader.h"
-#include "Animations.h"
 #include "Inventory.h"
 #include "InputHandler.h"
 #include "ServerConnection.h"
@@ -33,7 +32,36 @@
 #include "Menus.h"
 #include "Audio.h"
 #include "Stream.h"
-#include "TerrainAtlas.h"
+
+int Game_Width, Game_Height;
+double Game_Accumulator;
+int Game_ChunkUpdates, Game_Port;
+bool Game_CameraClipping, Game_UseCPEBlocks;
+
+struct PickedPos Game_SelectedPos, Game_CameraClipPos;
+int Game_ViewDistance, Game_MaxViewDistance, Game_UserViewDistance;
+int Game_Fov, Game_DefaultFov, Game_ZoomFov;
+
+float game_limitMs;
+int  Game_FpsLimit, Game_Vertices;
+bool Game_ShowAxisLines, Game_SimpleArmsAnim;
+bool Game_ClassicArmModel, Game_InvertMouse;
+
+int  Game_MouseSensitivity, Game_ChatLines;
+bool Game_TabAutocomplete, Game_UseClassicGui;
+bool Game_UseClassicTabList, Game_UseClassicOptions;
+bool Game_ClassicMode, Game_ClassicHacks;
+bool Game_AllowCustomBlocks, Game_UseCPE;
+bool Game_AllowServerTextures, Game_SmoothLighting;
+bool Game_ChatLogging, Game_AutoRotate;
+bool Game_SmoothCamera, Game_ClickableChat;
+bool Game_HideGui, Game_ShowFPS;
+
+bool Game_ViewBobbing, Game_ShowBlockInHand;
+int  Game_SoundsVolume, Game_MusicVolume;
+bool Game_BreakableLiquids, Game_ScreenshotRequested;
+int  Game_MaxChunkUpdates;
+float Game_RawHotbarScale, Game_RawChatScale, Game_RawInventoryScale;
 
 static struct ScheduledTask Game_Tasks[6];
 static int Game_TasksCount, entTaskI;
@@ -102,7 +130,7 @@ void Game_GetDefaultTexturePack(String* texPack) {
 	String texPath; char texPathBuffer[STRING_SIZE];
 
 	String_InitArray(texPath, texPathBuffer);
-	String_Format2(&texPath, "texpacks%r%s", &Directory_Separator, &game_defTexPack);
+	String_Format1(&texPath, "texpacks/%s", &game_defTexPack);
 
 	if (File_Exists(&texPath) && !Game_ClassicMode) {
 		String_AppendString(texPack, &game_defTexPack);
@@ -127,10 +155,8 @@ bool Game_ChangeTerrainAtlas(Bitmap* atlas) {
 	}
 	if (Gfx_LostContext) return false;
 
-	Atlas1D_Free();
-	Atlas2D_Free();
-	Atlas2D_UpdateState(atlas);
-	Atlas1D_UpdateState();
+	Atlas_Free();
+	Atlas_Update(atlas);
 
 	Event_RaiseVoid(&TextureEvents_AtlasChanged);
 	return true;
@@ -160,15 +186,19 @@ void Game_UpdateProjection(void) {
 }
 
 void Game_Disconnect(const String* title, const String* reason) {
-	struct IGameComponent* comp;
 	World_Reset();
 	Event_RaiseVoid(&WorldEvents_NewMap);
 	Gui_FreeActive();
 	Gui_SetActive(DisconnectScreen_MakeInstance(title, reason));
+	Game_Reset();
+}
 
-	Drawer2D_Init();
-	Block_Reset();
-	TexturePack_ExtractDefault();
+void Game_Reset(void) {
+	struct IGameComponent* comp;
+	if (World_TextureUrl.length) {
+		TexturePack_ExtractDefault();
+		World_TextureUrl.length = 0;
+	}
 
 	for (comp = comps_head; comp; comp = comp->Next) {
 		if (comp->Reset) comp->Reset();
@@ -178,18 +208,24 @@ void Game_Disconnect(const String* title, const String* reason) {
 void Game_UpdateBlock(int x, int y, int z, BlockID block) {
 	struct ChunkInfo* chunk;
 	int cx = x >> 4, cy = y >> 4, cz = z >> 4;
-	BlockID oldBlock = World_GetBlock(x, y, z);
+	BlockID old = World_GetBlock(x, y, z);
 	World_SetBlock(x, y, z, block);
 
 	if (Weather_Heightmap) {
-		EnvRenderer_OnBlockChanged(x, y, z, oldBlock, block);
+		EnvRenderer_OnBlockChanged(x, y, z, old, block);
 	}
-	Lighting_OnBlockChanged(x, y, z, oldBlock, block);
+	Lighting_OnBlockChanged(x, y, z, old, block);
 
 	/* Refresh the chunk the block was located in. */
 	chunk = MapRenderer_GetChunk(cx, cy, cz);
 	chunk->AllAir &= Block_Draw[block] == DRAW_GAS;
 	MapRenderer_RefreshChunk(cx, cy, cz);
+}
+
+void Game_ChangeBlock(int x, int y, int z, BlockID block) {
+	BlockID old = World_GetBlock(x, y, z);
+	Game_UpdateBlock(x, y, z, block);
+	ServerConnection.SendBlock(x, y, z, old, block);
 }
 
 bool Game_CanPick(BlockID block) {
@@ -253,7 +289,7 @@ int Game_CalcRenderType(const String* type) {
 	return -1;
 }
 
-static void Game_UpdateClientSize(void) {
+void Game_UpdateClientSize(void) {
 	Size2D size = Window_ClientSize;
 	Game_Width  = max(size.Width,  1);
 	Game_Height = max(size.Height, 1);
@@ -385,7 +421,7 @@ static void Game_LoadGuiOptions(void) {
 
 	Game_TabAutocomplete = Options_GetBool(OPT_TAB_AUTOCOMPLETE, false);
 	Options_Get(OPT_FONT_NAME, &Game_FontName, Font_DefaultName);
-	if (Game_ClassicMode) {
+	if (!Game_ClassicMode) {
 		Game_FontName.length = 0;
 		String_AppendConst(&Game_FontName, Font_DefaultName);
 	}
@@ -393,24 +429,10 @@ static void Game_LoadGuiOptions(void) {
 	/* TODO: Handle Arial font not working */
 }
 
-static void Game_InitScheduledTasks(void) {
-	#define GAME_DEF_TICKS (1.0 / 20)
-	#define GAME_NET_TICKS (1.0 / 60)
-
-	ScheduledTask_Add(30, AsyncDownloader_PurgeOldEntriesTask);
-	ScheduledTask_Add(GAME_NET_TICKS, ServerConnection_Tick);
-	entTaskI = ScheduledTask_Add(GAME_DEF_TICKS, Entities_Tick);
-
-	ScheduledTask_Add(GAME_DEF_TICKS, Particles_Tick);
-	ScheduledTask_Add(GAME_DEF_TICKS, Animations_Tick);
-}
-
 void Game_Free(void* obj);
 void Game_Load(void) {
-	String renderType; char renderTypeBuffer[STRING_SIZE];
 	String title;      char titleBuffer[STRING_SIZE];
 	struct IGameComponent* comp;
-	int flags;
 
 	Game_ViewDistance     = 512;
 	Game_MaxViewDistance  = 32768;
@@ -421,21 +443,11 @@ void Game_Load(void) {
 	Gfx_Init();
 	Gfx_SetVSync(true);
 	Gfx_MakeApiInfo();
+	Gfx_Mipmaps = Options_GetBool(OPT_MIPMAPS, false);
 
-	Drawer2D_Init();
 	Game_UpdateClientSize();
-
-	Entities_Init();
-	TextureCache_Init();
-	/* TODO: Survival vs Creative game mode */
-
-	InputHandler_Init();
-	Game_AddComponent(&Particles_Component);
-	Game_AddComponent(&TabList_Component);
-
 	Game_LoadOptions();
 	Game_LoadGuiOptions();
-	Game_AddComponent(&Chat_Component);
 
 	Event_RegisterVoid(&WorldEvents_NewMap,         NULL, Game_OnNewMapCore);
 	Event_RegisterVoid(&WorldEvents_MapLoaded,      NULL, Game_OnNewMapLoadedCore);
@@ -445,47 +457,29 @@ void Game_Load(void) {
 	Event_RegisterVoid(&WindowEvents_Resized,       NULL, Game_OnResize);
 	Event_RegisterVoid(&WindowEvents_Closed,        NULL, Game_Free);
 
-#ifdef EXTENDED_BLOCKS
-	Block_SetUsedCount(256);
-#endif
-	Block_Init();
-	ModelCache_Init();
+	TextureCache_Init();
+	/* TODO: Survival vs Creative game mode */
 
+	InputHandler_Init();
+	Game_AddComponent(&Blocks_Component);
+	Game_AddComponent(&Drawer2D_Component);
+
+	Game_AddComponent(&Particles_Component);
+	Game_AddComponent(&TabList_Component);
+	Game_AddComponent(&Chat_Component);
+
+	Game_AddComponent(&Models_Component);
+	Game_AddComponent(&Entities_Component);
 	Game_AddComponent(&AsyncDownloader_Component);
 	Game_AddComponent(&Lighting_Component);
 
-	Drawer2D_BitmappedText = Game_ClassicMode || !Options_GetBool(OPT_USE_CHAT_FONT, false);
-	Drawer2D_BlackTextShadows = Options_GetBool(OPT_BLACK_TEXT, false);
-	Gfx_Mipmaps               = Options_GetBool(OPT_MIPMAPS, false);
-
 	Game_AddComponent(&Animations_Component);
 	Game_AddComponent(&Inventory_Component);
-	Block_SetDefaultPerms();
 	Env_Reset();
 
-	LocalPlayer_Init(); 
-	Game_AddComponent(&LocalPlayer_Component);
-	Entities_List[ENTITIES_SELF_ID] = &LocalPlayer_Instance.Base;
-
-	MapRenderer_Init();
+	Game_AddComponent(&MapRenderer_Component);
 	Game_AddComponent(&EnvRenderer_Component);
-	String_InitArray(renderType, renderTypeBuffer);
-	Options_Get(OPT_RENDER_TYPE, &renderType, "normal");
-
-	flags = Game_CalcRenderType(&renderType);
-	if (flags == -1) flags = 0;
-	EnvRenderer_Legacy  = (flags & 1);
-	EnvRenderer_Minimal = (flags & 2);
-
-	if (!Game_IPAddress.length) {
-		ServerConnection_InitSingleplayer();
-	} else {
-		ServerConnection_InitMultiplayer();
-	}
 	Game_AddComponent(&ServerConnection_Component);
-	String_AppendConst(&ServerConnection_AppName, PROGRAM_APP_NAME);
-
-	Gfx_LostContextFunction = ServerConnection_Tick;
 	Camera_Init();
 	Game_UpdateProjection();
 
@@ -514,8 +508,8 @@ void Game_Load(void) {
 	for (comp = comps_head; comp; comp = comp->Next) {
 		if (comp->Ready) comp->Ready();
 	}
-	Game_InitScheduledTasks();
 
+	entTaskI = ScheduledTask_Add(GAME_DEF_TICKS, Entities_Tick);
 	/* TODO: plugin dll support */
 	/* if (nonLoaded != null) {
 		for (int i = 0; i < nonLoaded.Count; i++) {
@@ -530,7 +524,7 @@ void Game_Load(void) {
 
 	Gui_FreeActive();
 	Gui_SetActive(LoadingScreen_MakeInstance(&title, &String_Empty));
-	ServerConnection_BeginConnect();
+	ServerConnection.BeginConnect();
 }
 
 void Game_SetFpsLimit(enum FpsLimit method) {
@@ -647,7 +641,7 @@ void Game_TakeScreenshot(void) {
 	String_Format3(&filename, "screenshot_%p2-%p2-%p4", &now.Day, &now.Month, &now.Year);
 	String_Format3(&filename, "-%p2-%p2-%p2.png", &now.Hour, &now.Minute, &now.Second);
 	String_InitArray(path, pathBuffer);
-	String_Format2(&path, "screenshots%r%s", &Directory_Separator, &filename);
+	String_Format1(&path, "screenshots/%s", &filename);
 
 	res = Stream_CreateFile(&stream, &path);
 	if (res) { Chat_LogError2(res, "creating", &path); return; }
@@ -711,12 +705,7 @@ static void Game_RenderFrame(double delta) {
 
 void Game_Free(void* obj) {
 	struct IGameComponent* comp;
-
-	MapRenderer_Free();
-	Atlas2D_Free();
-	Atlas1D_Free();
-	ModelCache_Free();
-	Entities_Free();
+	Atlas_Free();
 
 	Event_UnregisterVoid(&WorldEvents_NewMap,         NULL, Game_OnNewMapCore);
 	Event_UnregisterVoid(&WorldEvents_MapLoaded,      NULL, Game_OnNewMapLoadedCore);
@@ -729,8 +718,6 @@ void Game_Free(void* obj) {
 	for (comp = comps_head; comp; comp = comp->Next) {
 		if (comp->Free) comp->Free();
 	}
-
-	Drawer2D_Free();
 	Gfx_Free();
 
 	if (!Options_HasAnyChanged()) return;

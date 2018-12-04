@@ -15,6 +15,15 @@
 #include "EnvRenderer.h"
 #include "GameStructs.h"
 
+static char msgs[10][STRING_SIZE];
+String Chat_Status[3]       = { String_FromArray(msgs[0]), String_FromArray(msgs[1]), String_FromArray(msgs[2]) };
+String Chat_BottomRight[3]  = { String_FromArray(msgs[3]), String_FromArray(msgs[4]), String_FromArray(msgs[5]) };
+String Chat_ClientStatus[3] = { String_FromArray(msgs[6]), String_FromArray(msgs[7]), String_FromArray(msgs[8]) };
+
+String Chat_Announcement = String_FromArray(msgs[9]);
+TimeMS Chat_AnnouncementReceived;
+StringsBuffer Chat_Log, Chat_InputLog;
+
 /*########################################################################################################################*
 *-------------------------------------------------------Chat logging------------------------------------------------------*
 *#########################################################################################################################*/
@@ -92,7 +101,7 @@ static void Chat_OpenLog(struct DateTime* now) {
 	/* Ensure multiple instances do not end up overwriting each other's log entries. */
 	for (i = 0; i < 20; i++) {
 		path->length = 0;
-		String_Format4(path, "logs%r%p4-%p2-%p2 ", &Directory_Separator, &now->Year, &now->Month, &now->Day);
+		String_Format3(path, "logs/%p4-%p2-%p2 ", &now->Year, &now->Month, &now->Day);
 
 		if (i > 0) {
 			String_Format2(path, "%s _%i.log", &Chat_LogName, &i);
@@ -143,12 +152,6 @@ static void Chat_AppendLog(const String* text) {
 	Chat_LogError2(res, "writing to", &Chat_LogPath);
 }
 
-static void ChatLine_Make(struct ChatLine* line, const String* text) {
-	String dst = String_ClearedArray(line->Buffer);
-	String_AppendString(&dst, text);
-	line->Received = DateTime_CurrentUTC_MS();
-}
-
 void Chat_LogError(ReturnCode result, const char* place) {
 	Chat_Add4("&cError %h when %c", &result, place, NULL, NULL);
 }
@@ -186,13 +189,14 @@ void Chat_AddOf(const String* text, MsgType type) {
 		Chat_AppendLog(text);
 		Chat_AppendLogTime();
 	} else if (type >= MSG_TYPE_STATUS_1 && type <= MSG_TYPE_STATUS_3) {
-		ChatLine_Make(&Chat_Status[type - MSG_TYPE_STATUS_1], text);
+		String_Copy(&Chat_Status[type - MSG_TYPE_STATUS_1], text);
 	} else if (type >= MSG_TYPE_BOTTOMRIGHT_1 && type <= MSG_TYPE_BOTTOMRIGHT_3) {
-		ChatLine_Make(&Chat_BottomRight[type - MSG_TYPE_BOTTOMRIGHT_1], text);
+		String_Copy(&Chat_BottomRight[type - MSG_TYPE_BOTTOMRIGHT_1], text);
 	} else if (type == MSG_TYPE_ANNOUNCEMENT) {
-		ChatLine_Make(&Chat_Announcement, text);
+		String_Copy(&Chat_Announcement, text);
+		Chat_AnnouncementReceived = DateTime_CurrentUTC_MS();
 	} else if (type >= MSG_TYPE_CLIENTSTATUS_1 && type <= MSG_TYPE_CLIENTSTATUS_3) {
-		ChatLine_Make(&Chat_ClientStatus[type - MSG_TYPE_CLIENTSTATUS_1], text);
+		String_Copy(&Chat_ClientStatus[type - MSG_TYPE_CLIENTSTATUS_1], text);
 	}
 }
 
@@ -458,7 +462,7 @@ static void CuboidCommand_DoCuboid(void) {
 	for (y = min.Y; y <= max.Y; y++) {
 		for (z = min.Z; z <= max.Z; z++) {
 			for (x = min.X; x <= max.X; x++) {
-				Game_UpdateBlock(x, y, z, toPlace);
+				Game_ChangeBlock(x, y, z, toPlace);
 			}
 		}
 	}
@@ -563,7 +567,7 @@ void Chat_Send(const String* text, bool logUsage) {
 	if (Commands_IsCommandPrefix(text)) {
 		Commands_Execute(text);
 	} else {
-		ServerConnection_SendChat(text);
+		ServerConnection.SendChat(text);
 	}
 }
 

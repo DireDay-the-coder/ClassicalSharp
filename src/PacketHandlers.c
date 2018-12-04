@@ -23,7 +23,6 @@
 #include "TexturePack.h"
 #include "Gui.h"
 #include "Errors.h"
-#include "TerrainAtlas.h"	
 
 /* Classic state */
 static uint8_t classic_tabList[ENTITIES_MAX_COUNT >> 3];
@@ -48,6 +47,7 @@ static BlockRaw* map2_blocks;
 #endif
 
 /* CPE state */
+bool cpe_needD3Fix;
 static int cpe_serverExtensionsCount, cpe_pingTicks;
 static int cpe_envMapVer = 2, cpe_blockDefsExtVer = 2;
 static bool cpe_sendHeldBlock, cpe_useMessageTypes, cpe_extEntityPos, cpe_blockPerms, cpe_fastMap;

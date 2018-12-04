@@ -7,6 +7,10 @@
 #include "Bitmap.h"
 #include "Game.h"
 
+bool Drawer2D_BitmappedText;
+bool Drawer2D_BlackTextShadows;
+BitmapCol Drawer2D_Cols[DRAWER2D_MAX_COLS];
+
 void DrawTextArgs_Make(struct DrawTextArgs* args, STRING_REF const String* text, const FontDesc* font, bool useShadow) {
 	args->Text = *text;
 	args->Font = *font;
@@ -54,7 +58,7 @@ static void Drawer2D_CalculateTextWidths(void) {
 
 			/* Iterate through each pixel of the given character, on the current scanline */
 			for (xx = Drawer2D_TileSize - 1; xx >= 0; xx--) {
-				if (row[x + xx].A < 127) continue;
+				if (!row[x + xx].A) continue;
 
 				/* Check if this is the pixel furthest to the right, for the current character */			
 				Drawer2D_Widths[i] = max(Drawer2D_Widths[i], xx + 1);
@@ -78,48 +82,185 @@ void Drawer2D_SetFontBitmap(Bitmap* bmp) {
 }
 
 
-static void Drawer2D_HexEncodedCol(int i, int hex, uint8_t lo, uint8_t hi) {
-	Drawer2D_Cols[i].R = (uint8_t)(lo * ((hex >> 2) & 1) + hi * (hex >> 3));
-	Drawer2D_Cols[i].G = (uint8_t)(lo * ((hex >> 1) & 1) + hi * (hex >> 3));
-	Drawer2D_Cols[i].B = (uint8_t)(lo * ((hex >> 0) & 1) + hi * (hex >> 3));
-	Drawer2D_Cols[i].A = 255;
+bool Drawer2D_Clamp(Bitmap* bmp, int* x, int* y, int* width, int* height) {
+	if (*x >= bmp->Width || *y >= bmp->Height) return false;
+
+	/* origin is negative, move inside */
+	if (*x < 0) { *width  += *x; *x = 0; }
+	if (*y < 0) { *height += *y; *y = 0; }
+
+	*width  = min(*x + *width,  bmp->Width)  - *x;
+	*height = min(*y + *height, bmp->Height) - *y;
+	return *width > 0 && *height > 0;
+}
+#define Drawer2D_ClampPixel(p) (p < 0 ? 0 : (p > 255 ? 255 : p))
+
+void Gradient_Noise(Bitmap* bmp, BitmapCol col, int variation,
+					int x, int y, int width, int height) {
+	BitmapCol* dst;
+	int xx, yy, n;
+	float noise;
+	if (!Drawer2D_Clamp(bmp, &x, &y, &width, &height)) return;
+
+	for (yy = 0; yy < height; yy++) {
+		dst = Bitmap_GetRow(bmp, y + yy) + x;
+
+		for (xx = 0; xx < width; xx++, dst++) {
+			n = (x + xx) + (y + yy) * 57;
+			n = (n << 13) ^ n;
+			noise = 1.0f - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0f;
+
+			n = col.B + (int)(noise * variation);
+			dst->B = Drawer2D_ClampPixel(n);
+			n = col.G + (int)(noise * variation);
+			dst->G = Drawer2D_ClampPixel(n);
+			n = col.R + (int)(noise * variation);
+			dst->R = Drawer2D_ClampPixel(n);
+
+			dst->A = 255;
+		}
+	}
 }
 
-void Drawer2D_Init(void) {
-	BitmapCol col = BITMAPCOL_CONST(0, 0, 0, 0);
-	int i;
-	
-	for (i = 0; i < DRAWER2D_MAX_COLS; i++) {
-		Drawer2D_Cols[i] = col;
-	}
+void Gradient_Vertical(Bitmap* bmp, BitmapCol a, BitmapCol b,
+					   int x, int y, int width, int height) {
+	BitmapCol* row, col;
+	int xx, yy;
+	float t;
+	if (!Drawer2D_Clamp(bmp, &x, &y, &width, &height)) return;
+	col.A = 255;
 
-	for (i = 0; i <= 9; i++) {
-		Drawer2D_HexEncodedCol('0' + i, i, 191, 64);
-	}
-	for (i = 10; i <= 15; i++) {
-		Drawer2D_HexEncodedCol('a' + (i - 10), i, 191, 64);
-		Drawer2D_HexEncodedCol('a' + (i - 10), i, 191, 64);
+	for (yy = 0; yy < height; yy++) {
+		row = Bitmap_GetRow(bmp, y + yy) + x;
+		t   = (float)yy / (height - 1); /* so last row has colour of b */
+
+		col.B = (uint8_t)Math_Lerp(a.B, b.B, t);	
+		col.G = (uint8_t)Math_Lerp(a.G, b.G, t);
+		col.R = (uint8_t)Math_Lerp(a.R, b.R, t);
+
+		for (xx = 0; xx < width; xx++) { row[xx] = col; }
 	}
 }
 
-void Drawer2D_Free(void) { Drawer2D_FreeFontBitmap(); }
+void Gradient_Blend(Bitmap* bmp, BitmapCol col, int blend,
+					int x, int y, int width, int height) {
+	BitmapCol* dst;
+	int xx, yy, t;
+	if (!Drawer2D_Clamp(bmp, &x, &y, &width, &height)) return;
 
-/* Draws a 2D flat rectangle. */
-void Drawer2D_Rect(Bitmap* bmp, BitmapCol col, int x, int y, int width, int height);
+	/* Pre compute the alpha blended source colour */
+	col.R = (uint8_t)(col.R * blend / 255);
+	col.G = (uint8_t)(col.G * blend / 255);
+	col.B = (uint8_t)(col.B * blend / 255);
+	blend = 255 - blend; /* inverse for existing pixels */
+
+	t = 0;
+	for (yy = 0; yy < height; yy++) {
+		dst = Bitmap_GetRow(bmp, y + yy) + x;
+
+		for (xx = 0; xx < width; xx++, dst++) {
+			t = col.B + (dst->B * blend) / 255;
+			dst->B = Drawer2D_ClampPixel(t);
+			t = col.G + (dst->G * blend) / 255;
+			dst->G = Drawer2D_ClampPixel(t);
+			t = col.R + (dst->R * blend) / 255;
+			dst->R = Drawer2D_ClampPixel(t);
+
+			dst->A = 255;
+		}
+	}
+}
+
+void Drawer2D_BmpIndexed(Bitmap* bmp, int x, int y, int size, 
+						uint8_t* indices, BitmapCol* palette) {
+	BitmapCol* row;
+	BitmapColUnion col;
+	int xx, yy;
+
+	for (yy = 0; yy < size; yy++) {
+		if ((y + yy) < 0) { indices += size; continue; }
+		if ((y + yy) >= bmp->Height) break;
+
+		row = Bitmap_GetRow(bmp, y + yy) + x;
+		for (xx = 0; xx < size; xx++) {
+			col.C = palette[*indices++];
+
+			if (col.Raw == 0) continue; /* transparent pixel */
+			if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
+			row[xx] = col.C;
+		}
+	}
+}
+
+void Drawer2D_BmpScaled(Bitmap* dst, int x, int y, int width, int height,
+						Bitmap* src, int srcX, int srcY, int srcWidth, int srcHeight,
+						int scaleWidth, int scaleHeight, uint8_t scaleA, uint8_t scaleB) {
+	BitmapCol* dstRow, col;
+	BitmapCol* srcRow;
+	int xx, yy;
+	int scaledX, scaledY;
+	uint8_t scale;
+
+	for (yy = 0; yy < height; yy++) {
+		scaledY = (y + yy) * srcHeight / scaleHeight;
+		srcRow  = Bitmap_GetRow(src, srcY + (scaledY % srcHeight));
+		dstRow  = Bitmap_GetRow(dst, y + yy) + x;
+		scale   = (uint8_t)Math_Lerp(scaleA, scaleB, (float)yy / height);
+
+		for (xx = 0; xx < width; xx++) {
+			scaledX = (x + xx) * srcWidth / scaleWidth;
+			col     = srcRow[srcX + (scaledX % srcWidth)];
+
+			dstRow[xx].B = (col.B * scale) / 255;
+			dstRow[xx].G = (col.G * scale) / 255;
+			dstRow[xx].R = (col.R * scale) / 255;
+			dstRow[xx].A = col.A;
+		}
+	}
+}
+
+void Drawer2D_BmpTiled(Bitmap* dst, int x, int y, int width, int height, 
+					   Bitmap* src, int srcX, int srcY, int srcWidth, int srcHeight) {
+	BitmapCol* dstRow;
+	BitmapCol* srcRow;
+	int xx, yy;
+	if (!Drawer2D_Clamp(dst, &x, &y, &width, &height)) return;
+
+	for (yy = 0; yy < height; yy++) {
+		srcRow = Bitmap_GetRow(src, srcY + ((y + yy) % srcHeight));
+		dstRow = Bitmap_GetRow(dst, y + yy) + x;
+
+		for (xx = 0; xx < width; xx++) {
+			dstRow[xx] = srcRow[srcX + ((x + xx) % srcWidth)];
+		}
+	}
+}
+
+void Drawer2D_BmpCopy(Bitmap* dst, int x, int y, int width, int height, Bitmap* src) {
+	BitmapCol* dstRow;
+	BitmapCol* srcRow;
+	int xx, yy;
+	if (!Drawer2D_Clamp(dst, &x, &y, &width, &height)) return;
+
+	for (yy = 0; yy < height; yy++) {
+		srcRow = Bitmap_GetRow(src, yy);
+		dstRow = Bitmap_GetRow(dst, y + yy) + x;
+
+		for (xx = 0; xx < width; xx++) { dstRow[xx] = srcRow[xx]; }
+	}
+}
 
 void Drawer2D_Clear(Bitmap* bmp, BitmapCol col, int x, int y, int width, int height) {
 	BitmapCol* row;
 	int xx, yy;
+	if (!Drawer2D_Clamp(bmp, &x, &y, &width, &height)) return;
 
-	if (x < 0 || y < 0 || (x + width) > bmp->Width || (y + height) > bmp->Height) {
-		ErrorHandler_Fail("Drawer2D_Clear - tried to clear at invalid coords");
-	}
-	
 	for (yy = 0; yy < height; yy++) {
 		row = Bitmap_GetRow(bmp, y + yy) + x;
 		for (xx = 0; xx < width; xx++) { row[xx] = col; }
 	}
 }
+
 
 int Drawer2D_FontHeight(const FontDesc* font, bool useShadow) {
 	static String text = String_FromConst("I");
@@ -433,3 +574,45 @@ Size2D Drawer2D_MeasureText(struct DrawTextArgs* args) {
 	args->Text = value;
 	return size;
 }
+
+
+/*########################################################################################################################*
+*---------------------------------------------------Drawer2D component----------------------------------------------------*
+*#########################################################################################################################*/
+static void Drawer2D_HexEncodedCol(int i, int hex, uint8_t lo, uint8_t hi) {
+	Drawer2D_Cols[i].R = (uint8_t)(lo * ((hex >> 2) & 1) + hi * (hex >> 3));
+	Drawer2D_Cols[i].G = (uint8_t)(lo * ((hex >> 1) & 1) + hi * (hex >> 3));
+	Drawer2D_Cols[i].B = (uint8_t)(lo * ((hex >> 0) & 1) + hi * (hex >> 3));
+	Drawer2D_Cols[i].A = 255;
+}
+
+static void Drawer2D_Reset(void) {
+	BitmapCol col = BITMAPCOL_CONST(0, 0, 0, 0);
+	int i;
+	
+	for (i = 0; i < DRAWER2D_MAX_COLS; i++) {
+		Drawer2D_Cols[i] = col;
+	}
+
+	for (i = 0; i <= 9; i++) {
+		Drawer2D_HexEncodedCol('0' + i, i, 191, 64);
+	}
+	for (i = 10; i <= 15; i++) {
+		Drawer2D_HexEncodedCol('a' + (i - 10), i, 191, 64);
+		Drawer2D_HexEncodedCol('a' + (i - 10), i, 191, 64);
+	}
+}
+
+static void Drawer2D_Init(void) {
+	Drawer2D_Reset();
+	Drawer2D_BitmappedText    = Game_ClassicMode || !Options_GetBool(OPT_USE_CHAT_FONT, false);
+	Drawer2D_BlackTextShadows = Options_GetBool(OPT_BLACK_TEXT, false);
+}
+
+static void Drawer2D_Free(void) { Drawer2D_FreeFontBitmap(); }
+
+struct IGameComponent Drawer2D_Component = {
+	Drawer2D_Init,  /* Init  */
+	Drawer2D_Free,  /* Free  */
+	Drawer2D_Reset, /* Reset */
+};

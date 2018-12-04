@@ -23,21 +23,19 @@ enum File_SeekFrom { FILE_SEEKFROM_BEGIN, FILE_SEEKFROM_CURRENT, FILE_SEEKFROM_E
 
 /* Newline for console and text files. */
 extern char* Platform_NewLine;
-/* Character in a path that distinguishes directories. (usually / or \) */
-extern char  Directory_Separator;
 /* Name of default system font used. (e.g. Arial) */
 extern char* Font_DefaultName;
-extern ReturnCode ReturnCode_FileShareViolation;
-extern ReturnCode ReturnCode_FileNotFound;
-extern ReturnCode ReturnCode_NotSupported;
-extern ReturnCode ReturnCode_SocketInProgess;
-extern ReturnCode ReturnCode_SocketWouldBlock;
-extern ReturnCode ReturnCode_InvalidArg;
+extern const ReturnCode ReturnCode_FileShareViolation;
+extern const ReturnCode ReturnCode_FileNotFound;
+extern const ReturnCode ReturnCode_NotSupported;
+extern const ReturnCode ReturnCode_SocketInProgess;
+extern const ReturnCode ReturnCode_SocketWouldBlock;
+extern const ReturnCode ReturnCode_InvalidArg;
 
 /* Data for a display device. (usually a monitor) */
 struct DisplayDevice { int BitsPerPixel; Rect2D Bounds; };
-struct DisplayDevice DisplayDevice_Default;
-void* DisplayDevice_Meta;
+extern struct DisplayDevice DisplayDevice_Default;
+extern void* DisplayDevice_Meta;
 
 struct GraphicsMode {
 	int R,G,B,A, BitsPerPixel, IsIndexed; /* Colour buffer data */

@@ -7,7 +7,6 @@
 #include "Drawer2D.h"
 #include "Graphics.h"
 #include "Funcs.h"
-#include "TerrainAtlas.h"
 #include "Model.h"
 #include "MapGenerator.h"
 #include "ServerConnection.h"
@@ -1285,7 +1284,7 @@ static void SaveLevelScreen_Save(void* screen, void* widget, const char* ext) {
 		SaveLevelScreen_MakeDesc(s, &fileMsg); return;
 	}
 	String_InitArray(path, pathBuffer);
-	String_Format3(&path, "maps%r%s%c", &Directory_Separator, &file, ext);
+	String_Format2(&path, "maps/%s%c", &file, ext);
 
 	if (File_Exists(&path) && !btn->OptName) {
 		ButtonWidget_Set(btn, &overMsg, &s->TitleFont);
@@ -1388,7 +1387,7 @@ static void TexturePackScreen_EntryClick(void* screen, void* widget) {
 	
 	filename = ListScreen_UNSAFE_GetCur(s, widget);
 	String_InitArray(path, pathBuffer);
-	String_Format2(&path, "texpacks%r%s", &Directory_Separator, &filename);
+	String_Format1(&path, "texpacks/%s", &filename);
 	if (!File_Exists(&path)) return;
 	
 	idx = s->CurrentIndex;
@@ -1574,7 +1573,7 @@ static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 
 	filename = ListScreen_UNSAFE_GetCur(s, widget);
 	String_InitArray(path, pathBuffer);
-	String_Format2(&path, "maps%r%s", &Directory_Separator, &filename);
+	String_Format1(&path, "maps/%s", &filename);
 
 	if (!File_Exists(&path)) return;
 	Map_LoadFrom(&path);
@@ -2963,7 +2962,7 @@ static void TexIdsOverlay_ContextRecreated(void* screen) {
 	s->DynamicVb = Gfx_CreateDynamicVb(VERTEX_FORMAT_P3FT2FC4B, TEXID_OVERLAY_VERTICES_COUNT);
 	TextAtlas_Make(&s->IdAtlas, &chars, &s->TextFont, &prefix);
 
-	s->XOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * Atlas2D_RowsCount,     Game_Width);
+	s->XOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * Atlas_RowsCount,     Game_Width);
 	s->YOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * ATLAS2D_TILES_PER_ROW, Game_Height);
 	s->TileSize = size;
 	
@@ -3050,7 +3049,7 @@ static void TexIdsOverlay_Render(void* screen, double delta) {
 	origXOffset = s->XOffset;
 	s->BaseTexLoc = 0;
 
-	for (rows = Atlas2D_RowsCount; rows > 0; rows -= ATLAS2D_TILES_PER_ROW) {
+	for (rows = Atlas_RowsCount; rows > 0; rows -= ATLAS2D_TILES_PER_ROW) {
 		TexIdsOverlay_RenderTerrain(s);
 		TexIdsOverlay_RenderTextOverlay(s);
 

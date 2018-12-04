@@ -118,6 +118,12 @@
     <Filter Include="Source Files\Freetype">
       <UniqueIdentifier>{bff86df8-7005-42a8-80c1-5468c1196336}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Launcher">
+      <UniqueIdentifier>{6b1102a4-29d5-4c01-8f32-b9d9cb19b8aa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Launcher">
+      <UniqueIdentifier>{a46e060c-8a75-436f-ac18-f35d184735af}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Platform.h">
@@ -195,9 +201,6 @@
     <ClInclude Include="Builder.h">
       <Filter>Header Files\MeshBuilder</Filter>
     </ClInclude>
-    <ClInclude Include="TerrainAtlas.h">
-      <Filter>Header Files\TexturePack</Filter>
-    </ClInclude>
     <ClInclude Include="Picking.h">
       <Filter>Header Files\Math</Filter>
     </ClInclude>
@@ -215,9 +218,6 @@
     </ClInclude>
     <ClInclude Include="Particle.h">
       <Filter>Header Files\Entities</Filter>
-    </ClInclude>
-    <ClInclude Include="Animations.h">
-      <Filter>Header Files\TexturePack</Filter>
     </ClInclude>
     <ClInclude Include="Widgets.h">
       <Filter>Header Files\2D</Filter>
@@ -303,6 +303,21 @@
     <ClInclude Include="Graphics.h">
       <Filter>Header Files\Graphics</Filter>
     </ClInclude>
+    <ClInclude Include="Launcher.h">
+      <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
+    <ClInclude Include="Resources.h">
+      <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
+    <ClInclude Include="LWidgets.h">
+      <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
+    <ClInclude Include="LWeb.h">
+      <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
+    <ClInclude Include="LScreens.h">
+      <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="String.c">
@@ -353,9 +368,6 @@
     <ClCompile Include="Program.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="TerrainAtlas.c">
-      <Filter>Source Files\TexturePack</Filter>
-    </ClCompile>
     <ClCompile Include="Entity.c">
       <Filter>Source Files\Entities</Filter>
     </ClCompile>
@@ -385,9 +397,6 @@
     </ClCompile>
     <ClCompile Include="Particle.c">
       <Filter>Source Files\Entities</Filter>
-    </ClCompile>
-    <ClCompile Include="Animations.c">
-      <Filter>Source Files\TexturePack</Filter>
     </ClCompile>
     <ClCompile Include="Widgets.c">
       <Filter>Source Files\2D</Filter>
@@ -544,6 +553,21 @@
     </ClCompile>
     <ClCompile Include="Window.c">
       <Filter>Source Files\Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Launcher.c">
+      <Filter>Source Files\Launcher</Filter>
+    </ClCompile>
+    <ClCompile Include="Resources.c">
+      <Filter>Source Files\Launcher</Filter>
+    </ClCompile>
+    <ClCompile Include="LWidgets.c">
+      <Filter>Source Files\Launcher</Filter>
+    </ClCompile>
+    <ClCompile Include="LWeb.c">
+      <Filter>Source Files\Launcher</Filter>
+    </ClCompile>
+    <ClCompile Include="LScreens.c">
+      <Filter>Source Files\Launcher</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -30,7 +30,7 @@ void Bitmap_CopyBlock(int srcX, int srcY, int dstX, int dstY, Bitmap* src, Bitma
 
 void Bitmap_Allocate(Bitmap* bmp, int width, int height) {
 	bmp->Width = width; bmp->Height = height;
-	bmp->Scan0 = Mem_Alloc(width * height, BITMAP_SIZEOF_PIXEL, "bitmap data");
+	bmp->Scan0 = Mem_Alloc(width * height, 4, "bitmap data");
 }
 
 void Bitmap_AllocateClearedPow2(Bitmap* bmp, int width, int height) {
@@ -38,7 +38,7 @@ void Bitmap_AllocateClearedPow2(Bitmap* bmp, int width, int height) {
 	height = Math_NextPowOf2(height);
 
 	bmp->Width = width; bmp->Height = height;
-	bmp->Scan0 = Mem_AllocCleared(width * height, BITMAP_SIZEOF_PIXEL, "bitmap data");
+	bmp->Scan0 = Mem_AllocCleared(width * height, 4, "bitmap data");
 }
 
 
@@ -378,7 +378,7 @@ ReturnCode Png_Decode(Bitmap* bmp, struct Stream* stream) {
 			if (bmp->Width  < 0 || bmp->Width  > PNG_MAX_DIMS) return PNG_ERR_TOO_WIDE;
 			if (bmp->Height < 0 || bmp->Height > PNG_MAX_DIMS) return PNG_ERR_TOO_TALL;
 
-			bmp->Scan0 = Mem_Alloc(bmp->Width * bmp->Height, BITMAP_SIZEOF_PIXEL, "PNG bitmap data");
+			bmp->Scan0 = Mem_Alloc(bmp->Width * bmp->Height, 4, "PNG bitmap data");
 			bitsPerSample = tmp[8]; col = tmp[9];
 			rowExpander = Png_GetExpander(col, bitsPerSample);
 			if (rowExpander == NULL) return PNG_ERR_INVALID_COL_BPP;
@@ -619,6 +619,7 @@ static void Png_EncodeRow(const BitmapCol* src, uint8_t* cur, uint8_t* prior, ui
 	best[0] = bestFilter;
 }
 
+static int Png_SelectRow(Bitmap* bmp, int y) { return y; }
 ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector selectRow) {	
 	uint8_t tmp[32];
 	uint8_t prevLine[PNG_MAX_DIMS * 3], curLine[PNG_MAX_DIMS * 3];
@@ -630,6 +631,7 @@ ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector select
 	int y, lineSize;
 	ReturnCode res;
 
+	if (!selectRow) selectRow = Png_SelectRow;
 	if ((res = Stream_Write(stream, png_sig, PNG_SIG_SIZE))) return res;
 	Bitmap_Crc32Stream(&chunk, stream);
 

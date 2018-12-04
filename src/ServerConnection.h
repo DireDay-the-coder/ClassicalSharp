@@ -46,33 +46,54 @@ int PingList_NextPingData(void);
 void PingList_Update(int data);
 int PingList_AveragePingMs(void);
 
-bool ServerConnection_IsSinglePlayer;
-bool ServerConnection_Disconnected;
+/* Whether the player is connected to singleplayer/loopback server. */
+extern bool ServerConnection_IsSinglePlayer;
+/* Whether the player has been disconnected from the server. */
+extern bool ServerConnection_Disconnected;
+/* The current name of the server. (Shows as first line when loading) */
 extern String ServerConnection_ServerName;
+/* The current MOTD of the server. (Shows as second line when loading) */
 extern String ServerConnection_ServerMOTD;
+/* The software name the client identifies itself as being to the server. */
+/* By default this is the same as PROGRAM_APP_NAME */
 extern String ServerConnection_AppName;
 
-void (*ServerConnection_BeginConnect)(void);
-void (*ServerConnection_SendChat)(const String* text);
-void (*ServerConnection_SendPosition)(Vector3 pos, float rotY, float headX);
-void (*ServerConnection_SendPlayerClick)(MouseButton button, bool isDown, EntityID targetId, struct PickedPos* pos);
-void (*ServerConnection_Tick)(struct ScheduledTask* task);
-uint8_t* ServerConnection_WriteBuffer;
+struct ServerConnectionFuncs {
+	/* Begins connecting to the server. */
+	/* NOTE: Usually asynchronous, but not always. */
+	void (*BeginConnect)(void);
+	/* Ticks state of the server. */
+	void (*Tick)(struct ScheduledTask* task);
+	/* Sends a block update to the server. */
+	void (*SendBlock)(int x, int y, int z, BlockID old, BlockID now);
+	/* Sends a chat message to the server. */
+	void (*SendChat)(const String* text);
+	/* Sends a position update to the server. */
+	void (*SendPosition)(Vector3 pos, float rotY, float headX);
+	/* Sends a PlayerClick packet to the server. */
+	void (*SendPlayerClick)(MouseButton button, bool isDown, EntityID targetId, struct PickedPos* pos);
+};
 
-bool ServerConnection_SupportsExtPlayerList;
-bool ServerConnection_SupportsPlayerClick;
-bool ServerConnection_SupportsPartialMessages;
-bool ServerConnection_SupportsFullCP437;
+/* Currently active connection to a server. */
+extern struct ServerConnectionFuncs ServerConnection;
+extern uint8_t* ServerConnection_WriteBuffer;
+
+/* Whether the server supports separate tab list from entities in world. */
+extern bool ServerConnection_SupportsExtPlayerList;
+/* Whether the server supports packet with detailed info on mouse clicks. */
+extern bool ServerConnection_SupportsPlayerClick;
+/* Whether the server supports combining multiple chat packets into one. */
+extern bool ServerConnection_SupportsPartialMessages;
+/* Whether the server supports all of code page 437, not just ASCII. */
+extern bool ServerConnection_SupportsFullCP437;
 
 void ServerConnection_RetrieveTexturePack(const String* url);
 void ServerConnection_DownloadTexturePack(const String* url);
-void ServerConnection_InitSingleplayer(void);
-void ServerConnection_InitMultiplayer(void);
-void ServerConnection_MakeComponent(struct IGameComponent* comp);
 
 typedef void (*Net_Handler)(uint8_t* data);
-uint16_t Net_PacketSizes[OPCODE_COUNT];
-Net_Handler Net_Handlers[OPCODE_COUNT];
-void Net_Set(uint8_t opcode, Net_Handler handler, int size);
+extern uint16_t Net_PacketSizes[OPCODE_COUNT];
+extern Net_Handler Net_Handlers[OPCODE_COUNT];
+#define Net_Set(opcode, handler, size) Net_Handlers[opcode] = handler; Net_PacketSizes[opcode] = size;
+
 void Net_SendPacket(void);
 #endif

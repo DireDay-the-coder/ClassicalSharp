@@ -9,6 +9,8 @@
 
 struct DrawTextArgs { String Text; FontDesc Font; bool UseShadow; };
 struct Texture;
+struct IGameComponent;
+extern struct IGameComponent Drawer2D_Component;
 
 void DrawTextArgs_Make(struct DrawTextArgs* args, STRING_REF const String* text, const FontDesc* font, bool useShadow);
 void DrawTextArgs_MakeEmpty(struct DrawTextArgs* args, const FontDesc* font, bool useShadow);
@@ -16,19 +18,38 @@ CC_NOINLINE void Drawer2D_MakeFont(FontDesc* desc, int size, int style);
 
 /* Whether chat text should be drawn and measuring using the currently bitmapped font, 
  false uses the font supplied as the DrawTextArgs argument supplied to the function. */
-bool Drawer2D_BitmappedText;
+extern bool Drawer2D_BitmappedText;
 /* Whether the shadows behind text (that uses shadows) is fully black. */
-bool Drawer2D_BlackTextShadows;
-BitmapCol Drawer2D_Cols[DRAWER2D_MAX_COLS];
+extern bool Drawer2D_BlackTextShadows;
+/* List of all colours. (An A of 0 means the colour is not used) */
+extern BitmapCol Drawer2D_Cols[DRAWER2D_MAX_COLS];
 #define DRAWER2D_OFFSET 1
 #define Drawer2D_GetCol(c) Drawer2D_Cols[(uint8_t)c]
 
-void Drawer2D_Init(void);
-void Drawer2D_Free(void);
+/* Clamps the given rectangle to line inside the bitmap. */
+/* Returns false if rectangle is completely outside bitmap's rectangle. */
+bool Drawer2D_Clamp(Bitmap* bmp, int* x, int* y, int* width, int* height);
+
+void Gradient_Noise(Bitmap* bmp, BitmapCol col, int variation,
+					int x, int y, int width, int height);
+void Gradient_Vertical(Bitmap* bmp, BitmapCol a, BitmapCol b,
+					   int x, int y, int width, int height);
+void Gradient_Blend(Bitmap* bmp, BitmapCol col, int blend,
+					int x, int y, int width, int height);
+
+void Drawer2D_BmpIndexed(Bitmap* bmp, int x, int y, int size,
+						 uint8_t* indices, BitmapCol* palette);
+void Drawer2D_BmpScaled(Bitmap* dst, int x, int y, int width, int height,
+						Bitmap* src, int srcX, int srcY, int srcWidth, int srcHeight,
+						int scaleWidth, int scaleHeight, uint8_t scaleA, uint8_t scaleB);
+void Drawer2D_BmpTiled(Bitmap* dst, int x, int y, int width, int height,
+					   Bitmap* src, int srcX, int srcY, int srcWidth, int srcHeight);
+void Drawer2D_BmpCopy(Bitmap* dst, int x, int y, int width, int height, Bitmap* src);
+
 
 /* Draws a 2D flat rectangle. */
 void Drawer2D_Rect(Bitmap* bmp, BitmapCol col, int x, int y, int width, int height);
-/* Clears the entire given area to the specified colour. */
+/* Fills the given rectangular area with the given colour. */
 void Drawer2D_Clear(Bitmap* bmp, BitmapCol col, int x, int y, int width, int height);
 
 void Drawer2D_Underline(Bitmap* bmp, int x, int y, int width, int height, BitmapCol col);
