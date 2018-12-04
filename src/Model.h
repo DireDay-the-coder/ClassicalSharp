@@ -10,8 +10,8 @@
 */
 struct Entity;
 struct AABB;
-struct Model;
-struct ModelTex;
+struct IGameComponent;
+extern struct IGameComponent Models_Component;
 
 #define MODEL_QUAD_VERTICES 4
 #define MODEL_BOX_VERTICES (FACE_COUNT * MODEL_QUAD_VERTICES)
@@ -30,6 +30,7 @@ struct ModelTex;
 /* Contains information about a texture used for models. */
 struct ModelTex { const char* Name; uint8_t SkinType; GfxResourceID TexID; struct ModelTex* Next; };
 
+struct Model;
 /* Contains a set of quads and/or boxes that describe a 3D object as well as
 the bounding boxes that contain the entire set of quads and/or boxes. */
 struct Model {
@@ -71,14 +72,14 @@ struct Model {
 public CustomModel[] CustomModels = new CustomModel[256];
 #endif
 
-PackedCol Model_Cols[FACE_COUNT];
+extern PackedCol Model_Cols[FACE_COUNT];
 /* U/V scale applied to the skin when rendering the model. */
 /* Default uScale is 1/32, vScale is 1/32 or 1/64 depending on skin. */
-float Model_uScale, Model_vScale;
-/* Angle of offset of head to body rotation */
-float Model_cosHead, Model_sinHead;
-uint8_t Model_Rotation, Model_skinType;
-struct Model* Model_ActiveModel;
+extern float Model_uScale, Model_vScale;
+/* Angle of offset of head from body rotation */
+extern float Model_cosHead, Model_sinHead;
+extern uint8_t Model_Rotation, Model_skinType;
+extern struct Model* Model_ActiveModel;
 void Model_Init(struct Model* model);
 
 #define Model_SetPointers(instance, typeName)\
@@ -101,12 +102,10 @@ void Model_DrawArmPart(struct ModelPart* part);
 
 /* Maximum number of vertices a model can have */
 #define MODEL_MAX_VERTICES (24 * 12)
-GfxResourceID Model_Vb;
-VertexP3fT2fC4b Model_Vertices[MODEL_MAX_VERTICES];
-struct Model* Human_ModelPtr;
+extern GfxResourceID Model_Vb;
+extern VertexP3fT2fC4b Model_Vertices[MODEL_MAX_VERTICES];
+extern struct Model* Human_ModelPtr;
 
-void ModelCache_Init(void);
-void ModelCache_Free(void);
 /* Returns pointer to model whose name caselessly matches given name. */
 CC_EXPORT struct Model* Model_Get(const String* name);
 /* Returns index of cached texture whose name caselessly matches given name. */

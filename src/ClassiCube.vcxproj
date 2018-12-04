@@ -209,6 +209,10 @@
     <ClInclude Include="Deflate.h" />
     <ClInclude Include="Gui.h" />
     <ClInclude Include="HeldBlockRenderer.h" />
+    <ClInclude Include="Launcher.h" />
+    <ClInclude Include="LScreens.h" />
+    <ClInclude Include="LWeb.h" />
+    <ClInclude Include="LWidgets.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Input.h" />
     <ClInclude Include="InputHandler.h" />
@@ -218,7 +222,6 @@
     <ClInclude Include="Inventory.h" />
     <ClInclude Include="IsometricDrawer.h" />
     <ClInclude Include="Lighting.h" />
-    <ClInclude Include="Animations.h" />
     <ClInclude Include="MapGenerator.h" />
     <ClInclude Include="MapRenderer.h" />
     <ClInclude Include="Options.h" />
@@ -226,12 +229,12 @@
     <ClInclude Include="BlockPhysics.h" />
     <ClInclude Include="Picking.h" />
     <ClInclude Include="PickedPosRenderer.h" />
+    <ClInclude Include="Resources.h" />
     <ClInclude Include="Screens.h" />
     <ClInclude Include="SelectionBox.h" />
     <ClInclude Include="ServerConnection.h" />
     <ClInclude Include="Stream.h" />
     <ClInclude Include="GameStructs.h" />
-    <ClInclude Include="TerrainAtlas.h" />
     <ClInclude Include="TexturePack.h" />
     <ClInclude Include="Utils.h" />
     <ClInclude Include="PackedCol.h" />
@@ -271,6 +274,10 @@
     <ClCompile Include="HeldBlockRenderer.c" />
     <ClCompile Include="InputHandler.c" />
     <ClCompile Include="Inventory.c" />
+    <ClCompile Include="Launcher.c" />
+    <ClCompile Include="LScreens.c" />
+    <ClCompile Include="LWeb.c" />
+    <ClCompile Include="LWidgets.c" />
     <ClCompile Include="MapGenerator.c" />
     <ClCompile Include="Deflate.c" />
     <ClCompile Include="Model.c" />
@@ -280,7 +287,6 @@
     <ClCompile Include="IsometricDrawer.c" />
     <ClCompile Include="Input.c" />
     <ClCompile Include="Lighting.c" />
-    <ClCompile Include="Animations.c" />
     <ClCompile Include="Entity.c" />
     <ClCompile Include="MapRenderer.c" />
     <ClCompile Include="Options.c" />
@@ -291,12 +297,12 @@
     <ClCompile Include="Picking.c" />
     <ClCompile Include="Platform.c" />
     <ClCompile Include="Program.c" />
+    <ClCompile Include="Resources.c" />
     <ClCompile Include="Screens.c" />
     <ClCompile Include="SelectionBox.c" />
     <ClCompile Include="ServerConnection.c" />
     <ClCompile Include="Stream.c" />
     <ClCompile Include="String.c" />
-    <ClCompile Include="TerrainAtlas.c" />
     <ClCompile Include="TexturePack.c" />
     <ClCompile Include="Utils.c" />
     <ClCompile Include="Vectors.c" />

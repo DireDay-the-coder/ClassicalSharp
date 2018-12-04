@@ -7,6 +7,7 @@
 #include "Funcs.h"
 #include "AsyncDownloader.h"
 #include "Bitmap.h"
+#include "Window.h"
 
 #include "freetype/ft2build.h"
 #include "freetype/freetype.h"
@@ -14,6 +15,8 @@
 
 static void Platform_InitDisplay(void);
 static void Platform_InitStopwatch(void);
+struct DisplayDevice DisplayDevice_Default;
+void* DisplayDevice_Meta;
 
 #ifdef CC_BUILD_WIN
 #define WIN32_LEAN_AND_MEAN
@@ -41,15 +44,14 @@ static void Platform_InitStopwatch(void);
 
 static HANDLE heap;
 char* Platform_NewLine    = "\r\n";
-char  Directory_Separator = '\\';
 char* Font_DefaultName    = "Arial";
 
-ReturnCode ReturnCode_FileShareViolation = ERROR_SHARING_VIOLATION;
-ReturnCode ReturnCode_FileNotFound = ERROR_FILE_NOT_FOUND;
-ReturnCode ReturnCode_NotSupported = ERROR_NOT_SUPPORTED;
-ReturnCode ReturnCode_InvalidArg   = ERROR_INVALID_PARAMETER;
-ReturnCode ReturnCode_SocketInProgess  = WSAEINPROGRESS;
-ReturnCode ReturnCode_SocketWouldBlock = WSAEWOULDBLOCK;
+const ReturnCode ReturnCode_FileShareViolation = ERROR_SHARING_VIOLATION;
+const ReturnCode ReturnCode_FileNotFound = ERROR_FILE_NOT_FOUND;
+const ReturnCode ReturnCode_NotSupported = ERROR_NOT_SUPPORTED;
+const ReturnCode ReturnCode_InvalidArg   = ERROR_INVALID_PARAMETER;
+const ReturnCode ReturnCode_SocketInProgess  = WSAEINPROGRESS;
+const ReturnCode ReturnCode_SocketWouldBlock = WSAEWOULDBLOCK;
 #endif
 /* POSIX is mainly shared between Linux and OSX */
 #ifdef CC_BUILD_POSIX
@@ -74,15 +76,14 @@ ReturnCode ReturnCode_SocketWouldBlock = WSAEWOULDBLOCK;
 #define Nix_Return(success) ((success) ? 0 : errno)
 
 char* Platform_NewLine    = "\n";
-char  Directory_Separator = '/'; /* TODO: Is this right for old OSX though?? */
 pthread_mutex_t event_mutex;
 
-ReturnCode ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
-ReturnCode ReturnCode_FileNotFound = ENOENT;
-ReturnCode ReturnCode_NotSupported = EPERM;
-ReturnCode ReturnCode_InvalidArg   = EINVAL;
-ReturnCode ReturnCode_SocketInProgess = EINPROGRESS;
-ReturnCode ReturnCode_SocketWouldBlock = EWOULDBLOCK;
+const ReturnCode ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
+const ReturnCode ReturnCode_FileNotFound = ENOENT;
+const ReturnCode ReturnCode_NotSupported = EPERM;
+const ReturnCode ReturnCode_InvalidArg   = EINVAL;
+const ReturnCode ReturnCode_SocketInProgess = EINPROGRESS;
+const ReturnCode ReturnCode_SocketWouldBlock = EWOULDBLOCK;
 #endif
 #ifdef CC_BUILD_NIX
 #include <X11/Xlib.h>
@@ -409,7 +410,7 @@ ReturnCode Directory_Enum(const String* dirPath, void* obj, Directory_EnumCallba
 
 	do {
 		path.length = 0;
-		String_Format2(&path, "%s%r", dirPath, &Directory_Separator);
+		String_Format1(&path, "%s/", dirPath);
 
 		/* ignore . and .. entry */
 		TCHAR* src = entry.cFileName;
@@ -542,7 +543,7 @@ ReturnCode Directory_Enum(const String* dirPath, void* obj, Directory_EnumCallba
 
 	while ((entry = readdir(dirPtr))) {
 		path.length = 0;
-		String_Format2(&path, "%s%r", dirPath, &Directory_Separator);
+		String_Format1(&path, "%s/", dirPath);
 
 		/* ignore . and .. entry */
 		src = entry->d_name;
@@ -796,7 +797,8 @@ void Waitable_WaitFor(void* handle, uint32_t milliseconds) {
 *#########################################################################################################################*/
 static FT_Library ft_lib;
 static struct FT_MemoryRec_ ft_mem;
-static StringsBuffer norm_fonts, bold_fonts;
+static struct EntryList font_list;
+static bool font_list_changed;
 static void Font_Init(void);
 
 #define DPI_PIXEL  72
@@ -867,21 +869,31 @@ static int Font_Find(const String* name, StringsBuffer* entries) {
 }
 
 void Font_GetNames(StringsBuffer* buffer) {
-	String faceName;
+	String entry, name, path;
 	int i;
-	if (!norm_fonts.Count) Font_Init();
+	if (!font_list.Entries.Count) Font_Init();
 
-	for (i = 1; i < norm_fonts.Count; i += 2) {
-		faceName = StringsBuffer_UNSAFE_Get(&norm_fonts, i);
-		StringsBuffer_Add(buffer, &faceName);
+	for (i = 0; i < font_list.Entries.Count; i++) {
+		entry = StringsBuffer_UNSAFE_Get(&font_list.Entries, i);
+		String_UNSAFE_Separate(&entry, font_list.Separator, &name, &path);
+
+		/* Only want Regular fonts here */
+		if (name.length < 2 || name.buffer[name.length - 1] != 'R') continue;
+		name.length -= 2;
+		StringsBuffer_Add(buffer, &name);
 	}
 }
 
-void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
-	StringsBuffer* entries;
-	int idx;
-	String path;
+static String Font_Lookup(const String* fontName, const char type) {
+	String name; char nameBuffer[STRING_SIZE + 2];
+	String_InitArray(name, nameBuffer);
 
+	String_Format2(&name, "%s %r", fontName, &type);
+	return EntryList_UNSAFE_Get(&font_list, &name);
+}
+
+void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
+	String path;
 	FT_Stream stream;
 	FT_Open_Args args;
 	FT_Face face;
@@ -889,19 +901,13 @@ void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
 
 	desc->Size  = size;
 	desc->Style = style;
-	if (!norm_fonts.Count) Font_Init();
 
-	idx     = -1;
-	entries = &bold_fonts;
-	if (style & FONT_STYLE_BOLD) { idx = Font_Find(fontName, entries); }
+	if (!font_list.Entries.Count) Font_Init();
+	path = String_Empty;
 
-	if (idx == -1) {
-		entries = &norm_fonts;
-		idx = Font_Find(fontName, entries);
-	}
-
-	if (idx == -1) ErrorHandler_Fail("Unknown font");
-	path = StringsBuffer_UNSAFE_Get(entries, idx - 1);
+	if (style & FONT_STYLE_BOLD) path = Font_Lookup(fontName, 'B');
+	if (!path.length) path = Font_Lookup(fontName, 'R');
+	if (!path.length) ErrorHandler_Fail("Unknown font");
 
 	stream = Mem_AllocCleared(1, sizeof(FT_StreamRec), "leaky font"); /* TODO: LEAKS MEMORY!!! */
 	if (!Font_MakeArgs(&path, stream, &args)) return;
@@ -938,15 +944,14 @@ void Font_Free(FontDesc* desc) {
 	desc->Handle = NULL;
 }
 
-static void Font_Add(const String* path, FT_Face face, StringsBuffer* entries, const char* defStyle) {
+static void Font_Add(const String* path, FT_Face face, char type, const char* defStyle) {
 	String name; char nameBuffer[STRING_SIZE];
 	String style;
 
 	if (!face->family_name || !(face->face_flags & FT_FACE_FLAG_SCALABLE)) return;
-	StringsBuffer_Add(entries, path);
 	String_InitArray(name, nameBuffer);
-
 	String_AppendConst(&name, face->family_name);
+
 	/* don't want 'Arial Regular' or 'Arial Bold' */
 	if (face->style_name) {
 		style = String_FromReadonly(face->style_name);
@@ -956,14 +961,19 @@ static void Font_Add(const String* path, FT_Face face, StringsBuffer* entries, c
 	}
 
 	Platform_Log1("Face: %s", &name);
-	StringsBuffer_Add(entries, &name);
+	String_Append(&name, ' '); String_Append(&name, type);
+	EntryList_Set(&font_list, &name, path);
+	font_list_changed = true;
 }
 
 static void Font_DirCallback(const String* path, void* obj) {
+	static String fonExt = String_FromConst(".fon");
+	String entry, name, fontPath;
 	FT_StreamRec stream = { 0 };
 	FT_Open_Args args;
 	FT_Face face;
 	FT_Error err;
+	int i, flags;
 
 	if (!Font_MakeArgs(path, &stream, &args)) return;
 
@@ -976,13 +986,28 @@ static void Font_DirCallback(const String* path, void* obj) {
 	args.pathname = filename.buffer;
 #endif
 
+	/* If font is already known good, skip it */
+	for (i = 0; i < font_list.Entries.Count; i++) {
+		entry = StringsBuffer_UNSAFE_Get(&font_list.Entries, i);
+		String_UNSAFE_Separate(&entry, font_list.Separator, &name, &fontPath);
+		if (String_CaselessEquals(path, &fontPath)) return;
+	}
+
+	/* Completely skip windows .FON files */
+	if (String_CaselessEnds(path, &fonExt)) return;
+
 	err = FT_New_Face(ft_lib, &args, 0, &face);
 	if (err) { stream.close(&stream); return; }
+	flags = face->style_flags;
 
-	if (face->style_flags == FT_STYLE_FLAG_BOLD) {
-		Font_Add(path, face, &bold_fonts, "Bold");
-	} else if (face->style_flags == 0) {
-		Font_Add(path, face, &norm_fonts, "Regular");
+	if (flags == (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC)) {
+		Font_Add(path, face, 'Z', "Bold Italic");
+	} else if (flags == FT_STYLE_FLAG_BOLD) {
+		Font_Add(path, face, 'B', "Bold");
+	} else if (flags == FT_STYLE_FLAG_ITALIC) {
+		Font_Add(path, face, 'I', "Italic");
+	} else if (flags == 0) {
+		Font_Add(path, face, 'R', "Regular");
 	}
 	FT_Done_Face(face);
 }
@@ -1007,6 +1032,56 @@ Size2D Platform_TextMeasure(struct DrawTextArgs* args) {
 	return s;
 }
 
+static void Platform_GrayscaleGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, BitmapCol col) {
+	uint8_t* src;
+	BitmapCol* dst;
+	uint8_t intensity, invIntensity;
+	int xx, yy;
+
+	for (yy = 0; yy < img->rows; yy++) {
+		if ((y + yy) < 0 || (y + yy) >= bmp->Height) continue;
+		src = img->buffer + (yy * img->pitch);
+		dst = Bitmap_GetRow(bmp, y + yy) + x;
+
+		for (xx = 0; xx < img->width; xx++, src++) {
+			if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
+			intensity = *src; invIntensity = UInt8_MaxValue - intensity;
+
+			dst->B = ((col.B * intensity) >> 8) + ((dst->B * invIntensity) >> 8);
+			dst->G = ((col.G * intensity) >> 8) + ((dst->G * invIntensity) >> 8);
+			dst->R = ((col.R * intensity) >> 8) + ((dst->R * invIntensity) >> 8);
+			/*dst->A = ((col.A * intensity) >> 8) + ((dst->A * invIntensity) >> 8);*/
+			dst->A = intensity + ((dst->A * invIntensity) >> 8);
+			dst++;
+		}
+	}
+}
+
+static void Platform_BlackWhiteGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, BitmapCol col) {
+	uint8_t* src;
+	BitmapCol* dst;
+	uint8_t intensity;
+	int xx, yy;
+
+	for (yy = 0; yy < img->rows; yy++) {
+		if ((y + yy) < 0 || (y + yy) >= bmp->Height) continue;
+		src = img->buffer + (yy * img->pitch);
+		dst = Bitmap_GetRow(bmp, y + yy) + x;
+
+		for (xx = 0; xx < img->width; xx++) {
+			if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
+			intensity = src[xx >> 3];
+
+			if (intensity & (1 << (7 - (xx & 7)))) {
+				dst->B = col.B; dst->G = col.G; dst->R = col.R;
+				/*dst->A = col.A*/
+				dst->A = 255;
+			}
+			dst++;
+		}
+	}
+}
+
 Size2D Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, BitmapCol col) {
 	FT_Face face = args->Font.Handle;
 	String text = args->Text;
@@ -1014,14 +1089,9 @@ Size2D Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, B
 	int descender, begX = x;
 
 	/* glyph state */
-	int i, xx, yy, offset;
-	Codepoint cp;
 	FT_Bitmap* img;
-
-	/* glyph drawing state */
-	uint8_t* src;
-	BitmapCol* dst;
-	uint8_t intensity, invIntensity;
+	int i, offset;
+	Codepoint cp;
 
 	s.Height  = TEXT_CEIL(face->size->metrics.height);
 	descender = TEXT_CEIL(face->size->metrics.descender);
@@ -1030,26 +1100,14 @@ Size2D Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, B
 		cp = Convert_CP437ToUnicode(text.buffer[i]);
 		FT_Load_Char(face, cp, FT_LOAD_RENDER); /* TODO: Check error */
 
-		img    = &face->glyph->bitmap;
 		offset = (s.Height + descender) - face->glyph->bitmap_top;
 		x += face->glyph->bitmap_left; y += offset;
 
-		for (yy = 0; yy < img->rows; yy++) {
-			if ((y + yy) < 0 || (y + yy) >= bmp->Height) continue;
-			src = img->buffer + (yy * img->width);
-			dst = Bitmap_GetRow(bmp, y + yy) + x;
-
-			for (xx = 0; xx < img->width; xx++) {
-				if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
-				intensity = *src; invIntensity = UInt8_MaxValue - intensity;
-
-				dst->B = ((col.B * intensity) >> 8) + ((dst->B * invIntensity) >> 8);
-				dst->G = ((col.G * intensity) >> 8) + ((dst->G * invIntensity) >> 8);
-				dst->R = ((col.R * intensity) >> 8) + ((dst->R * invIntensity) >> 8);
-				/*dst->A = ((col.A * intensity) >> 8) + ((dst->A * invIntensity) >> 8);*/
-				dst->A = intensity + ((dst->A * invIntensity) >> 8);
-				src++; dst++;
-			}
+		img = &face->glyph->bitmap;
+		if (img->num_grays == 2) {
+			Platform_BlackWhiteGlyph(img, bmp, x, y, col);
+		} else {
+			Platform_GrayscaleGlyph(img, bmp, x, y, col);
 		}
 
 		x += TEXT_CEIL(face->glyph->advance.x);
@@ -1080,6 +1138,7 @@ static void* FT_ReallocWrapper(FT_Memory memory, long cur_size, long new_size, v
 	return Mem_Realloc(block, new_size, 1, "Freetype data");
 }
 
+#define FONT_CACHE_FILE "fontcache.txt"
 static void Font_Init(void) {
 #ifdef CC_BUILD_WIN
 	static String dir = String_FromConst("C:\\Windows\\fonts");
@@ -1093,6 +1152,7 @@ static void Font_Init(void) {
 #ifdef CC_BUILD_OSX
 	static String dir = String_FromConst("/Library/Fonts");
 #endif
+	static String cachePath = String_FromConst(FONT_CACHE_FILE);
 	FT_Error err;
 
 	ft_mem.alloc   = FT_AllocWrapper;
@@ -1104,7 +1164,14 @@ static void Font_Init(void) {
 
 	FT_Add_Default_Modules(ft_lib);
 	FT_Set_Default_Properties(ft_lib);
+
+	if (!File_Exists(&cachePath)) {
+		Window_ShowDialog("One time load", "Initialising font cache, this can take several seconds.");
+	}
+
+	EntryList_Init(&font_list, NULL, FONT_CACHE_FILE, '=');
 	Directory_Enum(&dir, NULL, Font_DirCallback);
+	if (font_list_changed) EntryList_Save(&font_list);
 }
 
 
@@ -1518,9 +1585,9 @@ ReturnCode Audio_Free(AudioHandle handle) {
 	ReturnCode res;
 	ctx = &Audio_Contexts[handle];
 
-	if (!ctx->Count) return 0;
 	ctx->Count  = 0;
 	ctx->Format = fmt;
+	if (!ctx->Handle) return 0;
 
 	res = waveOutClose(ctx->Handle);
 	ctx->Handle = NULL;
@@ -1568,6 +1635,7 @@ ReturnCode Audio_Play(AudioHandle handle) { return 0; }
 
 ReturnCode Audio_Stop(AudioHandle handle) {
 	struct AudioContext* ctx = &Audio_Contexts[handle];
+	if (!ctx->Handle) return 0;
 	return waveOutReset(ctx->Handle);
 }
 

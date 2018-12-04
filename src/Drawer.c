@@ -1,6 +1,12 @@
 #include "Drawer.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Constants.h"
+
+bool Drawer_Tinted;
+PackedCol Drawer_TintCol;
+Vector3 Drawer_MinBB, Drawer_MaxBB;
+float Drawer_X1, Drawer_Y1, Drawer_Z1;
+float Drawer_X2, Drawer_Y2, Drawer_Z2;
 
 /* Performance critical, use macro to ensure always inlined. */
 #define ApplyTint \

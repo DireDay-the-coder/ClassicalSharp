@@ -27,7 +27,7 @@ namespace Launcher {
 		
 		/// <summary> Whether the client drawing area needs to be redrawn/presented to the screen. </summary>
 		public bool Dirty, pendingRedraw;
-				/// <summary> The specific area/region of the window that needs to be redrawn. </summary>
+		/// <summary> The specific area/region of the window that needs to be redrawn. </summary>
 		public Rectangle DirtyArea;
 		
 		public string Username;
@@ -56,7 +56,7 @@ namespace Launcher {
 		
 		Font logoFont;
 		PlatformDrawer platformDrawer;
-		public void Init() {
+		void Init() {
 			Window.Resize += Resize;
 			Window.FocusedChanged += RedrawAll;
 			Window.WindowStateChanged += Resize;
@@ -247,7 +247,7 @@ namespace Launcher {
 			if (IsShutdown(key)) ShouldExit = true;
 		}
 		
-		public void Dispose() {
+		void Dispose() {
 			Window.Resize -= Resize;
 			Window.FocusedChanged -= RedrawAll;
 			Window.WindowStateChanged -= Resize;

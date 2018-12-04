@@ -8,7 +8,8 @@ namespace ClassicalSharp {
 	
 	internal static class Program {
 		
-		public const string AppName = "DireCube Client 0.99.9.98";
+
+		public const string AppName = "DireCube Client 0.99.9.99";
 		
 		public const int APIVersion = 2;
 		

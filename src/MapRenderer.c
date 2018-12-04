@@ -10,9 +10,14 @@
 #include "Game.h"
 #include "Graphics.h"
 #include "Platform.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Utils.h"
 #include "World.h"
+
+int MapRenderer_ChunksX, MapRenderer_ChunksY, MapRenderer_ChunksZ;
+int MapRenderer_1DUsedCount, MapRenderer_ChunksCount;
+struct ChunkPartInfo* MapRenderer_PartsNormal;
+struct ChunkPartInfo* MapRenderer_PartsTranslucent;
 
 static bool inTranslucent;
 static int elementsPerBitmap;
@@ -60,6 +65,16 @@ void ChunkInfo_Reset(struct ChunkInfo* chunk, int x, int y, int z) {
 
 	chunk->NormalParts      = NULL;
 	chunk->TranslucentParts = NULL;
+}
+
+CC_NOINLINE static int MapRenderer_UsedAtlases(void) {
+	TextureLoc maxLoc = 0;
+	int i;
+
+	for (i = 0; i < Array_Elems(Block_Textures); i++) {
+		maxLoc = max(maxLoc, Block_Textures[i]);
+	}
+	return Atlas1D_Index(maxLoc) + 1;
 }
 
 
@@ -381,7 +396,7 @@ void MapRenderer_Refresh(void) {
 		MapRenderer_ResetChunks();
 
 		oldCount = MapRenderer_1DUsedCount;
-		MapRenderer_1DUsedCount = Atlas1D_UsedAtlasesCount();
+		MapRenderer_1DUsedCount = MapRenderer_UsedAtlases();
 		/* Need to reallocate parts array in this case */
 		if (MapRenderer_1DUsedCount != oldCount) {
 			MapRenderer_FreeParts();
@@ -688,14 +703,14 @@ static void MapRenderer_TerrainAtlasChanged(void* obj) {
 		if (refreshRequired) MapRenderer_Refresh();
 	}
 
-	MapRenderer_1DUsedCount = Atlas1D_UsedAtlasesCount();
+	MapRenderer_1DUsedCount = MapRenderer_UsedAtlases();
 	elementsPerBitmap = Atlas1D_TilesPerAtlas;
 	MapRenderer_ResetPartFlags();
 }
 
 static void MapRenderer_BlockDefinitionChanged(void* obj) {
 	MapRenderer_Refresh();
-	MapRenderer_1DUsedCount = Atlas1D_UsedAtlasesCount();
+	MapRenderer_1DUsedCount = MapRenderer_UsedAtlases();
 	MapRenderer_ResetPartFlags();
 }
 
@@ -711,7 +726,7 @@ void MapRenderer_ApplyMeshBuilder(void) {
 	}
 }
 
-static void MapRenderer_OnNewMap(void* obj) {
+static void MapRenderer_OnNewMap(void) {
 	Game_ChunkUpdates = 0;
 	MapRenderer_DeleteChunks();
 	MapRenderer_ResetPartCounts();
@@ -721,7 +736,7 @@ static void MapRenderer_OnNewMap(void* obj) {
 	MapRenderer_FreeParts();
 }
 
-static void MapRenderer_OnNewMapLoaded(void* obj) {
+static void MapRenderer_OnNewMapLoaded(void) {
 	int count;
 	MapRenderer_ChunksX = (World_Width  + CHUNK_MAX) >> CHUNK_SHIFT;
 	MapRenderer_ChunksY = (World_Height + CHUNK_MAX) >> CHUNK_SHIFT;
@@ -742,13 +757,11 @@ static void MapRenderer_OnNewMapLoaded(void* obj) {
 	lastCamPos = Vector3_BigPos();
 }
 
-void MapRenderer_Init(void) {
-	Event_RegisterVoid(&TextureEvents_AtlasChanged, NULL, MapRenderer_TerrainAtlasChanged);
-	Event_RegisterVoid(&WorldEvents_NewMap,         NULL, MapRenderer_OnNewMap);
-	Event_RegisterVoid(&WorldEvents_MapLoaded,      NULL, MapRenderer_OnNewMapLoaded);
-	Event_RegisterInt(&WorldEvents_EnvVarChanged,   NULL, MapRenderer_EnvVariableChanged);
+static void MapRenderer_Init(void) {
+	Event_RegisterVoid(&TextureEvents_AtlasChanged,  NULL, MapRenderer_TerrainAtlasChanged);
+	Event_RegisterInt(&WorldEvents_EnvVarChanged,    NULL, MapRenderer_EnvVariableChanged);
+	Event_RegisterVoid(&BlockEvents_BlockDefChanged, NULL, MapRenderer_BlockDefinitionChanged);
 
-	Event_RegisterVoid(&BlockEvents_BlockDefChanged,   NULL, MapRenderer_BlockDefinitionChanged);
 	Event_RegisterVoid(&GfxEvents_ViewDistanceChanged, NULL, MapRenderer_RecalcVisibility_);
 	Event_RegisterVoid(&GfxEvents_ProjectionChanged,   NULL, MapRenderer_RecalcVisibility_);
 	Event_RegisterVoid(&GfxEvents_ContextLost,         NULL, MapRenderer_DeleteChunks_);
@@ -760,17 +773,23 @@ void MapRenderer_Init(void) {
 	MapRenderer_ApplyMeshBuilder();
 }
 
-void MapRenderer_Free(void) {
-	Event_UnregisterVoid(&TextureEvents_AtlasChanged, NULL, MapRenderer_TerrainAtlasChanged);
-	Event_UnregisterVoid(&WorldEvents_NewMap,         NULL, MapRenderer_OnNewMap);
-	Event_UnregisterVoid(&WorldEvents_MapLoaded,      NULL, MapRenderer_OnNewMapLoaded);
-	Event_UnregisterInt(&WorldEvents_EnvVarChanged,   NULL, MapRenderer_EnvVariableChanged);
+static void MapRenderer_Free(void) {
+	Event_UnregisterVoid(&TextureEvents_AtlasChanged,  NULL, MapRenderer_TerrainAtlasChanged);
+	Event_UnregisterInt(&WorldEvents_EnvVarChanged,    NULL, MapRenderer_EnvVariableChanged);
+	Event_UnregisterVoid(&BlockEvents_BlockDefChanged, NULL, MapRenderer_BlockDefinitionChanged);
 
-	Event_UnregisterVoid(&BlockEvents_BlockDefChanged,   NULL, MapRenderer_BlockDefinitionChanged);
 	Event_UnregisterVoid(&GfxEvents_ViewDistanceChanged, NULL, MapRenderer_RecalcVisibility_);
 	Event_UnregisterVoid(&GfxEvents_ProjectionChanged,   NULL, MapRenderer_RecalcVisibility_);
 	Event_UnregisterVoid(&GfxEvents_ContextLost,         NULL, MapRenderer_DeleteChunks_);
 	Event_UnregisterVoid(&GfxEvents_ContextRecreated,    NULL, MapRenderer_Refresh_);
 
-	MapRenderer_OnNewMap(NULL);
+	MapRenderer_OnNewMap();
 }
+
+struct IGameComponent MapRenderer_Component = {
+	MapRenderer_Init, /* Init  */
+	MapRenderer_Free, /* Free  */
+	MapRenderer_OnNewMap, /* Reset */
+	MapRenderer_OnNewMap, /* OnNewMap */
+	MapRenderer_OnNewMapLoaded /* OnNewMapLoaded */
+};

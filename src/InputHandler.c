@@ -44,7 +44,7 @@ static void InputHandler_ButtonStateUpdate(MouseButton button, bool pressed) {
 	}
 
 	input_buttonsDown[button] = pressed;
-	ServerConnection_SendPlayerClick(button, pressed, 
+	ServerConnection.SendPlayerClick(button, pressed, 
 									(EntityID)input_pickingId, &Game_SelectedPos);	
 }
 
@@ -74,7 +74,7 @@ void InputHandler_ScreenChanged(struct Screen* oldScreen, struct Screen* newScre
 static bool InputHandler_IsShutdown(Key key) {
 	if (key == KEY_F4 && Key_IsAltPressed()) return true;
 
-	/* On OSX, Cmd+Q should also terminate the process. */
+	/* On OSX, Cmd+Q should also terminate the process */
 #ifdef CC_BUILD_OSX
 	return key == KEY_Q && Key_IsWinPressed();
 #else
@@ -347,7 +347,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		old = World_GetBlock(p.X, p.Y, p.Z);
 		if (Block_Draw[old] == DRAW_GAS || !Block_CanDelete[old]) return;
 
-		Game_UpdateBlock(p.X, p.Y, p.Z, BLOCK_AIR);
+		Game_ChangeBlock(p.X, p.Y, p.Z, BLOCK_AIR);
 		Event_RaiseBlock(&UserEvents_BlockChanged, p, old, BLOCK_AIR);
 	} else if (right) {
 		p = Game_SelectedPos.TranslatedPos;
@@ -362,7 +362,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		if (Block_Draw[block] == DRAW_GAS && Block_Draw[old] != DRAW_GAS) return;
 		if (!InputHandler_CheckIsFree(block)) return;
 
-		Game_UpdateBlock(p.X, p.Y, p.Z, block);
+		Game_ChangeBlock(p.X, p.Y, p.Z, block);
 		Event_RaiseBlock(&UserEvents_BlockChanged, p, old, block);
 	} else if (middle) {
 		p = Game_SelectedPos.BlockPos;

@@ -18,11 +18,10 @@ typedef struct Bitmap_ { uint8_t* Scan0; int Width, Height; } Bitmap;
 
 #define PNG_MAX_DIMS 0x8000
 #define BITMAPCOL_CONST(r, g, b, a) { b, g, r, a }
-#define BITMAP_SIZEOF_PIXEL 4 /* 32 bit ARGB */
 
-#define Bitmap_DataSize(width, height) ((uint32_t)(width) * (uint32_t)(height) * (uint32_t)BITMAP_SIZEOF_PIXEL)
-#define Bitmap_RawRow(bmp, y) ((uint32_t*)((bmp)->Scan0 + ((y) * ((bmp)->Width << 2))))
-#define Bitmap_GetRow(bmp, y) ((BitmapCol*)((bmp)->Scan0 + ((y) * ((bmp)->Width << 2))))
+#define Bitmap_DataSize(width, height) ((uint32_t)(width) * (uint32_t)(height) * 4)
+#define Bitmap_RawRow(bmp, y) ((uint32_t*)(bmp)->Scan0  + (y) * (bmp)->Width)
+#define Bitmap_GetRow(bmp, y) ((BitmapCol*)(bmp)->Scan0 + (y) * (bmp)->Width)
 #define Bitmap_GetPixel(bmp, x, y) (Bitmap_GetRow(bmp, y)[x])
 
 BitmapCol BitmapCol_Scale(BitmapCol value, float t);
@@ -47,6 +46,7 @@ typedef int (*Png_RowSelector)(Bitmap* bmp, int row);
 */
 ReturnCode Png_Decode(Bitmap* bmp, struct Stream* stream);
 /* Encodes a bitmap in PNG format. */
+/* selectRow is optional. Can be used to modify how rows are encoded. (e.g. flip image) */
 /* NOTE: Always saves as RGB, alpha channel is discarded. */
 ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector selectRow);
 #endif

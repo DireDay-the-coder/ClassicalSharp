@@ -15,15 +15,12 @@
 #define NOMCX
 #define NOIME
 
-static int Gfx_strideSizes[2] = { 16, 24 };
-static int gfx_batchStride, gfx_batchFormat = -1;
+int Gfx_MaxTexWidth, Gfx_MaxTexHeight;
+float Gfx_MinZNear;
+bool Gfx_LostContext;
+bool Gfx_Mipmaps, Gfx_CustomMipmapsLevels;
+struct Matrix Gfx_View, Gfx_Projection;
 
-static bool gfx_vsync, gfx_fogEnabled;
-bool Gfx_GetFog(void) { return gfx_fogEnabled; }
-
-/*########################################################################################################################*
-*------------------------------------------------------Generic/Common-----------------------------------------------------*
-*#########################################################################################################################*/
 static char Gfx_ApiBuffer[7][STRING_SIZE];
 String Gfx_ApiInfo[7] = {
 	String_FromArray(Gfx_ApiBuffer[0]), String_FromArray(Gfx_ApiBuffer[1]),
@@ -32,6 +29,19 @@ String Gfx_ApiInfo[7] = {
 	String_FromArray(Gfx_ApiBuffer[6]),
 };
 
+GfxResourceID Gfx_defaultIb;
+GfxResourceID Gfx_quadVb, Gfx_texVb;
+ScheduledTaskCallback Gfx_LostContextFunction;
+
+static int gfx_strideSizes[2] = { 16, 24 };
+static int gfx_batchStride, gfx_batchFormat = -1;
+
+static bool gfx_vsync, gfx_fogEnabled;
+bool Gfx_GetFog(void) { return gfx_fogEnabled; }
+
+/*########################################################################################################################*
+*------------------------------------------------------Generic/Common-----------------------------------------------------*
+*#########################################################################################################################*/
 CC_NOINLINE static void Gfx_InitDefaultResources(void) {
 	uint16_t indices[GFX_MAX_INDICES];
 	Gfx_MakeIndices(indices, GFX_MAX_INDICES);
@@ -184,7 +194,7 @@ void Gfx_RestoreAlphaState(uint8_t draw) {
 /* Quoted from http://www.realtimerendering.com/blog/gpus-prefer-premultiplication/
    The short version: if you want your renderer to properly handle textures with alphas when using
    bilinear interpolation or mipmapping, you need to premultiply your PNG color data by their (unassociated) alphas. */
-static BitmapCol GfxCommon_Average(BitmapCol p1, BitmapCol p2) {
+static BitmapCol Gfx_Average(BitmapCol p1, BitmapCol p2) {
 	uint32_t a1, a2, aSum;
 	uint32_t b1, g1, r1;
 	uint32_t b2, g2, r2;
@@ -227,9 +237,9 @@ void Gfx_GenMipmaps(int width, int height, uint8_t* lvlScan0, uint8_t* scan0) {
 			BitmapCol src10 = src1[srcX], src11 = src1[srcX + 1];
 
 			/* bilinear filter this mipmap */
-			BitmapCol ave0 = GfxCommon_Average(src00, src01);
-			BitmapCol ave1 = GfxCommon_Average(src10, src11);
-			dst[x] = GfxCommon_Average(ave0, ave1);
+			BitmapCol ave0 = Gfx_Average(src00, src01);
+			BitmapCol ave1 = Gfx_Average(src10, src11);
+			dst[x] = Gfx_Average(ave0, ave1);
 		}
 	}
 }
@@ -422,7 +432,7 @@ static void D3D9_SetTexturePartData(IDirect3DTexture9* texture, int x, int y, Bi
 	uint8_t* src = (uint8_t*)bmp->Scan0;
 	uint8_t* dst = (uint8_t*)rect.pBits;
 	int yy;
-	uint32_t stride = (uint32_t)(bmp->Width) * BITMAP_SIZEOF_PIXEL;
+	uint32_t stride = (uint32_t)bmp->Width * 4;
 
 	for (yy = 0; yy < bmp->Height; yy++) {
 		Mem_Copy(dst, src, stride);
@@ -447,7 +457,7 @@ static void D3D9_DoMipmaps(IDirect3DTexture9* texture, int x, int y, Bitmap* bmp
 		if (width > 1)   width /= 2; 
 		if (height > 1) height /= 2;
 
-		cur = Mem_Alloc(width * height, BITMAP_SIZEOF_PIXEL, "mipmaps");
+		cur = Mem_Alloc(width * height, 4, "mipmaps");
 		Gfx_GenMipmaps(width, height, cur, prev);
 
 		Bitmap_Create(&mipmap, width, height, cur);
@@ -693,7 +703,7 @@ static void D3D9_RestoreRenderStates(void) {
 *---------------------------------------------------Vertex/Index buffers--------------------------------------------------*
 *#########################################################################################################################*/
 GfxResourceID Gfx_CreateDynamicVb(VertexFormat fmt, int maxVertices) {
-	int size = maxVertices * Gfx_strideSizes[fmt];
+	int size = maxVertices * gfx_strideSizes[fmt];
 	IDirect3DVertexBuffer9* vbuffer;
 	ReturnCode res = IDirect3DDevice9_CreateVertexBuffer(device, size, D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY,
 		d3d9_formatMappings[fmt], D3DPOOL_DEFAULT, &vbuffer, NULL);
@@ -713,7 +723,7 @@ static void D3D9_SetVbData(IDirect3DVertexBuffer9* buffer, void* data, int size,
 }
 
 GfxResourceID Gfx_CreateVb(void* vertices, VertexFormat fmt, int count) {
-	int size = count * Gfx_strideSizes[fmt];
+	int size = count * gfx_strideSizes[fmt];
 	IDirect3DVertexBuffer9* vbuffer;
 	ReturnCode res;
 
@@ -771,7 +781,7 @@ void Gfx_SetVertexFormat(VertexFormat fmt) {
 
 	ReturnCode res = IDirect3DDevice9_SetFVF(device, d3d9_formatMappings[fmt]);
 	if (res) ErrorHandler_Fail2(res, "D3D9_SetBatchFormat");
-	gfx_batchStride = Gfx_strideSizes[fmt];
+	gfx_batchStride = gfx_strideSizes[fmt];
 }
 
 void Gfx_SetDynamicVbData(GfxResourceID vb, void* vertices, int vCount) {
@@ -850,7 +860,6 @@ void Gfx_CalcPerspectiveMatrix(float fov, float aspect, float zNear, float zFar,
 /*########################################################################################################################*
 *-----------------------------------------------------------Misc----------------------------------------------------------*
 *#########################################################################################################################*/
-static int D3D9_SelectRow(Bitmap* bmp, int y) { return y; }
 ReturnCode Gfx_TakeScreenshot(struct Stream* output, int width, int height) {
 	IDirect3DSurface9* backbuffer = NULL;
 	IDirect3DSurface9* temp = NULL;
@@ -868,7 +877,7 @@ ReturnCode Gfx_TakeScreenshot(struct Stream* output, int width, int height) {
 	if (res) goto finished;
 	{
 		Bitmap bmp; Bitmap_Create(&bmp, width, height, rect.pBits);
-		res = Png_Encode(&bmp, output, D3D9_SelectRow);
+		res = Png_Encode(&bmp, output, NULL);
 		if (res) { IDirect3DSurface9_UnlockRect(temp); goto finished; }
 	}
 	res = IDirect3DSurface9_UnlockRect(temp);
@@ -1083,7 +1092,7 @@ static void GL_DoMipmaps(GfxResourceID texId, int x, int y, Bitmap* bmp, bool pa
 		if (width > 1)  width /= 2;
 		if (height > 1) height /= 2;
 
-		cur = Mem_Alloc(width * height, BITMAP_SIZEOF_PIXEL, "mipmaps");
+		cur = Mem_Alloc(width * height, 4, "mipmaps");
 		Gfx_GenMipmaps(width, height, cur, prev);
 
 		if (partial) {
@@ -1235,14 +1244,14 @@ static GfxResourceID GL_GenAndBind(GLenum target) {
 
 GfxResourceID Gfx_CreateDynamicVb(VertexFormat fmt, int maxVertices) {
 	GfxResourceID id = GL_GenAndBind(GL_ARRAY_BUFFER);
-	uint32_t size    = maxVertices * Gfx_strideSizes[fmt];
+	uint32_t size    = maxVertices * gfx_strideSizes[fmt];
 	glBufferData(GL_ARRAY_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
 	return id;
 }
 
 GfxResourceID Gfx_CreateVb(void* vertices, VertexFormat fmt, int count) {
 	GfxResourceID id = GL_GenAndBind(GL_ARRAY_BUFFER);
-	uint32_t size    = count * Gfx_strideSizes[fmt];
+	uint32_t size    = count * gfx_strideSizes[fmt];
 	glBufferData(GL_ARRAY_BUFFER, size, vertices, GL_STATIC_DRAW);
 	return id;
 }
@@ -1281,7 +1290,7 @@ GfxResourceID Gfx_CreateVb(void* vertices, VertexFormat fmt, int count) {
 
 	uint16_t indices[GFX_MAX_INDICES];
 	Gfx_MakeIndices(indices, ICOUNT(count));
-	stride = Gfx_strideSizes[fmt];
+	stride = gfx_strideSizes[fmt];
 
 	glVertexPointer(3, GL_FLOAT, stride, vertices);
 	glColorPointer(4, GL_UNSIGNED_BYTE, stride, (void*)((uint8_t*)vertices + 12));
@@ -1338,7 +1347,7 @@ void Gfx_SetVertexFormat(VertexFormat fmt) {
 		glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 	}
 	gfx_batchFormat = fmt;
-	gfx_batchStride = Gfx_strideSizes[fmt];
+	gfx_batchStride = gfx_strideSizes[fmt];
 
 	if (fmt == VERTEX_FORMAT_P3FT2FC4B) {
 		glEnableClientState(GL_TEXTURE_COORD_ARRAY);

@@ -4,7 +4,7 @@
 #include "ExtMath.h"
 #include "Lighting.h"
 #include "Entity.h"
-#include "TerrainAtlas.h"
+#include "TexturePack.h"
 #include "Graphics.h"
 #include "Funcs.h"
 #include "Game.h"
@@ -467,8 +467,9 @@ static void Particles_BreakBlockEffect_Handler(void* obj, Vector3I coords, Block
 }
 
 static void Particles_Init(void) {
+	ScheduledTask_Add(GAME_DEF_TICKS, Particles_Tick);
 	Random_InitFromCurrentTime(&rnd);
-	Particles_ContextRecreated(NULL);
+	Particles_ContextRecreated(NULL);	
 
 	Event_RegisterBlock(&UserEvents_BlockChanged,   NULL, Particles_BreakBlockEffect_Handler);
 	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, Particles_FileChanged);

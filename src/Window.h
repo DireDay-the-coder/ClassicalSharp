@@ -1,6 +1,7 @@
 #ifndef CC_WINDOW_H
 #define CC_WINDOW_H
 #include "String.h"
+#include "Bitmap.h"
 /* Abstracts creating and managing a native window.
    Copyright 2017 ClassicalSharp | Licensed under BSD-3 | Based on OpenTK code
 */
@@ -49,9 +50,9 @@ void Window_SetClipboardText(const String* value);
 /* TODO: IMPLEMENT void Window_SetIcon(Bitmap* bmp); */
 
 /* Whether the window is actually valid (i.e. not destroyed). */
-bool Window_Exists;
+extern bool Window_Exists;
 /* Whether the user is interacting with the window. */
-bool Window_Focused;
+extern bool Window_Focused;
 /* Whether the window is visible on screen at all. */
 /* NOTE: This does not count when just hidden behind other windows. */
 bool Window_GetVisible(void);
@@ -66,10 +67,10 @@ void Window_SetWindowState(int state);
 
 /* The external bounds of the window in screen coordinates. */
 /* Size of external bounds is client size + borders + title */
-Rect2D Window_Bounds;
+extern Rect2D Window_Bounds;
 /* Size of the internal bounds of the window. */
 /* This is the size of area that can be drawn on. (i.e. content size) */
-Size2D Window_ClientSize;
+extern Size2D Window_ClientSize;
 /* Sets the position and external size of the window. */
 void Window_SetBounds(Rect2D rect);
 /* Sets the position of the window on the screen. */
@@ -100,6 +101,16 @@ bool Window_GetCursorVisible(void);
 /* NOTE: You must be careful with this! OS typically uses a counter for visibility,
 so setting invisible multiple times means you must then set visible multiple times. */
 void Window_SetCursorVisible(bool visible);
+
+/* Shows a dialog box window. */
+CC_EXPORT void Window_ShowDialog(const char* title, const char* msg);
+/* Initialises the internal state for being able to set window's pixels. */
+/* NOTE: Do not manually free bmp->Scan0 - it may be allocated by system. */
+/* NOTE: This function must also be called whenever the window is resized. */
+void Window_InitRaw(Bitmap* bmp);
+/* Updates the window's pixels using the bitmap from Window_InitRaw. */
+/* r can be used to only update a small region of pixels (may be ignored) */
+void Window_DrawRaw(Rect2D r);
 
 #ifndef CC_BUILD_D3D9
 /* Initialises an OpenGL context that most closely matches the input arguments. */

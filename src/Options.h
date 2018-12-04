@@ -70,14 +70,15 @@ extern const char* FpsLimit_Names[FPS_LIMIT_COUNT];
 #define OPT_CLASSIC_ARM_MODEL "nostalgia-classicarm"
 #define OPT_MAX_CHUNK_UPDATES "gfx-maxchunkupdates"
 
-StringsBuffer Options_Keys;
-StringsBuffer Options_Values;
-
+extern struct EntryList Options;
 /* Returns whether user has changed any options this session. */
-CC_NOINLINE bool Options_HasAnyChanged(void);
+bool Options_HasAnyChanged(void);
 /* Frees any memory allocated in storing options. */
-CC_NOINLINE void Options_Free(void);
+void Options_Free(void);
 
+/* Sets value to value of option directly in Options.Buffer if found, String_Empty if not. */
+/* Returns whether the option was actually found. */
+STRING_REF bool Options_UNSAFE_Get(const char* keyRaw, String* value);
 /* Returns value of given option, or defalt value if not found. */
 CC_EXPORT void Options_Get(const char*       key, String* value, const char* defValue);
 /* Returns value of given option as an integer, or defalt value if could not be converted. */
