@@ -20,6 +20,8 @@ typedef int FileHandle;
 
 /* Origin points for when seeking in a file. */
 enum File_SeekFrom { FILE_SEEKFROM_BEGIN, FILE_SEEKFROM_CURRENT, FILE_SEEKFROM_END };
+/* Number of milliseconds since 01/01/0001 to start of unix time. */
+#define UNIX_EPOCH 62135596800000ULL
 
 /* Newline for console and text files. */
 extern char* Platform_NewLine;
@@ -206,7 +208,7 @@ ReturnCode Socket_Select(SocketHandle socket, int selectMode, bool* success);
 /* Initalises the platform specific http library state. */
 void Http_Init(void);
 /* Performs a http request, setting progress as data is received. */
-/* NOTE: NOT thread safe - you should always use AsyncDownloader for making requests. */
+/* NOTE: NOT thread safe - you should ALWAYS use AsyncDownloader for making requests. */
 ReturnCode Http_Do(struct AsyncRequest* req, volatile int* progress);
 /* Frees the platform specific http library state. */
 ReturnCode Http_Free(void);

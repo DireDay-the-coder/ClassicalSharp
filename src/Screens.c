@@ -64,7 +64,6 @@ struct LoadingScreen {
 #define CHATSCREEN_MAX_GROUP 3
 struct ChatScreen {
 	Screen_Layout
-	struct Screen* HUD;
 	int InputOldHeight;
 	float ChatAcc;
 	bool SuppressNextPress;
@@ -363,11 +362,6 @@ static void StatusScreen_Update(struct StatusScreen* s, double delta) {
 }
 
 static void StatusScreen_OnResize(void* screen) { }
-static void StatusScreen_FontChanged(void* screen) {
-	struct StatusScreen* s = screen;
-	Elem_Recreate(s);
-}
-
 static void StatusScreen_ContextLost(void* screen) {
 	struct StatusScreen* s = screen;
 	TextAtlas_Free(&s->PosAtlas);
@@ -421,7 +415,6 @@ static void StatusScreen_Init(void* screen) {
 	struct StatusScreen* s = screen;
 	Drawer2D_MakeFont(&s->Font, 16, FONT_STYLE_NORMAL);
 	Screen_CommonInit(s);
-	Event_RegisterVoid(&ChatEvents_FontChanged, s, StatusScreen_FontChanged);
 }
 
 static void StatusScreen_Render(void* screen, double delta) {
@@ -447,7 +440,6 @@ static void StatusScreen_Free(void* screen) {
 	struct StatusScreen* s = screen;
 	Font_Free(&s->Font);
 	Screen_CommonFree(s);
-	Event_UnregisterVoid(&ChatEvents_FontChanged, s, StatusScreen_FontChanged);
 }
 
 static struct ScreenVTABLE StatusScreen_VTABLE = {
@@ -1101,12 +1093,6 @@ static void ChatScreen_ContextRecreated(void* screen) {
 	struct ChatScreen* s = screen;
 	ChatScreen_ConstructWidgets(s);
 	ChatScreen_SetInitialMessages(s);
-}
-
-static void ChatScreen_FontChanged(void* screen) {
-	struct ChatScreen* s = screen;
-	if (!Drawer2D_BitmappedText) return;
-	Elem_Recreate(s);
 	ChatScreen_UpdateChatYOffset(s, true);
 }
 
@@ -1131,9 +1117,8 @@ static void ChatScreen_Init(void* screen) {
 	Drawer2D_MakeFont(&s->AnnouncementFont, largeSize, FONT_STYLE_NORMAL);
 	Screen_CommonInit(s);
 
-	Event_RegisterChat(&ChatEvents_ChatReceived,    s, ChatScreen_ChatReceived);
-	Event_RegisterVoid(&ChatEvents_FontChanged,     s, ChatScreen_FontChanged);
-	Event_RegisterInt(&ChatEvents_ColCodeChanged,   s, ChatScreen_ColCodeChanged);
+	Event_RegisterChat(&ChatEvents_ChatReceived,  s, ChatScreen_ChatReceived);
+	Event_RegisterInt(&ChatEvents_ColCodeChanged, s, ChatScreen_ColCodeChanged);
 }
 
 static void ChatScreen_Render(void* screen, double delta) {
@@ -1191,9 +1176,8 @@ static void ChatScreen_Free(void* screen) {
 	Font_Free(&s->AnnouncementFont);
 	Screen_CommonFree(s);
 
-	Event_UnregisterChat(&ChatEvents_ChatReceived,    s, ChatScreen_ChatReceived);
-	Event_UnregisterVoid(&ChatEvents_FontChanged,     s, ChatScreen_FontChanged);
-	Event_UnregisterInt(&ChatEvents_ColCodeChanged,   s, ChatScreen_ColCodeChanged);
+	Event_UnregisterChat(&ChatEvents_ChatReceived,  s, ChatScreen_ChatReceived);
+	Event_UnregisterInt(&ChatEvents_ColCodeChanged, s, ChatScreen_ColCodeChanged);
 }
 
 static struct ScreenVTABLE ChatScreen_VTABLE = {
@@ -1206,7 +1190,6 @@ struct Screen* ChatScreen_MakeInstance(void) {
 	struct ChatScreen* s = &ChatScreen_Instance;
 	s->InputOldHeight     = -1;
 	s->LastDownloadStatus = Int32_MinValue;
-	s->HUD = Gui_HUD;
 
 	s->VTABLE = &ChatScreen_VTABLE;
 	return (struct Screen*)s;

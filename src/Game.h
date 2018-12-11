@@ -53,7 +53,6 @@ extern bool Game_SmoothLighting;
 extern bool Game_ChatLogging;
 extern bool Game_AutoRotate;
 extern bool Game_SmoothCamera;
-extern String Game_FontName;
 extern int  Game_ChatLines;
 extern bool Game_ClickableChat;
 extern bool Game_HideGui;
@@ -97,5 +96,5 @@ void Game_UpdateClientSize(void);
 void Game_SetFpsLimit(enum FpsLimit method);
 float Game_CalcLimitMillis(enum FpsLimit method);
 
-void Game_Run(int width, int height, const String* title, struct DisplayDevice* device);
+void Game_Run(int width, int height, const String* title);
 #endif

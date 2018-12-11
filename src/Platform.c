@@ -301,7 +301,6 @@ void Platform_Log(const String* message) {
 	write(STDOUT_FILENO, "\n",            1);
 }
 
-#define UNIX_EPOCH 62135596800000ULL
 #define UnixTime_TotalMS(time) ((uint64_t)time.tv_sec * 1000 + UNIX_EPOCH + (time.tv_usec / 1000))
 TimeMS DateTime_CurrentUTC_MS(void) {
 	struct timeval cur;
@@ -905,7 +904,9 @@ void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
 	if (!font_list.Entries.Count) Font_Init();
 	path = String_Empty;
 
-	if (style & FONT_STYLE_BOLD) path = Font_Lookup(fontName, 'B');
+	if (style & FONT_STYLE_BOLD)   path = Font_Lookup(fontName, 'B');
+	if (style & FONT_STYLE_ITALIC) path = Font_Lookup(fontName, 'I');
+
 	if (!path.length) path = Font_Lookup(fontName, 'R');
 	if (!path.length) ErrorHandler_Fail("Unknown font");
 

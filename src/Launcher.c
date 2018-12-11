@@ -1,5 +1,6 @@
 #include "Launcher.h"
 #include "LScreens.h"
+#include "LWeb.h"
 #include "Resources.h"
 #include "Drawer2D.h"
 #include "Game.h"
@@ -10,18 +11,22 @@
 #include "Window.h"
 #include "GameStructs.h"
 #include "Event.h"
+#include "AsyncDownloader.h"
 
 struct LScreen* Launcher_Screen;
 bool Launcher_Dirty;
 Rect2D Launcher_DirtyArea;
 Bitmap Launcher_Framebuffer;
 bool Launcher_ClassicBackground;
-FontDesc Launcher_TitleFont, Launcher_TextFont;
+FontDesc Launcher_TitleFont, Launcher_TextFont, Launcher_HintFont;
 
-bool Launcher_ShouldExit, Launcher_ShouldUpdate;
+static bool fullRedraw, pendingRedraw;
+static FontDesc logoFont;
+
+bool Launcher_ShouldExit, Launcher_ShouldUpdate, Launcher_SaveOptions;
 TimeMS Launcher_PatchTime;
-struct ServerListEntry* Launcher_PublicServers;
-int Launcher_NumServers;
+static void Launcher_ApplyUpdate(void);
+
 
 void Launcher_ShowError(ReturnCode res, const char* place) {
 	String msg; char msgBuffer[STRING_SIZE * 2];
@@ -30,36 +35,6 @@ void Launcher_ShowError(ReturnCode res, const char* place) {
 	String_Format2(&msg, "Error %x when %c", &res, place);
 	msg.buffer[msg.length] = '\0';
 	Window_ShowDialog("Error", msg.buffer);
-}
-
-/* TODO: FIX THESE STUBS!!! */
-void Launcher_SecureSetOpt(const char* opt, const String* data, const String* key) { }
-
-internal UpdateCheckTask checkTask;
-static bool fullRedraw, pendingRedraw;
-static FontDesc logoFont;
-
-static void Launcher_RedrawAll(void) {
-	Launcher_ResetPixels();
-	if (Launcher_Screen) Launcher_Screen->DrawAll(Launcher_Screen);
-	fullRedraw = true;
-}
-
-static void Launcher_ReqeustRedraw(void) {
-	/* We may get multiple Redraw events in short timespan */
-	/* So we just request a redraw at next launcher tick */
-	pendingRedraw  = true;
-	Launcher_Dirty = true;
-}
-
-/* updates window state on resize and redraws contents. */
-static void Launcher_OnResize(void) {
-	Game_UpdateClientSize();
-	Launcher_Framebuffer.Width  = Game_Width;
-	Launcher_Framebuffer.Height = Game_Height;
-
-	Window_InitRaw(&Launcher_Framebuffer);
-	Launcher_RedrawAll();
 }
 
 void Launcher_SetScreen(struct LScreen* screen) {
@@ -72,50 +47,140 @@ void Launcher_SetScreen(struct LScreen* screen) {
 	screen->MouseMove(screen, 0, 0);
 }
 
+
+/*########################################################################################################################*
+*---------------------------------------------------------Event handler---------------------------------------------------*
+*#########################################################################################################################*/
+static void Launcher_RedrawAll(void* obj) {
+	Launcher_ResetPixels();
+	if (Launcher_Screen) Launcher_Screen->DrawAll(Launcher_Screen);
+	fullRedraw = true;
+}
+
+static void Launcher_ReqeustRedraw(void* obj) {
+	/* We may get multiple Redraw events in short timespan */
+	/* So we just request a redraw at next launcher tick */
+	pendingRedraw  = true;
+	Launcher_Dirty = true;
+}
+
+static void Launcher_OnResize(void* obj) {
+	Game_UpdateClientSize();
+	Launcher_Framebuffer.Width  = Game_Width;
+	Launcher_Framebuffer.Height = Game_Height;
+
+	Window_InitRaw(&Launcher_Framebuffer);
+	Launcher_RedrawAll(NULL);
+}
+
+static bool Launcher_IsShutdown(int key) {
+	if (key == KEY_F4 && Key_IsAltPressed()) return true;
+
+	/* On OSX, Cmd+Q should also terminate the process */
+#ifdef CC_BUILD_OSX
+	return key == Key.Q && Key_IsWinPressed();
+#else
+	return false;
+#endif
+}
+
+static void Launcher_KeyDown(void* obj, int key) {
+	if (Launcher_IsShutdown(key)) Launcher_ShouldExit = true;
+	Launcher_Screen->KeyDown(Launcher_Screen, key);
+}
+
+static void Launcher_MouseDown(void* obj, int btn) {
+	Launcher_Screen->MouseDown(Launcher_Screen, btn);
+}
+
+static void Launcher_MouseUp(void* obj, int btn) {
+	Launcher_Screen->MouseUp(Launcher_Screen, btn);
+}
+
+static void Launcher_MouseMove(void* obj, int deltaX, int deltaY) {
+	Launcher_Screen->MouseMove(Launcher_Screen, deltaX, deltaY);
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------------------Main body-----------------------------------------------------*
+*#########################################################################################################################*/
+static void Launcher_Display(void) {
+	Rect2D r;
+	if (pendingRedraw) {
+		Launcher_RedrawAll(NULL);
+		pendingRedraw = false;
+	}
+
+	Launcher_Screen->OnDisplay(Launcher_Screen);
+	Launcher_Dirty = false;
+
+	r.X = 0; r.Width  = Launcher_Framebuffer.Width;
+	r.Y = 0; r.Height = Launcher_Framebuffer.Height;
+
+	if (!fullRedraw && Launcher_DirtyArea.Width) r = Launcher_DirtyArea;
+	Window_DrawRaw(r);
+	fullRedraw = false;
+
+	r.X = 0; r.Width   = 0;
+	r.Y = 0; r.Height  = 0;
+	Launcher_DirtyArea = r;
+}
+
 static void Launcher_Init(void) {
 	BitmapCol col = BITMAPCOL_CONST(125, 125, 125, 255);
 
 	Event_RegisterVoid(&WindowEvents_Resized,      NULL, Launcher_OnResize);
 	Event_RegisterVoid(&WindowEvents_StateChanged, NULL, Launcher_OnResize);
-	Window.FocusedChanged += RedrawAll;
-	Window.Redraw += RedrawPending;
-	Keyboard.KeyDown += KeyDown;
+	Event_RegisterVoid(&WindowEvents_FocusChanged, NULL, Launcher_RedrawAll);
+	Event_RegisterVoid(&WindowEvents_Redraw,       NULL, Launcher_ReqeustRedraw);
 
-	Options_Load();
-	Options_Get(OPT_FONT_NAME, &Game_FontName, Font_DefaultName);
-	/* TODO: Handle Arial font not working */
-	Font_Make(&logoFont,           &Game_FontName, 32, FONT_STYLE_NORMAL);
-	Font_Make(&Launcher_TitleFont, &Game_FontName, 16, FONT_STYLE_BOLD);
-	Font_Make(&Launcher_TextFont,  &Game_FontName, 14, FONT_STYLE_NORMAL);
+	Event_RegisterInt(&KeyEvents_Down,          NULL, Launcher_KeyDown);
+	Event_RegisterInt(&MouseEvents_Down,        NULL, Launcher_MouseDown);
+	Event_RegisterInt(&MouseEvents_Up,          NULL, Launcher_MouseUp);
+	Event_RegisterMouseMove(&MouseEvents_Moved, NULL, Launcher_MouseMove);
+
+	Font_Make(&logoFont,           &Drawer2D_FontName, 32, FONT_STYLE_NORMAL);
+	Font_Make(&Launcher_TitleFont, &Drawer2D_FontName, 16, FONT_STYLE_BOLD);
+	Font_Make(&Launcher_TextFont,  &Drawer2D_FontName, 14, FONT_STYLE_NORMAL);
+	Font_Make(&Launcher_HintFont,  &Drawer2D_FontName, 12, FONT_STYLE_ITALIC);
 
 	Drawer2D_Cols['g'] = col;
 	Utils_EnsureDirectory("texpacks");
 	Utils_EnsureDirectory("audio");
 }
 
-void Dispose() {
+static void Launcher_Free(void) {
+	int i;
 	Event_UnregisterVoid(&WindowEvents_Resized,      NULL, Launcher_OnResize);
 	Event_UnregisterVoid(&WindowEvents_StateChanged, NULL, Launcher_OnResize);
+	Event_UnregisterVoid(&WindowEvents_FocusChanged, NULL, Launcher_RedrawAll);
+	Event_UnregisterVoid(&WindowEvents_Redraw,       NULL, Launcher_ReqeustRedraw);
+	
+	Event_UnregisterInt(&KeyEvents_Down,          NULL, Launcher_KeyDown);
+	Event_UnregisterInt(&MouseEvents_Down,        NULL, Launcher_MouseDown);
+	Event_UnregisterInt(&MouseEvents_Up,          NULL, Launcher_MouseUp);
+	Event_UnregisterMouseMove(&MouseEvents_Moved, NULL, Launcher_MouseMove);
 
-	Window.FocusedChanged -= RedrawAll;
-	Window.Redraw -= RedrawPending;
-	Keyboard.KeyDown -= KeyDown;
-
-	List<FastBitmap> bitmaps = FetchFlagsTask.Bitmaps;
-	for (int i = 0; i < bitmaps.Count; i++) {
-		bitmaps[i].Dispose();
-		bitmaps[i].Bitmap.Dispose();
+	for (i = 0; i < FetchFlagsTask.NumDownloaded; i++) {
+		Mem_Free(FetchFlagsTask.Bitmaps[i].Scan0);
 	}
 
 	Font_Free(&logoFont);
 	Font_Free(&Launcher_TitleFont);
 	Font_Free(&Launcher_TextFont);
+	Font_Free(&Launcher_HintFont);
+
+	Launcher_Screen->Free(Launcher_Screen);
+	Launcher_Screen = NULL;
 }
 
-void Run() {
-	Window = Factory.CreateWindow(640, 400, Program.AppName,
-		GraphicsMode.Default, DisplayDevice.Default);
+void Launcher_Run(void) {
+	static String title = String_FromConst(PROGRAM_APP_NAME);
+	Window_CreateSimple(640, 480);
+	Window_SetTitle(&title);
 	Window_SetVisible(true);
+
 	Drawer2D_Component.Init();
 	Game_UpdateClientSize();
 
@@ -126,81 +191,41 @@ void Run() {
 	Launcher_Framebuffer.Height = Game_Height;
 	Window_InitRaw(&Launcher_Framebuffer);
 
-	Downloader = new AsyncDownloader(Drawer);
-	Downloader.Init("");
-	Downloader.Cookies = new CookieContainer();
-	Downloader.KeepAlive = true;
+	AsyncDownloader_Cookies = true;
+	AsyncDownloader_Component.Init();
 
 	Resources_CheckExistence();
-	checkTask = new UpdateCheckTask();
-	checkTask.RunAsync(this);
+	UpdateCheckTask_Run();
 
 	if (Resources_Count) {
-		SetScreen(new ResourcesScreen(this));
+		Launcher_SetScreen(ResourcesScreen_MakeInstance());
 	} else {
-		SetScreen(new MainScreen(this));
+		Launcher_SetScreen(MainScreen_MakeInstance());
 	}
 
-	while (true) {
+	for (;;) {
 		Window_ProcessEvents();
-		if (!Window_Exists) break;
+		if (!Window_Exists)      break;
 		if (Launcher_ShouldExit) break;
+		LWebTask_Tick(&UpdateCheckTask.Base);
 
-		checkTask.Tick();
 		Launcher_Screen->Tick(Launcher_Screen);
 		if (Launcher_Dirty) Launcher_Display();
 		Thread_Sleep(10);
 	}
 
-	if (Options.Load()) {
-		LauncherSkin.SaveToOptions();
-		Options.Save();
+	if (Launcher_SaveOptions) {
+		Options_Load();
+		Options_Save();
 	}
 
-	if (Launcher_Screen) {
-		Launcher_Screen->Free(Launcher_Screen);
-		Launcher_Screen = NULL;
-	}
-
+	Launcher_Free();
 	if (Launcher_ShouldUpdate)
-		Updater.Applier.ApplyUpdate();
+		Launcher_ApplyUpdate();
 	if (Window_Exists)
 		Window_Close();
 }
 
-void Display() {
-	if (pendingRedraw) {
-		Launcher_RedrawAll();
-		pendingRedraw = false;
-	}
-
-	Launcher_Screen->OnDisplay(Launcher_Screen);
-	Launcher_Dirty = false;
-
-	Rectangle rec = new Rectangle(0, 0, Framebuffer.Width, Framebuffer.Height);
-	if (!fullRedraw && DirtyArea.Width > 0) {
-		rec = DirtyArea;
-	}
-
-	Window_DrawRaw(rec);
-	DirtyArea = Rectangle.Empty;
-	fullRedraw = false;
-}
-
-void KeyDown(Key key) {
-	if (IsShutdown(key)) Launcher_ShouldExit = true;
-}
-
-static bool Launcher_IsShutdown(Key key) {
-	if (key == KEY_F4 && Key_IsAltPressed()) return true;
-
-	/* On OSX, Cmd+Q should also terminate the process */
-#ifdef CC_BUILD_OSX
-	return key == Key.Q && Key_IsWinPressed();
-#else
-	return false;
-#endif
-}
 
 /*########################################################################################################################*
 *---------------------------------------------------------Colours/Skin----------------------------------------------------*
@@ -308,9 +333,8 @@ static void Launcher_ProcessZipEntry(const String* path, struct Stream* data, st
 		res = Png_Decode(&bmp, data);
 
 		if (res) {
-			Launcher_ShowError(res, "decoding default.png"); return;
+			Launcher_ShowError(res, "decoding terrain.png"); return;
 		} else {
-			Drawer2D_SetFontBitmap(&bmp);
 			Launcher_LoadTextures(&bmp);
 		}
 	}
@@ -401,6 +425,10 @@ void Launcher_ResetPixels(void) {
 	Launcher_Dirty = true;
 }
 
+
+/*########################################################################################################################*
+*--------------------------------------------------------Starter/Updater--------------------------------------------------*
+*#########################################################################################################################*/
 static TimeMS lastJoin;
 bool Launcher_StartGame(const String* user, const String* mppass, const String* ip, const String* port, const String* server) {
 #ifdef CC_BUILD_WINDOWS
@@ -426,7 +454,7 @@ bool Launcher_StartGame(const String* user, const String* mppass, const String* 
 		Options_Set("launcher-username", user);
 		Options_Set("launcher-ip",       ip);
 		Options_Set("launcher-port",     port);
-		Launcher_SecureSetOpt("launcher-mppass", mppass, user);
+		Launcher_SaveSecureOpt("launcher-mppass", mppass, user);
 		Options_Save();
 	}
 
@@ -447,4 +475,72 @@ bool Launcher_StartGame(const String* user, const String* mppass, const String* 
 		return false;
 	}
 	return true;
+}
+
+#ifdef CC_BUILD_WIN
+static const char* Update_Script = \
+"@echo off\n" \
+"echo Waiting for launcher to exit..\n" \
+"echo 5..\n" \
+"ping 127.0.0.1 - n 2 > nul\n" \
+"echo 4..\n" \
+"ping 127.0.0.1 - n 2 > nul\n" \
+"echo 3..\n" \
+"ping 127.0.0.1 - n 2 > nul\n" \
+"echo 2..\n" \
+"ping 127.0.0.1 - n 2 > nul\n" \
+"echo 1..\n" \
+"ping 127.0.0.1 - n 2 > nul\n" \
+"echo Copying updated version\n" \
+"move ClassiCube.update ClassiCube.exe\n" \
+"echo Starting launcher again\n" \
+"start ClassiCube.exe\n" \
+"exit\n";
+#else
+static const char* Update_Script = \
+"@#!/bin/bash\n" \
+"echo Waiting for launcher to exit..\n" \
+"echo 5..\n" \
+"sleep 1\n" \
+"echo 4..\n" \
+"sleep 1\n" \
+"echo 3..\n" \
+"sleep 1\n" \
+"echo 2..\n" \
+"sleep 1\n" \
+"echo 1..\n" \
+"sleep 1\n" \
+"echo Copying updated version\n" \
+"mv ./ClassiCube.update ./ClassiCube\n" \
+"echo Starting launcher again\n" \
+"./ClassiCube\n";
+#endif
+
+static void Launcher_ApplyUpdate(void) {
+#ifdef CC_BUILD_WIN
+	static String scriptPath = String_FromConst("update.bat");
+	static String scriptName = String_FromConst("cmd");
+	static String scriptArgs = String_FromConst("/C start cmd /C update.bat");
+#else
+	static String scriptPath = String_FromConst("update.sh");
+	static String scriptName = String_FromConst("xterm");
+	static String scriptArgs = String_FromConst("./update.sh");
+#endif
+	struct Stream s;
+	ReturnCode res;
+
+	res = Stream_CreateFile(&s, &scriptPath);
+	if (res) { Launcher_ShowError(res, "creating update script"); return; }
+
+	/* Can't use WriteLine, want \n as actual newline not code page 437 */
+	res = Stream_Write(&s, Update_Script, sizeof(Update_Script) - 1);
+	if (res) { Launcher_ShowError(res, "writing update script"); return; }
+
+	res = s.Close(&s);
+	if (res) { Launcher_ShowError(res, "closing update script"); return; }
+
+	/* TODO: (open -a Terminal ", '"' + path + '"'); on OSX */
+	/* TODO: chmod +x on non-windows */
+	res = Platform_StartProcess(&scriptName, &scriptArgs);
+	if (res) { Launcher_ShowError(res, "starting update script"); return; }
 }
