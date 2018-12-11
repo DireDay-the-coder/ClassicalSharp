@@ -8,10 +8,6 @@ namespace ClassicalSharp {
 	
 	internal static class Program {
 		
-<<<<<<< HEAD
-
-=======
->>>>>>> parent of d3cf4c25... Revert "Update Program.cs"
 		public const string AppName = "DireCube Client 0.99.9.99";
 		
 		public const int APIVersion = 2;
