@@ -116,6 +116,7 @@ namespace Launcher.Gui.Widgets {
 			}
 		}
 		
+		
 		int DrawColumn(IDrawer2D drawer, string header, int columnI, int x, ColumnFilter filter) {
 			int y = table.Y + 3;
 			int maxWidth = table.ColumnWidths[columnI];
@@ -130,10 +131,13 @@ namespace Launcher.Gui.Widgets {
 			for (int i = table.CurrentIndex; i < table.Count; i++) {
 				TableEntry entry = table.Get(i);
 				args = new DrawTextArgs(filter(entry), font, true);
-				if ((i == table.SelectedIndex || entry.Featured) && !separator) {
+				int players = int.Parse(entry.Players.Substring(0, entry.Players.IndexOf('/')));
+				//int players = int.Parse(entry.Online);
+				
+				if ((i == table.SelectedIndex || entry.Featured || players == 0 || players >= 1 && players < 5 || players >= 5 && players < 10 || players >= 10) && !separator) {
 					int startY = y - 3;
 					int height = Math.Min(startY + (entryHeight + 4), table.Y + table.Height) - startY;
-					drawer.Clear(GetGridCol(entry.Featured, i == table.SelectedIndex), table.X, startY, table.Width, height);
+					drawer.Clear(GetGridCol(entry.Featured, players == 0, players >= 1 && players < 5, players >= 5 && players < 10, players >= 10, i == table.SelectedIndex), table.X, startY, table.Width, height);
 				}				
 				if (!DrawColumnEntry(drawer, ref args, maxWidth, x, ref y, ref entry)) {
 					maxIndex = i; break;
@@ -145,11 +149,27 @@ namespace Launcher.Gui.Widgets {
 			return maxWidth + 5;
 		}
 
-		PackedCol GetGridCol(bool featured, bool selected) {
+        PackedCol GetGridCol(bool featured, bool inactive, bool quiet, bool typical, bool popular, bool selected) {
 			if (featured) {
 				if (selected) return new PackedCol(50, 53, 0);
 				return new PackedCol(101, 107, 0);
 			}
+        	if (quiet) {
+        		if (selected) return new PackedCol(255, 237, 104);
+        		return new PackedCol(210, 199, 71);
+        	}
+        	if (typical) {
+        		if (selected) return new PackedCol(10, 54, 54);
+        		return new PackedCol(10, 104, 54);
+        	}
+        	if (popular) {
+        		if (selected) return new PackedCol(117, 138, 43);
+        		return new PackedCol(177, 255, 62);
+        	}
+        	if (inactive) {
+        		if (selected) return new PackedCol(255, 87, 87);
+        		return new PackedCol(105, 0, 0);
+        	}
 			return foreGridCol;
 		} 
 		
