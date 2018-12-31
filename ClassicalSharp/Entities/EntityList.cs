@@ -17,7 +17,8 @@ namespace ClassicalSharp.Entities {
 		
 		public Entity[] List = new Entity[MaxCount];
 		public Game game;
-		public EntityShadow ShadowMode = EntityShadow.None;
+	    public Player[] Players = new Player[256];
+        public EntityShadow ShadowMode = EntityShadow.None;
 		byte closestId;
 		
 		/// <summary> Mode of how names of hovered entities are rendered (with or without depth testing),

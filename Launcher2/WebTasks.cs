@@ -129,8 +129,11 @@ namespace Launcher.Web {
 			if (obj.ContainsKey("featured")) {
 				entry.Featured = (bool)obj["featured"];
 			}
+			if (obj.ContainsKey("players")) {
+				entry.Players = (string)obj["players"];
+			}
 			if (obj.ContainsKey("country_abbr")) {
-				entry.Flag = Utils.ToLower((string)obj["country_abbr"]);
+				entry.Flag = (string)obj["country_abbr"];
 			}
 			return entry;
 		}

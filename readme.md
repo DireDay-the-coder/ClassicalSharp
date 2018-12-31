@@ -1,15 +1,14 @@
-ClassicalSharp is a custom Minecraft Classic client written in C# that works on Windows, Linux and OSX.
+DireCube is a custom Minecraft Classic client written in C# that works on Windows, Linux and OSX.
 **It is not affiliated with (or supported by) Mojang AB, Minecraft, or Microsoft in any way.**
 
 ![screenshot_n](http://i.imgur.com/FCiwl27.png)
 
 
-You can grab the latest stable binaries [here](https://github.com/UnknownShadow200/ClassicalSharp/releases).
+You can grab the latest stable binaries [here](https://github.com/TheCleverDire/ClassicalSharp/releases).
 
-You can grab the very latest OpenGL build [here](http://cs.classicube.net/latest.zip) and the latest Direct3D 9 build [here](http://cs.classicube.net/latest.DirectX.zip).
-
-#### What ClassicalSharp is
-* Works with both ~~minecraft.net~~(classic has been removed by Mojang) and classicube.net accounts.
+#### What DireCube is
+* Is a fork of classicalsharp that is being actively maintained in C#
+* Works with classicube.net accounts.
 * Lightweight, minimal memory usage compared to the standard client.
 * Works with effectively all graphics cards that support OpenGL or Direct3D 9.
 * Provides single-player support, and both a flatgrass and vanilla-type map generator.
