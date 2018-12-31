@@ -18,8 +18,11 @@ namespace ClassicalSharp.Entities {
 		public byte Flags;
 		/// <summary> True if position is relative to the last position received from server </summary>
 		public bool RelativePos;
-		
-		public static float Clamp(float degrees) {
+	    public bool IncludesPosition;
+	    public bool IncludesOrientation;
+
+
+        public static float Clamp(float degrees) {
 			// Make sure angle is in [0, 360)
 			degrees = degrees % 360;
 			if (degrees < 0) degrees += 360;

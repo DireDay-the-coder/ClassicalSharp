@@ -9,8 +9,8 @@ namespace ClassicalSharp.Model {
 	public class ChibiModel : HumanoidModel {
 		
 		public ChibiModel(Game game) : base(game) {
-			MaxScale = 3.0f;
-			ShadowScale = 0.5f;
+			MaxScale = 7.0f;
+			ShadowScale = 0.005f;
 		}
 		
 		const float size = 0.5f;

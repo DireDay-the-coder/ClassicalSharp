@@ -53,7 +53,8 @@ namespace ClassicalSharp {
 		public IServerConnection Server;
 		
 		public EntityList Entities;
-		public LocalPlayer LocalPlayer;
+	    public EntityList Players;
+        public LocalPlayer LocalPlayer;
 		public TabList TabList;
 
 		public Camera Camera;
