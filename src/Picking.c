@@ -6,7 +6,8 @@
 #include "World.h"
 #include "Funcs.h"
 #include "Block.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
+#include "Camera.h"
 
 static float pickedPos_dist;
 static void PickedPos_TestAxis(struct PickedPos* pos, float dAxis, Face fAxis) {
@@ -185,7 +186,7 @@ static bool Picking_RayTrace(Vector3 origin, Vector3 dir, float reach, struct Pi
 		RayTracer_Step(&tracer);
 	}
 
-	ErrorHandler_Fail("Something went wrong, did over 25,000 iterations in Picking_RayTrace()");
+	Logger_Abort("Something went wrong, did over 25,000 iterations in Picking_RayTrace()");
 	return false;
 }
 
@@ -240,7 +241,7 @@ void Picking_CalculatePickedBlock(Vector3 origin, Vector3 dir, float reach, stru
 }
 
 void Picking_ClipCameraPos(Vector3 origin, Vector3 dir, float reach, struct PickedPos* pos) {
-	bool noClip = !Game_CameraClipping || LocalPlayer_Instance.Hacks.Noclip;
+	bool noClip = !Camera_Clipping || LocalPlayer_Instance.Hacks.Noclip;
 	if (noClip || !Picking_RayTrace(origin, dir, reach, pos, Picking_ClipCamera)) {
 		PickedPos_SetAsInvalid(pos);
 		Vector3_Mul1(&pos->Intersect, &dir, reach);             /* intersect = dir * reach */

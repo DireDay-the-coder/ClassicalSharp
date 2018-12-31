@@ -198,7 +198,7 @@ void Block_DefineCustom(BlockID block) {
 
 	Inventory_AddDefault(block);
 	Block_SetCustomDefined(block, true);
-	Event_RaiseVoid(&BlockEvents_BlockDefChanged);
+	Event_RaiseVoid(&BlockEvents.BlockDefChanged);
 }
 
 static void Block_RecalcIsLiquid(BlockID b) {
@@ -240,9 +240,9 @@ void Block_SetDrawType(BlockID block, DrawType draw) {
 "_Iron_Double slab_Slab_Brick_TNT_Bookshelf_Mossy rocks_Obsidian_Cobblestone slab_Rope_Sandstone_Snow_Fire_Light pink"\
 "_Forest green_Brown_Deep blue_Turquoise_Ice_Ceramic tile_Magma_Pillar_Crate_Stone brick"
 
-static String Block_DefaultName(BlockID block) {
-	static String names   = String_FromConst(BLOCK_RAW_NAMES);
-	static String invalid = String_FromConst("Invalid");
+const static String Block_DefaultName(BlockID block) {
+	const static String names   = String_FromConst(BLOCK_RAW_NAMES);
+	const static String invalid = String_FromConst("Invalid");
 	int i, start = 0, end;
 
 	if (block >= BLOCK_CPE_COUNT) return invalid;
@@ -257,7 +257,7 @@ static String Block_DefaultName(BlockID block) {
 }
 
 void Block_ResetProps(BlockID block) {
-	String name = Block_DefaultName(block);
+	const String name = Block_DefaultName(block);
 
 	Block_BlocksLight[block] = DefaultSet_BlocksLight(block);
 	Block_FullBright[block] = DefaultSet_FullBright(block);
@@ -318,7 +318,7 @@ int Block_FindID(const String* name) {
 
 int Block_Parse(const String* name) {
 	int b;
-	if (Convert_TryParseInt(name, &b) && b < BLOCK_COUNT) return b;
+	if (Convert_ParseInt(name, &b) && b < BLOCK_COUNT) return b;
 	return Block_FindID(name);
 }
 
@@ -561,6 +561,7 @@ void Block_UpdateCulling(BlockID block) {
 /*########################################################################################################################*
 *-------------------------------------------------------AutoRotate--------------------------------------------------------*
 *#########################################################################################################################*/
+bool AutoRotate_Enabled;
 static BlockID AutoRotate_Find(BlockID block, const String* name, const char* suffix) {
 	String str; char strBuffer[STRING_SIZE * 2];
 	int rotated;	
@@ -689,8 +690,10 @@ static void Blocks_Init(void) {
 		Block_CanPlace[block]  = true;
 		Block_CanDelete[block] = true;
 	}
+
+	AutoRotate_Enabled = true;
 	Blocks_Reset();
-	Event_RegisterVoid(&TextureEvents_AtlasChanged, NULL, Blocks_AtlasChanged);
+	Event_RegisterVoid(&TextureEvents.AtlasChanged, NULL, Blocks_AtlasChanged);
 
 	Block_CanPlace[BLOCK_AIR] = false;         Block_CanDelete[BLOCK_AIR] = false;
 	Block_CanPlace[BLOCK_LAVA] = false;        Block_CanDelete[BLOCK_LAVA] = false;
@@ -701,7 +704,7 @@ static void Blocks_Init(void) {
 }
 
 static void Blocks_Free(void) {
-	Event_UnregisterVoid(&TextureEvents_AtlasChanged, NULL, Blocks_AtlasChanged);
+	Event_UnregisterVoid(&TextureEvents.AtlasChanged, NULL, Blocks_AtlasChanged);
 }
 
 struct IGameComponent Blocks_Component = {

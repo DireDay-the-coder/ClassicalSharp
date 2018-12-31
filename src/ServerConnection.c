@@ -5,7 +5,7 @@
 #include "Chat.h"
 #include "Block.h"
 #include "Event.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Funcs.h"
 #include "Entity.h"
 #include "Graphics.h"
@@ -17,7 +17,7 @@
 #include "Camera.h"
 #include "TexturePack.h"
 #include "Menus.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "PacketHandlers.h"
 #include "Inventory.h"
 #include "Platform.h"
@@ -60,7 +60,7 @@ void ServerConnection_RetrieveTexturePack(const String* url) {
 }
 
 void ServerConnection_DownloadTexturePack(const String* url) {
-	static String texPack = String_FromConst("texturePack");
+	const static String texPack = String_FromConst("texturePack");
 	String etag; char etagBuffer[STRING_SIZE];
 	TimeMS lastModified;
 
@@ -74,15 +74,15 @@ void ServerConnection_DownloadTexturePack(const String* url) {
 	}
 
 	TexturePack_ExtractCurrent(url);
-	AsyncDownloader_GetDataEx(url, true, &texPack, &lastModified, &etag);
+	Http_AsyncGetDataEx(url, true, &texPack, &lastModified, &etag);
 }
 
 void ServerConnection_CheckAsyncResources(void) {
-	static String texPack = String_FromConst("texturePack");
-	struct AsyncRequest item;
-	if (!AsyncDownloader_Get(&texPack, &item)) return;
+	const static String texPack = String_FromConst("texturePack");
+	struct HttpRequest item;
+	if (!Http_GetResult(&texPack, &item)) return;
 
-	if (item.ResultData) {
+	if (item.Success) {
 		TexturePack_Extract_Req(&item);
 	} else if (item.Result) {
 		Chat_Add1("&cError %i when trying to download texture pack", &item.Result);
@@ -145,7 +145,7 @@ int PingList_AveragePingMs(void) {
 *#########################################################################################################################*/
 #define SP_HasDir(path) (String_IndexOf(&path, '/', 0) >= 0 || String_IndexOf(&path, '\\', 0) >= 0)
 static void SPConnection_BeginConnect(void) {
-	static String logName = String_FromConst("Singleplayer");
+	const static String logName = String_FromConst("Singleplayer");
 	String path;
 	RNGState rnd;
 	int i, count;
@@ -158,7 +158,7 @@ static void SPConnection_BeginConnect(void) {
 		Block_CanPlace[i]  = true;
 		Block_CanDelete[i] = true;
 	}
-	Event_RaiseVoid(&BlockEvents_PermissionsChanged);
+	Event_RaiseVoid(&BlockEvents.PermissionsChanged);
 
 	/* For when user drops a map file onto ClassiCube.exe */
 	path = Game_Username;
@@ -221,7 +221,7 @@ static void SPConnection_SendChat(const String* text) {
 }
 
 static void SPConnection_SendPosition(Vector3 pos, float rotY, float headX) { }
-static void SPConnection_SendPlayerClick(MouseButton button, bool isDown, EntityID targetId, struct PickedPos* pos) { }
+static void SPConnection_SendPlayerClick(MouseButton button, bool pressed, EntityID targetId, struct PickedPos* pos) { }
 
 static void SPConnection_Tick(struct ScheduledTask* task) {
 	if (ServerConnection_Disconnected) return;
@@ -274,7 +274,7 @@ static TimeMS net_connectTimeout;
 static void ServerConnection_Free(void);
 static void MPConnection_FinishConnect(void) {
 	net_connecting = false;
-	Event_RaiseFloat(&WorldEvents_Loading, 0.0f);
+	Event_RaiseFloat(&WorldEvents.Loading, 0.0f);
 	net_readCurrent = net_readBuffer;
 	ServerConnection_WriteBuffer = net_writeBuffer;
 
@@ -285,7 +285,7 @@ static void MPConnection_FinishConnect(void) {
 }
 
 static void MPConnection_FailConnect(ReturnCode result) {
-	static String reason = String_FromConst("You failed to connect to the server. It's probably down!");
+	const static String reason = String_FromConst("You failed to connect to the server. It's probably down!");
 	String msg; char msgBuffer[STRING_SIZE * 2];
 
 	net_connecting = false;
@@ -293,7 +293,7 @@ static void MPConnection_FailConnect(ReturnCode result) {
 
 	if (result) {
 		String_Format3(&msg, "Error connecting to %s:%i: %i", &Game_IPAddress, &Game_Port, &result);
-		ErrorHandler_Log(&msg);
+		Logger_Log(&msg);
 		msg.length = 0;
 	}
 
@@ -311,7 +311,7 @@ static void MPConnection_TickConnect(void) {
 	if (res) { MPConnection_FailConnect(res); return; }
 
 	now = DateTime_CurrentUTC_MS();
-	Socket_Select(net_socket, SOCKET_SELECT_WRITE, &poll_write);
+	Socket_Poll(net_socket, SOCKET_POLL_WRITE, &poll_write);
 
 	if (poll_write) {
 		Socket_SetBlocking(net_socket, true);
@@ -320,7 +320,7 @@ static void MPConnection_TickConnect(void) {
 		MPConnection_FailConnect(0);
 	} else {
 		int leftMS = (int)(net_connectTimeout - now);
-		Event_RaiseFloat(&WorldEvents_Loading, (float)leftMS / NET_TIMEOUT_MS);
+		Event_RaiseFloat(&WorldEvents.Loading, (float)leftMS / NET_TIMEOUT_MS);
 	}
 }
 
@@ -370,36 +370,37 @@ static void MPConnection_SendPosition(Vector3 pos, float rotY, float headX) {
 	Net_SendPacket();
 }
 
-static void MPConnection_SendPlayerClick(MouseButton button, bool buttonDown, EntityID targetId, struct PickedPos* pos) {
-	CPE_WritePlayerClick(button, buttonDown, targetId, pos);
+static void MPConnection_SendPlayerClick(MouseButton button, bool pressed, EntityID targetId, struct PickedPos* pos) {
+	CPE_WritePlayerClick(button, pressed, targetId, pos);
 	Net_SendPacket();
 }
 
 static void MPConnection_CheckDisconnection(double delta) {
-	static String title  = String_FromConst("Disconnected!");
-	static String reason = String_FromConst("You've lost connection to the server");
+	const static String title  = String_FromConst("Disconnected!");
+	const static String reason = String_FromConst("You've lost connection to the server");
 
 	ReturnCode availRes, selectRes;
 	uint32_t pending = 0;
-	bool poll_success;
+	bool poll_read;
 
 	net_discAccumulator += delta;
 	if (net_discAccumulator < 1.0) return;
 	net_discAccumulator = 0.0;
 
 	availRes  = Socket_Available(net_socket, &pending);
-	selectRes = Socket_Select(net_socket, SOCKET_SELECT_READ, &poll_success);
+	/* poll read returns true when socket is closed */
+	selectRes = Socket_Poll(net_socket, SOCKET_POLL_READ, &poll_read);
 
-	if (net_writeFailed || availRes || selectRes || (pending == 0 && poll_success)) {	
+	if (net_writeFailed || availRes || selectRes || (pending == 0 && poll_read)) {	
 		Game_Disconnect(&title, &reason);
 	}
 }
 
 static void MPConnection_Tick(struct ScheduledTask* task) {
-	static String title_lost  = String_FromConst("&eLost connection to the server");
-	static String reason_err  = String_FromConst("I/O error when reading packets");
-	static String title_disc  = String_FromConst("Disconnected");
-	static String msg_invalid = String_FromConst("Server sent invalid packet!");
+	const static String title_lost  = String_FromConst("&eLost connection to the server");
+	const static String reason_err  = String_FromConst("I/O error when reading packets");
+	const static String title_disc  = String_FromConst("Disconnected");
+	const static String msg_invalid = String_FromConst("Server sent invalid packet!");
 	String msg; char msgBuffer[STRING_SIZE * 2];
 
 	struct LocalPlayer* p;
@@ -434,7 +435,7 @@ static void MPConnection_Tick(struct ScheduledTask* task) {
 		String_InitArray(msg, msgBuffer);
 		String_Format3(&msg, "Error reading from %s:%i: %i", &Game_IPAddress, &Game_Port, &res);
 
-		ErrorHandler_Log(&msg);
+		Logger_Log(&msg);
 		Game_Disconnect(&title_lost, &reason_err);
 		return;
 	}
@@ -560,7 +561,7 @@ static void ServerConnection_Init(void) {
 
 	Gfx_LostContextFunction = ServerConnection.Tick;
 	ScheduledTask_Add(GAME_NET_TICKS, ServerConnection.Tick);
-	String_AppendConst(&ServerConnection_AppName, PROGRAM_APP_NAME);
+	String_AppendConst(&ServerConnection_AppName, GAME_APP_NAME);
 }
 
 static void ServerConnection_Free(void) {

@@ -11,57 +11,93 @@
 #include "Window.h"
 #include "GameStructs.h"
 #include "Event.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
+#include "ExtMath.h"
+#include "Funcs.h"
+#include "Logger.h"
 
 struct LScreen* Launcher_Screen;
-bool Launcher_Dirty;
-Rect2D Launcher_DirtyArea;
+Rect2D Launcher_Dirty;
 Bitmap Launcher_Framebuffer;
 bool Launcher_ClassicBackground;
 FontDesc Launcher_TitleFont, Launcher_TextFont, Launcher_HintFont;
 
-static bool fullRedraw, pendingRedraw;
+static bool pendingRedraw;
 static FontDesc logoFont;
 
-bool Launcher_ShouldExit, Launcher_ShouldUpdate, Launcher_SaveOptions;
-TimeMS Launcher_PatchTime;
+bool Launcher_ShouldExit, Launcher_ShouldUpdate;
 static void Launcher_ApplyUpdate(void);
-
-
-void Launcher_ShowError(ReturnCode res, const char* place) {
-	String msg; char msgBuffer[STRING_SIZE * 2];
-	String_InitArray_NT(msg, msgBuffer);
-
-	String_Format2(&msg, "Error %x when %c", &res, place);
-	msg.buffer[msg.length] = '\0';
-	Window_ShowDialog("Error", msg.buffer);
-}
 
 void Launcher_SetScreen(struct LScreen* screen) {
 	if (Launcher_Screen) Launcher_Screen->Free(Launcher_Screen);
-	Launcher_ResetPixels();
 	Launcher_Screen = screen;
 
 	screen->Init(screen);
+	screen->Reposition(screen);
 	/* for hovering over active button etc */
 	screen->MouseMove(screen, 0, 0);
+
+	Launcher_Redraw();
+}
+
+CC_NOINLINE static void Launcher_StartFromInfo(struct ServerInfo* info) {
+	String port; char portBuffer[STRING_INT_CHARS];
+	String_InitArray(port, portBuffer);
+
+	String_AppendInt(&port, info->Port);
+	Launcher_StartGame(&SignInTask.Username, &info->Mppass, &info->IP, &port, &info->Name);
+}
+
+bool Launcher_ConnectToServer(const String* hash) {
+	int i;
+	struct ServerInfo* info;
+	if (!hash->length) return false;
+
+	for (i = 0; i < FetchServersTask.NumServers; i++) {
+		info = &FetchServersTask.Servers[i];
+		if (!String_Equals(hash, &info->Hash)) continue;
+
+		Launcher_StartFromInfo(info);
+		return true;
+	}
+
+	/* Fallback to private server handling */
+	/* TODO: Rewrite to be async */
+	FetchServerTask_Run(hash);
+
+	while (!FetchServerTask.Base.Completed) { 
+		LWebTask_Tick(&FetchServerTask.Base);
+		Thread_Sleep(10); 
+	}
+
+	if (FetchServerTask.Server.Hash.length) {
+		Launcher_StartFromInfo(&FetchServerTask.Server);
+		return true;
+	} else if (FetchServerTask.Base.Res) {
+		Logger_Warn(FetchServerTask.Base.Res, "fetching server info");
+	} else if (FetchServerTask.Base.Status != 200) {
+		/* TODO: Use a better dialog message.. */
+		Logger_Warn(FetchServerTask.Base.Status, "fetching server info");
+	} else {
+		Window_ShowDialog("Failed to connect", "No server has that hash");
+	}
+	return true;
 }
 
 
 /*########################################################################################################################*
 *---------------------------------------------------------Event handler---------------------------------------------------*
 *#########################################################################################################################*/
-static void Launcher_RedrawAll(void* obj) {
-	Launcher_ResetPixels();
-	if (Launcher_Screen) Launcher_Screen->DrawAll(Launcher_Screen);
-	fullRedraw = true;
+static void Launcher_MaybeRedraw(void* obj) {
+	/* Only redraw when launcher has been initialised */
+	if (Launcher_Screen) Launcher_Redraw();
 }
 
 static void Launcher_ReqeustRedraw(void* obj) {
 	/* We may get multiple Redraw events in short timespan */
 	/* So we just request a redraw at next launcher tick */
 	pendingRedraw  = true;
-	Launcher_Dirty = true;
+	Launcher_MarkAllDirty();
 }
 
 static void Launcher_OnResize(void* obj) {
@@ -70,7 +106,8 @@ static void Launcher_OnResize(void* obj) {
 	Launcher_Framebuffer.Height = Game_Height;
 
 	Window_InitRaw(&Launcher_Framebuffer);
-	Launcher_RedrawAll(NULL);
+	if (Launcher_Screen) Launcher_Screen->Reposition(Launcher_Screen);
+	Launcher_Redraw();
 }
 
 static bool Launcher_IsShutdown(int key) {
@@ -78,15 +115,19 @@ static bool Launcher_IsShutdown(int key) {
 
 	/* On OSX, Cmd+Q should also terminate the process */
 #ifdef CC_BUILD_OSX
-	return key == Key.Q && Key_IsWinPressed();
+	return key == KEY_Q && Key_IsWinPressed();
 #else
 	return false;
 #endif
 }
 
-static void Launcher_KeyDown(void* obj, int key) {
+static void Launcher_KeyDown(void* obj, int key, bool was) {
 	if (Launcher_IsShutdown(key)) Launcher_ShouldExit = true;
-	Launcher_Screen->KeyDown(Launcher_Screen, key);
+	Launcher_Screen->KeyDown(Launcher_Screen, key, was);
+}
+
+static void Launcher_KeyPress(void* obj, int c) {
+	Launcher_Screen->KeyPress(Launcher_Screen, c);
 }
 
 static void Launcher_MouseDown(void* obj, int btn) {
@@ -98,7 +139,12 @@ static void Launcher_MouseUp(void* obj, int btn) {
 }
 
 static void Launcher_MouseMove(void* obj, int deltaX, int deltaY) {
+	if (!Launcher_Screen) return;
 	Launcher_Screen->MouseMove(Launcher_Screen, deltaX, deltaY);
+}
+
+static void Launcher_MouseWheel(void* obj, float delta) {
+	Launcher_Screen->MouseWheel(Launcher_Screen, delta);
 }
 
 
@@ -106,44 +152,37 @@ static void Launcher_MouseMove(void* obj, int deltaX, int deltaY) {
 *-----------------------------------------------------------Main body-----------------------------------------------------*
 *#########################################################################################################################*/
 static void Launcher_Display(void) {
-	Rect2D r;
 	if (pendingRedraw) {
-		Launcher_RedrawAll(NULL);
+		Launcher_Redraw();
 		pendingRedraw = false;
 	}
 
 	Launcher_Screen->OnDisplay(Launcher_Screen);
-	Launcher_Dirty = false;
+	Window_DrawRaw(Launcher_Dirty);
 
-	r.X = 0; r.Width  = Launcher_Framebuffer.Width;
-	r.Y = 0; r.Height = Launcher_Framebuffer.Height;
-
-	if (!fullRedraw && Launcher_DirtyArea.Width) r = Launcher_DirtyArea;
-	Window_DrawRaw(r);
-	fullRedraw = false;
-
-	r.X = 0; r.Width   = 0;
-	r.Y = 0; r.Height  = 0;
-	Launcher_DirtyArea = r;
+	Launcher_Dirty.X = 0; Launcher_Dirty.Width   = 0;
+	Launcher_Dirty.Y = 0; Launcher_Dirty.Height  = 0;
 }
 
 static void Launcher_Init(void) {
 	BitmapCol col = BITMAPCOL_CONST(125, 125, 125, 255);
 
-	Event_RegisterVoid(&WindowEvents_Resized,      NULL, Launcher_OnResize);
-	Event_RegisterVoid(&WindowEvents_StateChanged, NULL, Launcher_OnResize);
-	Event_RegisterVoid(&WindowEvents_FocusChanged, NULL, Launcher_RedrawAll);
-	Event_RegisterVoid(&WindowEvents_Redraw,       NULL, Launcher_ReqeustRedraw);
+	Event_RegisterVoid(&WindowEvents.Resized,      NULL, Launcher_OnResize);
+	Event_RegisterVoid(&WindowEvents.StateChanged, NULL, Launcher_OnResize);
+	Event_RegisterVoid(&WindowEvents.FocusChanged, NULL, Launcher_MaybeRedraw);
+	Event_RegisterVoid(&WindowEvents.Redraw,       NULL, Launcher_ReqeustRedraw);
 
-	Event_RegisterInt(&KeyEvents_Down,          NULL, Launcher_KeyDown);
-	Event_RegisterInt(&MouseEvents_Down,        NULL, Launcher_MouseDown);
-	Event_RegisterInt(&MouseEvents_Up,          NULL, Launcher_MouseUp);
-	Event_RegisterMouseMove(&MouseEvents_Moved, NULL, Launcher_MouseMove);
+	Event_RegisterInput(&KeyEvents.Down,        NULL, Launcher_KeyDown);
+	Event_RegisterInt(&KeyEvents.Press,         NULL, Launcher_KeyPress);
+	Event_RegisterInt(&MouseEvents.Down,        NULL, Launcher_MouseDown);
+	Event_RegisterInt(&MouseEvents.Up,          NULL, Launcher_MouseUp);
+	Event_RegisterMouseMove(&MouseEvents.Moved, NULL, Launcher_MouseMove);
+	Event_RegisterFloat(&MouseEvents.Wheel,     NULL, Launcher_MouseWheel);
 
-	Font_Make(&logoFont,           &Drawer2D_FontName, 32, FONT_STYLE_NORMAL);
-	Font_Make(&Launcher_TitleFont, &Drawer2D_FontName, 16, FONT_STYLE_BOLD);
-	Font_Make(&Launcher_TextFont,  &Drawer2D_FontName, 14, FONT_STYLE_NORMAL);
-	Font_Make(&Launcher_HintFont,  &Drawer2D_FontName, 12, FONT_STYLE_ITALIC);
+	Drawer2D_MakeFont(&logoFont,           32, FONT_STYLE_NORMAL);
+	Drawer2D_MakeFont(&Launcher_TitleFont, 16, FONT_STYLE_BOLD);
+	Drawer2D_MakeFont(&Launcher_TextFont,  14, FONT_STYLE_NORMAL);
+	Drawer2D_MakeFont(&Launcher_HintFont,  12, FONT_STYLE_ITALIC);
 
 	Drawer2D_Cols['g'] = col;
 	Utils_EnsureDirectory("texpacks");
@@ -151,21 +190,19 @@ static void Launcher_Init(void) {
 }
 
 static void Launcher_Free(void) {
-	int i;
-	Event_UnregisterVoid(&WindowEvents_Resized,      NULL, Launcher_OnResize);
-	Event_UnregisterVoid(&WindowEvents_StateChanged, NULL, Launcher_OnResize);
-	Event_UnregisterVoid(&WindowEvents_FocusChanged, NULL, Launcher_RedrawAll);
-	Event_UnregisterVoid(&WindowEvents_Redraw,       NULL, Launcher_ReqeustRedraw);
+	Event_UnregisterVoid(&WindowEvents.Resized,      NULL, Launcher_OnResize);
+	Event_UnregisterVoid(&WindowEvents.StateChanged, NULL, Launcher_OnResize);
+	Event_UnregisterVoid(&WindowEvents.FocusChanged, NULL, Launcher_MaybeRedraw);
+	Event_UnregisterVoid(&WindowEvents.Redraw,       NULL, Launcher_ReqeustRedraw);
 	
-	Event_UnregisterInt(&KeyEvents_Down,          NULL, Launcher_KeyDown);
-	Event_UnregisterInt(&MouseEvents_Down,        NULL, Launcher_MouseDown);
-	Event_UnregisterInt(&MouseEvents_Up,          NULL, Launcher_MouseUp);
-	Event_UnregisterMouseMove(&MouseEvents_Moved, NULL, Launcher_MouseMove);
+	Event_UnregisterInput(&KeyEvents.Down,        NULL, Launcher_KeyDown);
+	Event_UnregisterInt(&KeyEvents.Press,         NULL, Launcher_KeyPress);
+	Event_UnregisterInt(&MouseEvents.Down,        NULL, Launcher_MouseDown);
+	Event_UnregisterInt(&MouseEvents.Up,          NULL, Launcher_MouseUp);
+	Event_UnregisterMouseMove(&MouseEvents.Moved, NULL, Launcher_MouseMove);
+	Event_UnregisterFloat(&MouseEvents.Wheel,     NULL, Launcher_MouseWheel);
 
-	for (i = 0; i < FetchFlagsTask.NumDownloaded; i++) {
-		Mem_Free(FetchFlagsTask.Bitmaps[i].Scan0);
-	}
-
+	Flags_Free();
 	Font_Free(&logoFont);
 	Font_Free(&Launcher_TitleFont);
 	Font_Free(&Launcher_TextFont);
@@ -176,14 +213,16 @@ static void Launcher_Free(void) {
 }
 
 void Launcher_Run(void) {
-	static String title = String_FromConst(PROGRAM_APP_NAME);
-	Window_CreateSimple(640, 480);
+	const static String title = String_FromConst(GAME_APP_NAME);
+	Window_CreateSimple(640, 400);
 	Window_SetTitle(&title);
 	Window_SetVisible(true);
 
 	Drawer2D_Component.Init();
 	Game_UpdateClientSize();
+	Drawer2D_BitmappedText = false;
 
+	Launcher_LoadSkin();
 	Launcher_Init();
 	Launcher_TryLoadTexturePack();
 
@@ -191,11 +230,11 @@ void Launcher_Run(void) {
 	Launcher_Framebuffer.Height = Game_Height;
 	Window_InitRaw(&Launcher_Framebuffer);
 
-	AsyncDownloader_Cookies = true;
-	AsyncDownloader_Component.Init();
+	Http_UseCookies = true;
+	Http_Component.Init();
 
 	Resources_CheckExistence();
-	UpdateCheckTask_Run();
+	CheckUpdateTask_Run();
 
 	if (Resources_Count) {
 		Launcher_SetScreen(ResourcesScreen_MakeInstance());
@@ -205,16 +244,14 @@ void Launcher_Run(void) {
 
 	for (;;) {
 		Window_ProcessEvents();
-		if (!Window_Exists)      break;
-		if (Launcher_ShouldExit) break;
-		LWebTask_Tick(&UpdateCheckTask.Base);
+		if (!Window_Exists || Launcher_ShouldExit) break;
 
 		Launcher_Screen->Tick(Launcher_Screen);
-		if (Launcher_Dirty) Launcher_Display();
+		if (Launcher_Dirty.Width) Launcher_Display();
 		Thread_Sleep(10);
 	}
 
-	if (Launcher_SaveOptions) {
+	if (Options_HasAnyChanged()) {
 		Options_Load();
 		Options_Save();
 	}
@@ -290,7 +327,6 @@ void Launcher_SaveSkin(void) {
 /*########################################################################################################################*
 *----------------------------------------------------------Background-----------------------------------------------------*
 *#########################################################################################################################*/
-static FontDesc logoFont;
 static bool useBitmappedFont;
 static Bitmap terrainBmp, fontBmp;
 #define TILESIZE 48
@@ -308,36 +344,42 @@ static void Launcher_LoadTextures(Bitmap* bmp) {
 	/* Precompute the scaled background */
 	Drawer2D_BmpScaled(&terrainBmp, TILESIZE, 0, TILESIZE, TILESIZE,
 						bmp, 2 * tileSize, 0, tileSize, tileSize,
-						TILESIZE, TILESIZE, 128, 64);
+						TILESIZE, TILESIZE);
 	Drawer2D_BmpScaled(&terrainBmp, 0, 0, TILESIZE, TILESIZE,
 						bmp, 1 * tileSize, 0, tileSize, tileSize,
-						TILESIZE, TILESIZE, 96, 96);					
+						TILESIZE, TILESIZE);
+
+	Gradient_Tint(&terrainBmp, 128, 64,
+				  TILESIZE, 0, TILESIZE, TILESIZE);
+	Gradient_Tint(&terrainBmp, 96, 96,
+				  0,        0, TILESIZE, TILESIZE);
 }
 
-static void Launcher_ProcessZipEntry(const String* path, struct Stream* data, struct ZipEntry* entry) {
+static ReturnCode Launcher_ProcessZipEntry(const String* path, struct Stream* data, struct ZipState* s) {
 	Bitmap bmp;
 	ReturnCode res;
 
 	if (String_CaselessEqualsConst(path, "default.png")) {
-		if (fontBmp.Scan0) return;
+		if (fontBmp.Scan0) return 0;
 		res = Png_Decode(&fontBmp, data);
 
 		if (res) {
-			Launcher_ShowError(res, "decoding default.png"); return;
+			Logger_Warn(res, "decoding default.png"); return res;
 		} else {
 			Drawer2D_SetFontBitmap(&fontBmp);
 			useBitmappedFont = !Options_GetBool(OPT_USE_CHAT_FONT, false);
 		}
 	} else if (String_CaselessEqualsConst(path, "terrain.png")) {
-		if (terrainBmp.Scan0) return;
+		if (terrainBmp.Scan0) return 0;
 		res = Png_Decode(&bmp, data);
 
 		if (res) {
-			Launcher_ShowError(res, "decoding terrain.png"); return;
+			Logger_Warn(res, "decoding terrain.png"); return res;
 		} else {
 			Launcher_LoadTextures(&bmp);
 		}
 	}
+	return 0;
 }
 
 static void Launcher_ExtractTexturePack(const String* path) {
@@ -347,7 +389,7 @@ static void Launcher_ExtractTexturePack(const String* path) {
 
 	res = Stream_OpenFile(&stream, path);
 	if (res) {
-		Launcher_ShowError(res, "opening texture pack"); return;
+		Logger_Warn(res, "opening texture pack"); return;
 	}
 
 	Zip_Init(&state, &stream);
@@ -356,13 +398,13 @@ static void Launcher_ExtractTexturePack(const String* path) {
 	res = Zip_Extract(&state);
 
 	if (res) {
-		Launcher_ShowError(res, "extracting texture pack");
+		Logger_Warn(res, "extracting texture pack");
 	}
 	stream.Close(&stream);
 }
 
 void Launcher_TryLoadTexturePack(void) {
-	static String defZipPath = String_FromConst("texpacks/default.zip");
+	const static String defZipPath = String_FromConst("texpacks/default.zip");
 	String path; char pathBuffer[FILENAME_SIZE];
 	String texPack;
 
@@ -397,13 +439,19 @@ void Launcher_ResetArea(int x, int y, int width, int height) {
 	} else {
 		Gradient_Noise(&Launcher_Framebuffer, Launcher_BackgroundCol, 6, x, y, width, height);
 	}
+	Launcher_MarkDirty(x, y, width, height);
 }
 
 void Launcher_ResetPixels(void) {
-	static String title_fore = String_FromConst("&eClassi&fCube");
-	static String title_back = String_FromConst("&0Classi&0Cube");
+	const static String title_fore = String_FromConst("&eClassi&fCube");
+	const static String title_back = String_FromConst("&0Classi&0Cube");
 	struct DrawTextArgs args;
 	int x;
+
+	if (Launcher_Screen && Launcher_Screen->HidesTitlebar) {
+		Launcher_ResetArea(0, 0, Game_Width, Game_Height);
+		return;
+	}
 
 	if (Launcher_ClassicBackground && terrainBmp.Scan0) {
 		Launcher_ClearTile(0,        0, Game_Width,               TILESIZE, TILESIZE);
@@ -414,7 +462,7 @@ void Launcher_ResetPixels(void) {
 
 	Drawer2D_BitmappedText = (useBitmappedFont || Launcher_ClassicBackground) && fontBmp.Scan0;
 	DrawTextArgs_Make(&args, &title_fore, &logoFont, false);
-	x = Game_Width / 2 - Drawer2D_MeasureText(&args).Width / 2;
+	x = Game_Width / 2 - Drawer2D_TextWidth(&args) / 2;
 
 	args.Text = title_back;
 	Drawer2D_DrawText(&Launcher_Framebuffer, &args, x + 4, 4);
@@ -422,7 +470,38 @@ void Launcher_ResetPixels(void) {
 	Drawer2D_DrawText(&Launcher_Framebuffer, &args, x, 0);
 
 	Drawer2D_BitmappedText = false;
-	Launcher_Dirty = true;
+	Launcher_MarkAllDirty();
+}
+
+void Launcher_Redraw(void) {
+	Launcher_ResetPixels();
+	Launcher_Screen->Draw(Launcher_Screen);
+	Launcher_MarkAllDirty();
+}
+
+void Launcher_MarkDirty(int x, int y, int width, int height) {
+	int x1, y1, x2, y2;
+	if (!Drawer2D_Clamp(&Launcher_Framebuffer, &x, &y, &width, &height)) return;
+
+	/* union with existing dirty area */
+	if (Launcher_Dirty.Width) {
+		x1 = min(x, Launcher_Dirty.X);
+		y1 = min(y, Launcher_Dirty.Y);
+
+		x2 = max(x + width, Launcher_Dirty.X + Launcher_Dirty.Width);
+		y2 = max(y + width, Launcher_Dirty.Y + Launcher_Dirty.Height);
+
+		x = x1; width  = x2 - x1;
+		y = y1; height = y2 - y1;
+	}
+
+	Launcher_Dirty.X = x; Launcher_Dirty.Width  = width;
+	Launcher_Dirty.Y = y; Launcher_Dirty.Height = height;
+}
+
+void Launcher_MarkAllDirty(void) {
+	Launcher_Dirty.X = 0; Launcher_Dirty.Width  = Launcher_Framebuffer.Width;
+	Launcher_Dirty.Y = 0; Launcher_Dirty.Height = Launcher_Framebuffer.Height;
 }
 
 
@@ -431,74 +510,70 @@ void Launcher_ResetPixels(void) {
 *#########################################################################################################################*/
 static TimeMS lastJoin;
 bool Launcher_StartGame(const String* user, const String* mppass, const String* ip, const String* port, const String* server) {
-#ifdef CC_BUILD_WINDOWS
-	static String exe = String_FromConst("ClassiCube.exe");
-#else
-	static String exe = String_FromConst("ClassiCube");
-#endif
+	String path; char pathBuffer[FILENAME_SIZE];
 	String args; char argsBuffer[512];
 	TimeMS now;
 	ReturnCode res;
 	
 	now = DateTime_CurrentUTC_MS();
-	if (lastJoin + 1000 < now) return false;
+	if (lastJoin + 1000 > now) return false;
 	lastJoin = now;
 
 	/* Make sure if the client has changed some settings in the meantime, we keep the changes */
 	Options_Load();
-	Launcher_ShouldExit = Options_GetBool(OPT_AUTO_CLOSE_LAUNCHER, false);
 
 	/* Save resume info */
-	if (server) {
+	if (server->length) {
 		Options_Set("launcher-server",   server);
 		Options_Set("launcher-username", user);
 		Options_Set("launcher-ip",       ip);
 		Options_Set("launcher-port",     port);
-		Launcher_SaveSecureOpt("launcher-mppass", mppass, user);
+		Options_SetSecure("launcher-mppass", mppass, user);
 		Options_Save();
 	}
 
+	String_InitArray(path, pathBuffer);
+	res = Platform_GetExePath(&path);
+	if (res) { Logger_Warn(res, "getting .exe path"); return false; }
+
 	String_InitArray(args, argsBuffer);
 	String_AppendString(&args, user);
-	if (mppass->length) String_Format3(&args, "%s %s %s", mppass, ip, port);
+	if (mppass->length) String_Format3(&args, " %s %s %s", mppass, ip, port);
 
-	res = Platform_StartProcess(&exe, &args);
+	res = Platform_StartProcess(&path, &args);
 #ifdef CC_BUILD_WINDOWS
 	/* TODO: Check this*/
 	/* HRESULT when user clicks 'cancel' to 'are you sure you want to run ClassiCube.exe' */
 	if (res == 0x80004005) return;
 #endif
+	if (res) { Logger_Warn(res, "starting game"); return false; }
 
-	if (res) {
-		Launcher_ShowError(res, "starting game");
-		Launcher_ShouldExit = false;
-		return false;
-	}
+	Launcher_ShouldExit = Options_GetBool(OPT_AUTO_CLOSE_LAUNCHER, false);
 	return true;
 }
 
 #ifdef CC_BUILD_WIN
-static const char* Update_Script = \
-"@echo off\n" \
-"echo Waiting for launcher to exit..\n" \
-"echo 5..\n" \
-"ping 127.0.0.1 - n 2 > nul\n" \
-"echo 4..\n" \
-"ping 127.0.0.1 - n 2 > nul\n" \
-"echo 3..\n" \
-"ping 127.0.0.1 - n 2 > nul\n" \
-"echo 2..\n" \
-"ping 127.0.0.1 - n 2 > nul\n" \
-"echo 1..\n" \
-"ping 127.0.0.1 - n 2 > nul\n" \
-"echo Copying updated version\n" \
-"move ClassiCube.update ClassiCube.exe\n" \
-"echo Starting launcher again\n" \
-"start ClassiCube.exe\n" \
-"exit\n";
+#define UPDATE_SCRIPT \
+"@echo off\r\n" \
+"echo Waiting for launcher to exit..\r\n" \
+"echo 5..\r\n" \
+"ping 127.0.0.1 -n 2 > nul\r\n" \
+"echo 4..\r\n" \
+"ping 127.0.0.1 -n 2 > nul\r\n" \
+"echo 3..\r\n" \
+"ping 127.0.0.1 -n 2 > nul\r\n" \
+"echo 2..\r\n" \
+"ping 127.0.0.1 -n 2 > nul\r\n" \
+"echo 1..\r\n" \
+"ping 127.0.0.1 -n 2 > nul\r\n" \
+"echo Copying updated version\r\n" \
+"move ClassiCube.update ClassiCube.exe\r\n" \
+"echo Starting launcher again\r\n" \
+"start ClassiCube.exe\r\n" \
+"exit\r\n"
 #else
-static const char* Update_Script = \
-"@#!/bin/bash\n" \
+#define UPDATE_SCRIPT \
+"#!/bin/bash\n" \
 "echo Waiting for launcher to exit..\n" \
 "echo 5..\n" \
 "sleep 1\n" \
@@ -513,34 +588,29 @@ static const char* Update_Script = \
 "echo Copying updated version\n" \
 "mv ./ClassiCube.update ./ClassiCube\n" \
 "echo Starting launcher again\n" \
-"./ClassiCube\n";
+"./ClassiCube\n"
 #endif
 
 static void Launcher_ApplyUpdate(void) {
 #ifdef CC_BUILD_WIN
-	static String scriptPath = String_FromConst("update.bat");
-	static String scriptName = String_FromConst("cmd");
-	static String scriptArgs = String_FromConst("/C start cmd /C update.bat");
+	const static String scriptPath = String_FromConst("update.bat");
+	const static String scriptName = String_FromConst("C:/Windows/System32/cmd.exe");
+	const static String scriptArgs = String_FromConst("/C start cmd /C update.bat");
 #else
-	static String scriptPath = String_FromConst("update.sh");
-	static String scriptName = String_FromConst("xterm");
-	static String scriptArgs = String_FromConst("./update.sh");
+	const static String scriptPath = String_FromConst("update.sh");
+	const static String scriptName = String_FromConst("xterm");
+	const static String scriptArgs = String_FromConst("./update.sh");
 #endif
-	struct Stream s;
 	ReturnCode res;
 
-	res = Stream_CreateFile(&s, &scriptPath);
-	if (res) { Launcher_ShowError(res, "creating update script"); return; }
-
 	/* Can't use WriteLine, want \n as actual newline not code page 437 */
-	res = Stream_Write(&s, Update_Script, sizeof(Update_Script) - 1);
-	if (res) { Launcher_ShowError(res, "writing update script"); return; }
+	res = Stream_WriteAllTo(&scriptPath, UPDATE_SCRIPT, sizeof(UPDATE_SCRIPT) - 1);
+	if (res) { Logger_Warn(res, "saving update script"); return; }
 
-	res = s.Close(&s);
-	if (res) { Launcher_ShowError(res, "closing update script"); return; }
+	res = Platform_MarkExecutable(&scriptPath);
+	if (res) Logger_Warn(res, "making update script executable");
 
 	/* TODO: (open -a Terminal ", '"' + path + '"'); on OSX */
-	/* TODO: chmod +x on non-windows */
 	res = Platform_StartProcess(&scriptName, &scriptArgs);
-	if (res) { Launcher_ShowError(res, "starting update script"); return; }
+	if (res) { Logger_Warn(res, "starting update script"); return; }
 }

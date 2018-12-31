@@ -9,10 +9,9 @@ struct LScreen;
 
 /* Currently active screen/menu. */
 extern struct LScreen* Launcher_Screen;
-/* Whether the client drawing area needs to be redrawn/presented to the screen. */
-extern bool Launcher_Dirty;
-/* The specific area/region of the window that needs to be redrawn. */
-extern Rect2D Launcher_DirtyArea;
+/* The area/region of the window that needs to be redrawn and presented to the screen. */
+/* If width is 0, means no area needs to be redrawn. */
+extern Rect2D Launcher_Dirty;
 /* Contains the pixels that are drawn to the window. */
 extern Bitmap Launcher_Framebuffer;
 /* Whether to use stone tile background like minecraft.net. */
@@ -26,10 +25,6 @@ extern FontDesc Launcher_HintFont;
 extern bool Launcher_ShouldExit;
 /* Whether update script should be asynchronously run on exit. */
 extern bool Launcher_ShouldUpdate;
-/* Whether options should be saved on closing launcher. */
-extern bool Launcher_SaveOptions;
-/* Time which updated executable's "modified" time should be set to. */
-extern TimeMS Launcher_PatchTime;
 
 /* Base colour of pixels before any widgets are drawn. */
 extern BitmapCol Launcher_BackgroundCol;
@@ -53,10 +48,18 @@ void Launcher_SaveSkin(void);
 /* Attempts to load font and terrain from texture pack. */
 void Launcher_TryLoadTexturePack(void);
 /* Redraws all pixels with default background. */
-/* NOTE: Also draws titlebar at top, if active screen permits it. */
+/* NOTE: Also draws titlebar at top, if current screen permits it. */
 void Launcher_ResetPixels(void);
 /* Redraws the specified region with the background pixels. */
+/* Also marks that area as neeing to be redrawn. */
 void Launcher_ResetArea(int x, int y, int width, int height);
+/* Resets pixels to default, then draws widgets of current screen over it. */
+/* Marks the entire window as needing to be redrawn. */
+void Launcher_Redraw(void);
+/* Marks the given area/region as needing to be redrawn. */
+CC_NOINLINE void Launcher_MarkDirty(int x, int y, int width, int height);
+/* Marks the entire window as needing to be redrawn. */
+CC_NOINLINE void Launcher_MarkAllDirty(void);
 
 /* Sets currently active screen/menu, freeing old one. */
 void Launcher_SetScreen(struct LScreen* screen);
@@ -64,16 +67,6 @@ void Launcher_SetScreen(struct LScreen* screen);
 bool Launcher_ConnectToServer(const String* hash);
 /* Launcher main loop. */
 void Launcher_Run(void);
-
-/* Shows a message box for an error. */
-void Launcher_ShowError(ReturnCode res, const char* place);
-/* Attempts to securely encode an option. */
-/* NOTE: Not all platforms support secure saving, DO NOT rely on this being secure. */
-void Launcher_SaveSecureOpt(const char* opt, const String* data, const String* key);
-/* Attempts to securely decode an option. */
-/* NOTE: Not all platforms support secure saving, DO NOT rely on this being secure. */
-void Launcher_LoadSecureOpt(const char* opt, String* data, const String* key);
-
 /* Starts the game from the given arguments. */
 bool Launcher_StartGame(const String* user, const String* mppass, const String* ip, const String* port, const String* server);
 #endif

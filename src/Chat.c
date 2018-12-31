@@ -3,7 +3,7 @@
 #include "Platform.h"
 #include "Event.h"
 #include "Game.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "ServerConnection.h"
 #include "World.h"
 #include "Inventory.h"
@@ -23,6 +23,7 @@ String Chat_ClientStatus[3] = { String_FromArray(msgs[6]), String_FromArray(msgs
 String Chat_Announcement = String_FromArray(msgs[9]);
 TimeMS Chat_AnnouncementReceived;
 StringsBuffer Chat_Log, Chat_InputLog;
+bool Chat_Logging;
 
 /*########################################################################################################################*
 *-------------------------------------------------------Chat logging------------------------------------------------------*
@@ -33,7 +34,7 @@ static TimeMS* Chat_LogTimes = Chat_DefaultLogTimes;
 static int Chat_LogTimesMax = CHAT_LOGTIMES_DEF_ELEMS, Chat_LogTimesCount;
 
 TimeMS Chat_GetLogTime(int i) {
-	if (i < 0 || i >= Chat_LogTimesCount) ErrorHandler_Fail("Tried to get time past LogTime end");
+	if (i < 0 || i >= Chat_LogTimesCount) Logger_Abort("Tried to get time past LogTime end");
 	return Chat_LogTimes[i];
 }
 
@@ -60,7 +61,7 @@ static void Chat_CloseLog(void) {
 	if (!Chat_LogStream.Meta.File) return;
 
 	res = Chat_LogStream.Close(&Chat_LogStream);
-	if (res) { Chat_LogError2(res, "closing", &Chat_LogPath); }
+	if (res) { Logger_Warn2(res, "closing", &Chat_LogPath); }
 }
 
 static bool Chat_AllowedLogChar(char c) {
@@ -86,7 +87,7 @@ void Chat_SetLogName(const String* name) {
 }
 
 static void Chat_DisableLogging(void) {
-	Game_ChatLogging = false;
+	Chat_Logging = false;
 	Chat_AddRaw("&cDisabling chat logging");
 }
 
@@ -112,7 +113,7 @@ static void Chat_OpenLog(struct DateTime* now) {
 		res = File_Append(&file, path);
 		if (res && res != ReturnCode_FileShareViolation) {
 			Chat_DisableLogging();
-			Chat_LogError2(res, "appending to", path); return;
+			Logger_Warn2(res, "appending to", path); return;
 		}
 
 		if (res == ReturnCode_FileShareViolation) continue;
@@ -130,7 +131,7 @@ static void Chat_AppendLog(const String* text) {
 	struct DateTime now;
 	ReturnCode res;	
 
-	if (!Chat_LogName.length || !Game_ChatLogging) return;
+	if (!Chat_LogName.length || !Chat_Logging) return;
 	DateTime_CurrentLocal(&now);
 
 	if (now.Day != ChatLog_LastLogDate.Day || now.Month != ChatLog_LastLogDate.Month || now.Year != ChatLog_LastLogDate.Year) {
@@ -149,15 +150,9 @@ static void Chat_AppendLog(const String* text) {
 	res = Stream_WriteLine(&Chat_LogStream, &str);
 	if (!res) return;
 	Chat_DisableLogging();
-	Chat_LogError2(res, "writing to", &Chat_LogPath);
+	Logger_Warn2(res, "writing to", &Chat_LogPath);
 }
 
-void Chat_LogError(ReturnCode result, const char* place) {
-	Chat_Add4("&cError %h when %c", &result, place, NULL, NULL);
-}
-void Chat_LogError2(ReturnCode result, const char* place, const String* path) {
-	Chat_Add4("&cError %h when %c '%s'", &result, place, path, NULL);
-}
 void Chat_Add1(const char* format, const void* a1) {
 	Chat_Add4(format, a1, NULL, NULL, NULL);
 }
@@ -182,7 +177,7 @@ void Chat_AddRaw(const char* raw) {
 void Chat_Add(const String* text) { Chat_AddOf(text, MSG_TYPE_NORMAL); }
 
 void Chat_AddOf(const String* text, MsgType type) {
-	Event_RaiseChat(&ChatEvents_ChatReceived, text, type);
+	Event_RaiseChat(&ChatEvents.ChatReceived, text, type);
 
 	if (type == MSG_TYPE_NORMAL) {
 		StringsBuffer_Add(&Chat_Log, text);
@@ -210,8 +205,8 @@ static struct ChatCommand* cmds_head;
 static struct ChatCommand* cmds_tail;
 
 static bool Commands_IsCommandPrefix(const String* str) {
-	static String prefixSpace = String_FromConst(COMMANDS_PREFIX_SPACE);
-	static String prefix      = String_FromConst(COMMANDS_PREFIX);
+	const static String prefixSpace = String_FromConst(COMMANDS_PREFIX_SPACE);
+	const static String prefix      = String_FromConst(COMMANDS_PREFIX);
 
 	if (!str->length) return false;
 	if (ServerConnection_IsSinglePlayer && str->buffer[0] == '/') return true;
@@ -282,8 +277,8 @@ static void Commands_PrintDefault(void) {
 }
 
 static void Commands_Execute(const String* input) {	
-	static String prefixSpace = String_FromConst(COMMANDS_PREFIX_SPACE);
-	static String prefix      = String_FromConst(COMMANDS_PREFIX);
+	const static String prefixSpace = String_FromConst(COMMANDS_PREFIX_SPACE);
+	const static String prefix      = String_FromConst(COMMANDS_PREFIX);
 	String text = *input;
 
 	int offset, count;
@@ -357,11 +352,9 @@ static void RenderTypeCommand_Execute(const String* args, int argsCount) {
 		Chat_AddRaw("&e/client: &cYou didn't specify a new render type."); return;
 	}
 
-	flags = Game_CalcRenderType(&args[0]);
+	flags = EnvRenderer_CalcFlags(&args[0]);
 	if (flags >= 0) {
-		EnvRenderer_UseLegacyMode( flags & 1);
-		EnvRenderer_UseMinimalMode(flags & 2);
-
+		EnvRenderer_SetMode(flags);
 		Options_Set(OPT_RENDER_TYPE, &args[0]);
 		Chat_Add1("&e/client: &fRender type is now %s.", &args[0]);
 	} else {
@@ -384,7 +377,7 @@ static void ResolutionCommand_Execute(const String* args, int argsCount) {
 	int width, height;
 	if (argsCount < 2) {
 		Chat_AddRaw("&e/client: &cYou didn't specify width and height");
-	} else if (!Convert_TryParseInt(&args[0], &width) || !Convert_TryParseInt(&args[1], &height)) {
+	} else if (!Convert_ParseInt(&args[0], &width) || !Convert_ParseInt(&args[1], &height)) {
 		Chat_AddRaw("&e/client: &cWidth and height must be integers.");
 	} else if (width <= 0 || height <= 0) {
 		Chat_AddRaw("&e/client: &cWidth and height must be above 0.");
@@ -427,7 +420,7 @@ static struct ChatCommand ModelCommand_Instance = {
 static int cuboid_block = -1;
 static Vector3I cuboid_mark1, cuboid_mark2;
 static bool cuboid_persist, cuboid_hooked;
-static String cuboid_msg = String_FromConst("&eCuboid: &fPlace or delete a block.");
+const static String cuboid_msg = String_FromConst("&eCuboid: &fPlace or delete a block.");
 
 static bool CuboidCommand_ParseBlock(const String* args, int argsCount) {
 	int block;
@@ -483,7 +476,7 @@ static void CuboidCommand_BlockChanged(void* obj, Vector3I coords, BlockID old, 
 		CuboidCommand_DoCuboid();
 
 		if (!cuboid_persist) {
-			Event_UnregisterBlock(&UserEvents_BlockChanged, NULL, CuboidCommand_BlockChanged);
+			Event_UnregisterBlock(&UserEvents.BlockChanged, NULL, CuboidCommand_BlockChanged);
 			cuboid_hooked = false;
 			Chat_AddOf(&String_Empty, MSG_TYPE_CLIENTSTATUS_1);
 		} else {
@@ -495,7 +488,7 @@ static void CuboidCommand_BlockChanged(void* obj, Vector3I coords, BlockID old, 
 
 static void CuboidCommand_Execute(const String* args, int argsCount) {
 	if (cuboid_hooked) {
-		Event_UnregisterBlock(&UserEvents_BlockChanged, NULL, CuboidCommand_BlockChanged);
+		Event_UnregisterBlock(&UserEvents.BlockChanged, NULL, CuboidCommand_BlockChanged);
 		cuboid_hooked = false;
 	}
 
@@ -510,7 +503,7 @@ static void CuboidCommand_Execute(const String* args, int argsCount) {
 	}
 
 	Chat_AddOf(&cuboid_msg, MSG_TYPE_CLIENTSTATUS_1);
-	Event_RegisterBlock(&UserEvents_BlockChanged, NULL, CuboidCommand_BlockChanged);
+	Event_RegisterBlock(&UserEvents.BlockChanged, NULL, CuboidCommand_BlockChanged);
 	cuboid_hooked = true;
 }
 
@@ -538,7 +531,7 @@ static void TeleportCommand_Execute(const String* args, int argsCount) {
 		Chat_AddRaw("&e/client teleport: &cYou didn't specify X, Y and Z coordinates.");
 		return;
 	}
-	if (!Convert_TryParseFloat(&args[0], &v.X) || !Convert_TryParseFloat(&args[1], &v.Y) || !Convert_TryParseFloat(&args[2], &v.Z)) {
+	if (!Convert_ParseFloat(&args[0], &v.X) || !Convert_ParseFloat(&args[1], &v.Y) || !Convert_ParseFloat(&args[2], &v.Z)) {
 		Chat_AddRaw("&e/client teleport: &cCoordinates must be decimals");
 		return;
 	}
@@ -561,7 +554,7 @@ static struct ChatCommand TeleportCommand_Instance = {
 *#########################################################################################################################*/
 void Chat_Send(const String* text, bool logUsage) {
 	if (!text->length) return;
-	Event_RaiseChat(&ChatEvents_ChatSending, text, 0);
+	Event_RaiseChat(&ChatEvents.ChatSending, text, 0);
 	if (logUsage) StringsBuffer_Add(&Chat_InputLog, text);
 
 	if (Commands_IsCommandPrefix(text)) {
@@ -579,6 +572,8 @@ static void Chat_Init(void) {
 	Commands_Register(&ModelCommand_Instance);
 	Commands_Register(&CuboidCommand_Instance);
 	Commands_Register(&TeleportCommand_Instance);
+
+	Chat_Logging = Options_GetBool(OPT_CHAT_LOGGING, true);
 }
 
 static void Chat_Reset(void) {

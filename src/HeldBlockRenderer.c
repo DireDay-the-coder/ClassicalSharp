@@ -10,6 +10,7 @@
 #include "Model.h"
 #include "GameStructs.h"
 
+bool HeldBlockRenderer_Show;
 static BlockID held_block;
 static struct Entity held_entity;
 static struct Matrix held_blockProjection;
@@ -20,7 +21,7 @@ static double held_time, held_period = 0.25;
 static BlockID held_lastBlock;
 
 static void HeldBlockRenderer_RenderModel(void) {
-	static String block = String_FromConst("block");
+	const static String block = String_FromConst("block");
 	struct Model* model;
 
 	Gfx_SetFaceCulling(true);
@@ -209,7 +210,7 @@ static void HeldBlockRenderer_DoAnimation(double delta, float lastSwingY) {
 void HeldBlockRenderer_Render(double delta) {
 	float lastSwingY;
 	struct Matrix view;
-	if (!Game_ShowBlockInHand) return;
+	if (!HeldBlockRenderer_Show) return;
 
 	lastSwingY  = held_swingY;
 	held_swingY = 0.0f;
@@ -234,19 +235,21 @@ struct EntityVTABLE heldEntity_VTABLE = {
 };
 static void HeldBlockRenderer_Init(void) {
 	Entity_Init(&held_entity);
-	held_entity.VTABLE = &heldEntity_VTABLE;
+	held_entity.VTABLE  = &heldEntity_VTABLE;
 	held_entity.NoShade = true;
 
-	held_lastBlock = Inventory_SelectedBlock;
-	Event_RegisterVoid(&GfxEvents_ProjectionChanged, NULL, HeldBlockRenderer_ProjectionChanged);
-	Event_RegisterVoid(&UserEvents_HeldBlockChanged, NULL, HeldBlockRenderer_DoSwitchBlockAnim);
-	Event_RegisterBlock(&UserEvents_BlockChanged,    NULL, HeldBlockRenderer_BlockChanged);
+	HeldBlockRenderer_Show = Options_GetBool(OPT_SHOW_BLOCK_IN_HAND, true);
+	held_lastBlock         = Inventory_SelectedBlock;
+
+	Event_RegisterVoid(&GfxEvents.ProjectionChanged, NULL, HeldBlockRenderer_ProjectionChanged);
+	Event_RegisterVoid(&UserEvents.HeldBlockChanged, NULL, HeldBlockRenderer_DoSwitchBlockAnim);
+	Event_RegisterBlock(&UserEvents.BlockChanged,    NULL, HeldBlockRenderer_BlockChanged);
 }
 
 static void HeldBlockRenderer_Free(void) {
-	Event_UnregisterVoid(&GfxEvents_ProjectionChanged, NULL, HeldBlockRenderer_ProjectionChanged);
-	Event_UnregisterVoid(&UserEvents_HeldBlockChanged, NULL, HeldBlockRenderer_DoSwitchBlockAnim);
-	Event_UnregisterBlock(&UserEvents_BlockChanged,    NULL, HeldBlockRenderer_BlockChanged);
+	Event_UnregisterVoid(&GfxEvents.ProjectionChanged, NULL, HeldBlockRenderer_ProjectionChanged);
+	Event_UnregisterVoid(&UserEvents.HeldBlockChanged, NULL, HeldBlockRenderer_DoSwitchBlockAnim);
+	Event_UnregisterBlock(&UserEvents.BlockChanged,    NULL, HeldBlockRenderer_BlockChanged);
 }
 
 struct IGameComponent HeldBlockRenderer_Component = {

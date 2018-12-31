@@ -10,7 +10,7 @@
    Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3 */
 
 struct Stream;
-struct AsyncRequest;
+struct HttpRequest;
 struct IGameComponent;
 extern struct IGameComponent Animations_Component;
 
@@ -54,7 +54,7 @@ extern GfxResourceID Atlas1D_TexIds[ATLAS1D_MAX_ATLASES];
 #define Atlas1D_Index(texLoc) ((texLoc) >> Atlas1D_Shift) /* texLoc / Atlas1D_TilesPerAtlas */
 
 /* Loads the given atlas and converts it into an array of 1D atlases. */
-/* NOTE: Use Game_ChangeTerrainAtlas to change atlas, because that raises TextureEvents_AtlasChanged */
+/* NOTE: Use Game_ChangeTerrainAtlas to change atlas, because that raises TextureEvents.AtlasChanged */
 void Atlas_Update(Bitmap* bmp);
 /* Loads the given tile into a new separate texture. */
 GfxResourceID Atlas_LoadTile(TextureLoc texLoc);
@@ -97,5 +97,5 @@ void TextureCache_SetLastModified(const String* url, const TimeMS* lastModified)
 void TexturePack_ExtractZip_File(const String* filename);
 void TexturePack_ExtractDefault(void);
 void TexturePack_ExtractCurrent(const String* url);
-void TexturePack_Extract_Req(struct AsyncRequest* item);
+void TexturePack_Extract_Req(struct HttpRequest* item);
 #endif

@@ -386,13 +386,6 @@ static struct ModelTex* textures_head;
 
 #define Model_RetSize(x,y,z) static Vector3 P = { (x)/16.0f,(y)/16.0f,(z)/16.0f }; *size = P;
 #define Model_RetAABB(x1,y1,z1, x2,y2,z2) static struct AABB BB = { (x1)/16.0f,(y1)/16.0f,(z1)/16.0f, (x2)/16.0f,(y2)/16.0f,(z2)/16.0f }; *bb = BB;
-#define BoxDesc_Dim(p1, p2) p1 < p2 ? p2 - p1 : p1 - p2
-
-#define BoxDesc_Tex(x, y)                 x,y
-#define BoxDesc_Dims(x1,y1,z1,x2,y2,z2)   BoxDesc_Dim(x1,x2), BoxDesc_Dim(y1,y2), BoxDesc_Dim(z1,z2)
-#define BoxDesc_Bounds(x1,y1,z1,x2,y2,z2) x1/16.0f,y1/16.0f,z1/16.0f, x2/16.0f,y2/16.0f,z2/16.0f
-#define BoxDesc_Rot(x, y, z)              x/16.0f,y/16.0f,z/16.0f
-#define BoxDesc_Box(x1,y1,z1,x2,y2,z2)    BoxDesc_Dims(x1,y1,z1,x2,y2,z2), BoxDesc_Bounds(x1,y1,z1,x2,y2,z2)
 
 static void Models_ContextLost(void* obj) {
 	Gfx_DeleteVb(&Model_Vb);
@@ -1684,9 +1677,9 @@ void Models_Init(void) {
 	Model_RegisterDefaultModels();
 	Models_ContextRecreated(NULL);
 
-	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, Models_TextureChanged);
-	Event_RegisterVoid(&GfxEvents_ContextLost,      NULL, Models_ContextLost);
-	Event_RegisterVoid(&GfxEvents_ContextRecreated, NULL, Models_ContextRecreated);
+	Event_RegisterEntry(&TextureEvents.FileChanged, NULL, Models_TextureChanged);
+	Event_RegisterVoid(&GfxEvents.ContextLost,      NULL, Models_ContextLost);
+	Event_RegisterVoid(&GfxEvents.ContextRecreated, NULL, Models_ContextRecreated);
 }
 
 void Models_Free(void) {
@@ -1697,9 +1690,9 @@ void Models_Free(void) {
 	}
 	Models_ContextLost(NULL);
 
-	Event_UnregisterEntry(&TextureEvents_FileChanged, NULL, Models_TextureChanged);
-	Event_UnregisterVoid(&GfxEvents_ContextLost,      NULL, Models_ContextLost);
-	Event_UnregisterVoid(&GfxEvents_ContextRecreated, NULL, Models_ContextRecreated);
+	Event_UnregisterEntry(&TextureEvents.FileChanged, NULL, Models_TextureChanged);
+	Event_UnregisterVoid(&GfxEvents.ContextLost,      NULL, Models_ContextLost);
+	Event_UnregisterVoid(&GfxEvents.ContextRecreated, NULL, Models_ContextRecreated);
 }
 
 struct IGameComponent Models_Component = {

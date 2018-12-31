@@ -1,17 +1,17 @@
 #include "Platform.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Stream.h"
 #include "ExtMath.h"
-#include "ErrorHandler.h"
 #include "Drawer2D.h"
 #include "Funcs.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Bitmap.h"
 #include "Window.h"
 
 #include "freetype/ft2build.h"
 #include "freetype/freetype.h"
 #include "freetype/ftmodapi.h"
+#include "freetype/ftglyph.h"
 
 static void Platform_InitDisplay(void);
 static void Platform_InitStopwatch(void);
@@ -37,14 +37,13 @@ void* DisplayDevice_Meta;
 #include <wininet.h>
 #include <mmsystem.h>
 #include <shellapi.h>
+#include <wincrypt.h>
 
 #define HTTP_QUERY_ETAG 54 /* Missing from some old MingW32 headers */
 #define Socket__Error() WSAGetLastError()
-#define Win_Return(success) ((success) ? 0 : GetLastError())
 
 static HANDLE heap;
 char* Platform_NewLine    = "\r\n";
-char* Font_DefaultName    = "Arial";
 
 const ReturnCode ReturnCode_FileShareViolation = ERROR_SHARING_VIOLATION;
 const ReturnCode ReturnCode_FileNotFound = ERROR_FILE_NOT_FOUND;
@@ -71,10 +70,11 @@ const ReturnCode ReturnCode_SocketWouldBlock = WSAEWOULDBLOCK;
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <utime.h>
+#include <poll.h>
+#include <signal.h>
 
 #define Socket__Error() errno
-#define Nix_Return(success) ((success) ? 0 : errno)
-
 char* Platform_NewLine    = "\n";
 pthread_mutex_t event_mutex;
 
@@ -89,20 +89,18 @@ const ReturnCode ReturnCode_SocketWouldBlock = EWOULDBLOCK;
 #include <X11/Xlib.h>
 #include <AL/al.h>
 #include <AL/alc.h>
-char* Font_DefaultName = "Century Schoolbook L Roman";
 #endif
 #ifdef CC_BUILD_SOLARIS
 #include <X11/Xlib.h>
 #include <AL/al.h>
 #include <AL/alc.h>
 #include <sys/filio.h>
-char* Font_DefaultName = "Century Schoolbook L Roman";
 #endif
 #ifdef CC_BUILD_OSX
 #include <mach/mach_time.h>
+#include <mach-o/dyld.h>
 #include <OpenAL/al.h>
 #include <OpenAL/alc.h>
-char* Font_DefaultName = "Arial";
 #endif
 
 
@@ -132,7 +130,7 @@ void GraphicsMode_Make(struct GraphicsMode* m, int bpp, int depth, int stencil, 
 		m->R = 2; m->G = 2; m->B = 1; break;
 	default:
 		/* mode->R = 0; mode->G = 0; mode->B = 0; */
-		ErrorHandler_Fail2(bpp, "Unsupported bits per pixel"); break;
+		Logger_Abort2(bpp, "Unsupported bits per pixel"); break;
 	}
 }
 void GraphicsMode_MakeDefault(struct GraphicsMode* m) {
@@ -144,16 +142,16 @@ void GraphicsMode_MakeDefault(struct GraphicsMode* m) {
 /*########################################################################################################################*
 *---------------------------------------------------------Memory----------------------------------------------------------*
 *#########################################################################################################################*/
-void Mem_Set(void* dst, uint8_t value, uint32_t numBytes) { memset(dst, value, numBytes); }
-void Mem_Copy(void* dst, void* src,  uint32_t numBytes)   { memcpy(dst, src,   numBytes); }
+void Mem_Set(void* dst, uint8_t value,    uint32_t numBytes) { memset(dst, value, numBytes); }
+void Mem_Copy(void* dst, const void* src, uint32_t numBytes) { memcpy(dst, src,   numBytes); }
 
 CC_NOINLINE static void Platform_AllocFailed(const char* place) {	
 	String log; char logBuffer[STRING_SIZE+20 + 1];
 	String_InitArray_NT(log, logBuffer);
 
-	String_Format1(&log, "Failed allocating memory for: %c", place);
+	String_Format1(&log, "Out of memory! (when allocating %c)", place);
 	log.buffer[log.length] = '\0';
-	ErrorHandler_Fail(log.buffer);
+	Logger_Abort(log.buffer);
 }
 
 #ifdef CC_BUILD_WIN
@@ -253,7 +251,7 @@ void Platform_Log(const String* message) {
 #define FILETIME_EPOCH 50491123200000ULL
 #define FileTime_TotalMS(time) ((time / 10000) + FILETIME_EPOCH)
 TimeMS DateTime_CurrentUTC_MS(void) {
-	FILETIME ft; GetSystemTimeAsFileTime(&ft);
+	FILETIME ft; GetSystemTimeAsFileTime(&ft); 
 	/* in 100 nanosecond units, since Jan 1 1601 */
 	uint64_t raw = ft.dwLowDateTime | ((uint64_t)ft.dwHighDateTime << 32);
 	return FileTime_TotalMS(raw);
@@ -380,7 +378,7 @@ ReturnCode Directory_Create(const String* path) {
 
 	Platform_ConvertString(str, path);
 	success = CreateDirectory(str, NULL);
-	return Win_Return(success);
+	return success ? 0 : GetLastError();
 }
 
 bool File_Exists(const String* path) {
@@ -431,10 +429,10 @@ ReturnCode Directory_Enum(const String* dirPath, void* obj, Directory_EnumCallba
 
 	res = GetLastError(); /* return code from FindNextFile */
 	FindClose(find);
-	return Win_Return(res == ERROR_NO_MORE_FILES);
+	return res == ERROR_NO_MORE_FILES ? 0 : GetLastError();
 }
 
-ReturnCode File_GetModifiedTime_MS(const String* path, TimeMS* time) {
+ReturnCode File_GetModifiedTime(const String* path, TimeMS* time) {
 	FileHandle file; 
 	ReturnCode res = File_Open(&file, path);
 	if (res) return res;
@@ -451,53 +449,68 @@ ReturnCode File_GetModifiedTime_MS(const String* path, TimeMS* time) {
 	return res;
 }
 
+ReturnCode File_SetModifiedTime(const String* path, TimeMS time) {
+	FileHandle file;
+	ReturnCode res = File_Append(&file, path);
+	if (res) return res;
+
+	FILETIME ft;
+	uint64_t raw = 10000 * (time - FILETIME_EPOCH);
+	ft.dwLowDateTime  = (uint32_t)raw;
+	ft.dwHighDateTime = (uint32_t)(raw >> 32);
+
+	if (!SetFileTime(file, NULL, NULL, &ft)) res = GetLastError();
+	File_Close(file);
+	return res;
+}
+
 static ReturnCode File_Do(FileHandle* file, const String* path, DWORD access, DWORD createMode) {
 	TCHAR str[300]; 
 	Platform_ConvertString(str, path);
 	*file = CreateFile(str, access, FILE_SHARE_READ, NULL, createMode, 0, NULL);
-	return Win_Return(*file != INVALID_HANDLE_VALUE);
+	return *file != INVALID_HANDLE_VALUE ? 0 : GetLastError();
 }
 
 ReturnCode File_Open(FileHandle* file, const String* path) {
 	return File_Do(file, path, GENERIC_READ, OPEN_EXISTING);
 }
 ReturnCode File_Create(FileHandle* file, const String* path) {
-	return File_Do(file, path, GENERIC_WRITE, CREATE_ALWAYS);
+	return File_Do(file, path, GENERIC_WRITE | GENERIC_READ, CREATE_ALWAYS);
 }
 ReturnCode File_Append(FileHandle* file, const String* path) {
-	ReturnCode res = File_Do(file, path, GENERIC_WRITE, OPEN_ALWAYS);
+	ReturnCode res = File_Do(file, path, GENERIC_WRITE | GENERIC_READ, OPEN_ALWAYS);
 	if (res) return res;
 	return File_Seek(*file, 0, FILE_SEEKFROM_END);
 }
 
 ReturnCode File_Read(FileHandle file, uint8_t* buffer, uint32_t count, uint32_t* bytesRead) {
 	BOOL success = ReadFile(file, buffer, count, bytesRead, NULL);
-	return Win_Return(success);
+	return success ? 0 : GetLastError();
 }
 
-ReturnCode File_Write(FileHandle file, uint8_t* buffer, uint32_t count, uint32_t* bytesWrote) {
+ReturnCode File_Write(FileHandle file, const uint8_t* buffer, uint32_t count, uint32_t* bytesWrote) {
 	BOOL success = WriteFile(file, buffer, count, bytesWrote, NULL);
-	return Win_Return(success);
+	return success ? 0 : GetLastError();
 }
 
 ReturnCode File_Close(FileHandle file) {
-	return Win_Return(CloseHandle(file));
+	return CloseHandle(file) ? 0 : GetLastError();
 }
 
 ReturnCode File_Seek(FileHandle file, int offset, int seekType) {
 	static uint8_t modes[3] = { FILE_BEGIN, FILE_CURRENT, FILE_END };
 	DWORD pos = SetFilePointer(file, offset, NULL, modes[seekType]);
-	return Win_Return(pos != INVALID_SET_FILE_POINTER);
+	return pos != INVALID_SET_FILE_POINTER ? 0 : GetLastError();
 }
 
-ReturnCode File_Position(FileHandle file, uint32_t* position) {
-	*position = SetFilePointer(file, 0, NULL, FILE_CURRENT);
-	return Win_Return(*position != INVALID_SET_FILE_POINTER);
+ReturnCode File_Position(FileHandle file, uint32_t* pos) {
+	*pos = SetFilePointer(file, 0, NULL, FILE_CURRENT);
+	return *pos != INVALID_SET_FILE_POINTER ? 0 : GetLastError();
 }
 
-ReturnCode File_Length(FileHandle file, uint32_t* length) {
-	*length = GetFileSize(file, NULL);
-	return Win_Return(*length != INVALID_FILE_SIZE);
+ReturnCode File_Length(FileHandle file, uint32_t* len) {
+	*len = GetFileSize(file, NULL);
+	return *len != INVALID_FILE_SIZE ? 0 : GetLastError();
 }
 #endif
 #ifdef CC_BUILD_POSIX
@@ -513,7 +526,7 @@ ReturnCode Directory_Create(const String* path) {
 	Platform_ConvertString(str, path);
 	/* read/write/search permissions for owner and group, and with read/search permissions for others. */
 	/* TODO: Is the default mode in all cases */
-	return Nix_Return(mkdir(str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != -1);
+	return mkdir(str, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) == -1 ? errno : 0;
 }
 
 bool File_Exists(const String* path) {
@@ -550,7 +563,7 @@ ReturnCode Directory_Enum(const String* dirPath, void* obj, Directory_EnumCallba
 		if (src[0] == '.' && src[1] == '.' && src[2] == '\0') continue;
 
 		len = String_CalcLen(src, UInt16_MaxValue);
-		String_DecodeUtf8(&path, src, len);
+		Convert_DecodeUtf8(&path, src, len);
 
 		/* TODO: fallback to stat when this fails */
 		if (entry->d_type == DT_DIR) {
@@ -567,7 +580,7 @@ ReturnCode Directory_Enum(const String* dirPath, void* obj, Directory_EnumCallba
 	return res;
 }
 
-ReturnCode File_GetModifiedTime_MS(const String* path, TimeMS* time) {
+ReturnCode File_GetModifiedTime(const String* path, TimeMS* time) {
 	char str[600]; 
 	struct stat sb;
 	Platform_ConvertString(str, path);
@@ -577,53 +590,62 @@ ReturnCode File_GetModifiedTime_MS(const String* path, TimeMS* time) {
 	return 0;
 }
 
+ReturnCode File_SetModifiedTime(const String* path, TimeMS time) {
+	char str[600];
+	struct utimbuf times = { 0 };
+
+	times.modtime = (time - UNIX_EPOCH) / 1000;
+	Platform_ConvertString(str, path);
+	return utime(str, &times) == -1 ? errno : 0;
+}
+
 static ReturnCode File_Do(FileHandle* file, const String* path, int mode) {
 	char str[600]; 
 	Platform_ConvertString(str, path);
 	*file = open(str, mode, (6 << 6) | (4 << 3) | 4); /* rw|r|r */
-	return Nix_Return(*file != -1);
+	return *file == -1 ? errno : 0;
 }
 
 ReturnCode File_Open(FileHandle* file, const String* path) {
 	return File_Do(file, path, O_RDONLY);
 }
 ReturnCode File_Create(FileHandle* file, const String* path) {
-	return File_Do(file, path, O_WRONLY | O_CREAT | O_TRUNC);
+	return File_Do(file, path, O_RDWR | O_CREAT | O_TRUNC);
 }
 ReturnCode File_Append(FileHandle* file, const String* path) {
-	ReturnCode res = File_Do(file, path, O_WRONLY | O_CREAT);
+	ReturnCode res = File_Do(file, path, O_RDWR | O_CREAT);
 	if (res) return res;
 	return File_Seek(*file, 0, FILE_SEEKFROM_END);
 }
 
 ReturnCode File_Read(FileHandle file, uint8_t* buffer, uint32_t count, uint32_t* bytesRead) {
 	*bytesRead = read(file, buffer, count);
-	return Nix_Return(*bytesRead != -1);
+	return *bytesRead == -1 ? errno : 0;
 }
 
-ReturnCode File_Write(FileHandle file, uint8_t* buffer, uint32_t count, uint32_t* bytesWrote) {
+ReturnCode File_Write(FileHandle file, const uint8_t* buffer, uint32_t count, uint32_t* bytesWrote) {
 	*bytesWrote = write(file, buffer, count);
-	return Nix_Return(*bytesWrote != -1);
+	return *bytesWrote == -1 ? errno : 0;
 }
 
 ReturnCode File_Close(FileHandle file) {
-	return Nix_Return(close(file) != -1);
+	return close(file) == -1 ? errno : 0;
 }
 
 ReturnCode File_Seek(FileHandle file, int offset, int seekType) {
 	static uint8_t modes[3] = { SEEK_SET, SEEK_CUR, SEEK_END };
-	return Nix_Return(lseek(file, offset, modes[seekType]) != -1);
+	return lseek(file, offset, modes[seekType]) == -1 ? errno : 0;
 }
 
-ReturnCode File_Position(FileHandle file, uint32_t* position) {
-	*position = lseek(file, 0, SEEK_CUR);
-	return Nix_Return(*position != -1);
+ReturnCode File_Position(FileHandle file, uint32_t* pos) {
+	*pos = lseek(file, 0, SEEK_CUR);
+	return *pos == -1 ? errno : 0;
 }
 
-ReturnCode File_Length(FileHandle file, uint32_t* length) {
+ReturnCode File_Length(FileHandle file, uint32_t* len) {
 	struct stat st;
-	if (fstat(file, &st) == -1) { *length = -1; return errno; }
-	*length = st.st_size; return 0;
+	if (fstat(file, &st) == -1) { *len = -1; return errno; }
+	*len = st.st_size; return 0;
 }
 #endif
 
@@ -643,7 +665,7 @@ void* Thread_Start(Thread_StartFunc* func, bool detach) {
 	DWORD threadID;
 	void* handle = CreateThread(NULL, 0, Thread_StartCallback, func, 0, &threadID);
 	if (!handle) {
-		ErrorHandler_Fail2(GetLastError(), "Creating thread");
+		Logger_Abort2(GetLastError(), "Creating thread");
 	}
 
 	if (detach) Thread_Detach(handle);
@@ -652,7 +674,7 @@ void* Thread_Start(Thread_StartFunc* func, bool detach) {
 
 void Thread_Detach(void* handle) {
 	if (!CloseHandle((HANDLE)handle)) {
-		ErrorHandler_Fail2(GetLastError(), "Freeing thread handle");
+		Logger_Abort2(GetLastError(), "Freeing thread handle");
 	}
 }
 
@@ -663,7 +685,7 @@ void Thread_Join(void* handle) {
 
 static CRITICAL_SECTION mutexList[3]; int mutexIndex;
 void* Mutex_Create(void) {
-	if (mutexIndex == Array_Elems(mutexList)) ErrorHandler_Fail("Cannot allocate mutex");
+	if (mutexIndex == Array_Elems(mutexList)) Logger_Abort("Cannot allocate mutex");
 	CRITICAL_SECTION* ptr = &mutexList[mutexIndex];
 	InitializeCriticalSection(ptr); mutexIndex++;
 	return ptr;
@@ -676,14 +698,14 @@ void Mutex_Unlock(void* handle) { LeaveCriticalSection((CRITICAL_SECTION*)handle
 void* Waitable_Create(void) {
 	void* handle = CreateEvent(NULL, false, false, NULL);
 	if (!handle) {
-		ErrorHandler_Fail2(GetLastError(), "Creating waitable");
+		Logger_Abort2(GetLastError(), "Creating waitable");
 	}
 	return handle;
 }
 
 void Waitable_Free(void* handle) {
 	if (!CloseHandle((HANDLE)handle)) {
-		ErrorHandler_Fail2(GetLastError(), "Freeing waitable");
+		Logger_Abort2(GetLastError(), "Freeing waitable");
 	}
 }
 
@@ -707,7 +729,7 @@ void* Thread_StartCallback(void* lpParam) {
 void* Thread_Start(Thread_StartFunc* func, bool detach) {
 	pthread_t* ptr = Mem_Alloc(1, sizeof(pthread_t), "allocating thread");
 	int res = pthread_create(ptr, NULL, Thread_StartCallback, func);
-	if (res) ErrorHandler_Fail2(res, "Creating thread");
+	if (res) Logger_Abort2(res, "Creating thread");
 
 	if (detach) Thread_Detach(ptr);
 	return ptr;
@@ -716,61 +738,61 @@ void* Thread_Start(Thread_StartFunc* func, bool detach) {
 void Thread_Detach(void* handle) {
 	pthread_t* ptr = handle;
 	int res = pthread_detach(*ptr);
-	if (res) ErrorHandler_Fail2(res, "Detaching thread");
+	if (res) Logger_Abort2(res, "Detaching thread");
 	Mem_Free(ptr);
 }
 
 void Thread_Join(void* handle) {
 	pthread_t* ptr = handle;
 	int res = pthread_join(*ptr, NULL);
-	if (res) ErrorHandler_Fail2(res, "Joining thread");
+	if (res) Logger_Abort2(res, "Joining thread");
 	Mem_Free(ptr);
 }
 
 void* Mutex_Create(void) {
 	pthread_mutex_t* ptr = Mem_Alloc(1, sizeof(pthread_mutex_t), "allocating mutex");
 	int res = pthread_mutex_init(ptr, NULL);
-	if (res) ErrorHandler_Fail2(res, "Creating mutex");
+	if (res) Logger_Abort2(res, "Creating mutex");
 	return ptr;
 }
 
 void Mutex_Free(void* handle) {
 	int res = pthread_mutex_destroy((pthread_mutex_t*)handle);
-	if (res) ErrorHandler_Fail2(res, "Destroying mutex");
+	if (res) Logger_Abort2(res, "Destroying mutex");
 	Mem_Free(handle);
 }
 
 void Mutex_Lock(void* handle) {
 	int res = pthread_mutex_lock((pthread_mutex_t*)handle);
-	if (res) ErrorHandler_Fail2(res, "Locking mutex");
+	if (res) Logger_Abort2(res, "Locking mutex");
 }
 
 void Mutex_Unlock(void* handle) {
 	int res = pthread_mutex_unlock((pthread_mutex_t*)handle);
-	if (res) ErrorHandler_Fail2(res, "Unlocking mutex");
+	if (res) Logger_Abort2(res, "Unlocking mutex");
 }
 
 void* Waitable_Create(void) {
 	pthread_cond_t* ptr = Mem_Alloc(1, sizeof(pthread_cond_t), "allocating waitable");
 	int res = pthread_cond_init(ptr, NULL);
-	if (res) ErrorHandler_Fail2(res, "Creating event");
+	if (res) Logger_Abort2(res, "Creating event");
 	return ptr;
 }
 
 void Waitable_Free(void* handle) {
 	int res = pthread_cond_destroy((pthread_cond_t*)handle);
-	if (res) ErrorHandler_Fail2(res, "Destroying event");
+	if (res) Logger_Abort2(res, "Destroying event");
 	Mem_Free(handle);
 }
 
 void Waitable_Signal(void* handle) {
 	int res = pthread_cond_signal((pthread_cond_t*)handle);
-	if (res) ErrorHandler_Fail2(res, "Signalling event");
+	if (res) Logger_Abort2(res, "Signalling event");
 }
 
 void Waitable_Wait(void* handle) {
 	int res = pthread_cond_wait((pthread_cond_t*)handle, &event_mutex);
-	if (res) ErrorHandler_Fail2(res, "Waiting event");
+	if (res) Logger_Abort2(res, "Waiting event");
 }
 
 void Waitable_WaitFor(void* handle, uint32_t milliseconds) {
@@ -786,7 +808,7 @@ void Waitable_WaitFor(void* handle, uint32_t milliseconds) {
 
 	res = pthread_cond_timedwait((pthread_cond_t*)handle, &event_mutex, &ts);
 	if (res == ETIMEDOUT) return;
-	if (res) ErrorHandler_Fail2(res, "Waiting timed event");
+	if (res) Logger_Abort2(res, "Waiting timed event");
 }
 #endif
 
@@ -803,68 +825,78 @@ static void Font_Init(void);
 #define DPI_PIXEL  72
 #define DPI_DEVICE 96 /* TODO: GetDeviceCaps(hdc, LOGPIXELSY) in Platform_InitDisplay ? */
 
+struct FontData {
+	FT_Face face;
+	struct Stream src, file;
+	FT_StreamRec stream;
+	uint8_t buffer[8192]; /* small buffer to minimise disk I/O */
+	uint16_t widths[256]; /* cached width of each character glyph */
+	FT_Glyph glyphs[256]; /* cached glyph */
+#ifdef CC_BUILD_OSX
+	char filename[FILENAME_SIZE + 1];
+#endif
+};
 
-static unsigned long Font_ReadWrapper(FT_Stream s, unsigned long offset, unsigned char* buffer, unsigned long count) {
-	struct Stream* stream;
+static unsigned long FontData_Read(FT_Stream s, unsigned long offset, unsigned char* buffer, unsigned long count) {
+	struct FontData* data;
 	ReturnCode res;
 
 	if (!count && offset > s->size) return 1;
-	stream = s->descriptor.pointer;
-	if (s->pos != offset) stream->Seek(stream, offset);
+	data = s->descriptor.pointer;
+	if (s->pos != offset) data->src.Seek(&data->src, offset);
 
-	res = Stream_Read(stream, buffer, count);
+	res = Stream_Read(&data->src, buffer, count);
 	return res ? 0 : count;
 }
 
-static void Font_CloseWrapper(FT_Stream s) {
-	struct Stream* stream;
-	struct Stream* source;
-
-	stream = s->descriptor.pointer;
-	if (!stream) return;
-	source = stream->Meta.Buffered.Source;
-
-	/* Close the actual file stream */
-	source->Close(source);
-	Mem_Free(s->descriptor.pointer);
-	s->descriptor.pointer = NULL;
-}
-
-static bool Font_MakeArgs(const String* path, FT_Stream stream, FT_Open_Args* args) {
-	struct Stream* data;
-	uint8_t* buffer;
+static bool FontData_Init(const String* path, struct FontData* data, FT_Open_Args* args) {
 	FileHandle file;
 	uint32_t size;
 
 	if (File_Open(&file, path)) return false;
 	if (File_Length(file, &size)) { File_Close(file); return false; }
-	stream->size = size;
 
-	data   = Mem_Alloc(1, sizeof(struct Stream) * 2 + 8192, "Font_MakeArgs");
-	buffer = (uint8_t*)&data[2];
-	Stream_FromFile(&data[1], file);
-	Stream_ReadonlyBuffered(&data[0], &data[1], buffer, 8192);
+	data->stream.base = NULL;
+	data->stream.size = size;
+	data->stream.pos  = 0;
 
-	stream->descriptor.pointer = data;
-	stream->memory = &ft_mem;
-	stream->read   = Font_ReadWrapper;
-	stream->close  = Font_CloseWrapper;
+	data->stream.descriptor.pointer = data;
+	data->stream.read   = FontData_Read;
+	data->stream.close  = NULL;
+
+	data->stream.memory = &ft_mem;
+	data->stream.cursor = NULL;
+	data->stream.limit  = NULL;
 
 	args->flags    = FT_OPEN_STREAM;
 	args->pathname = NULL;
-	args->stream   = stream;
+	args->stream   = &data->stream;
+
+	Stream_FromFile(&data->file, file);
+	Stream_ReadonlyBuffered(&data->src, &data->file, data->buffer, sizeof(data->buffer));
+
+	/* For OSX font suitcase files */
+#ifdef CC_BUILD_OSX
+	String filename = String_NT_Array(data->filename);
+	String_Copy(&filename, &path);
+	data->filename[filename.length] = '\0';
+	args->pathname = data->filename;
+#endif
+	Mem_Set(data->widths, 0xFF, sizeof(data->widths));
+	Mem_Set(data->glyphs, 0x00, sizeof(data->glyphs));
 	return true;
 }
 
-static int Font_Find(const String* name, StringsBuffer* entries) {
-	String faceName;
+static void FontData_Free(struct FontData* font) {
 	int i;
+	/* Close the actual file stream */
+	struct Stream* source = &font->file;
+	source->Close(source);
 
-	for (i = 1; i < entries->Count; i += 2) {
-		faceName = StringsBuffer_UNSAFE_Get(entries, i);
-		if (String_CaselessEquals(&faceName, name)) return i;
+	for (i = 0; i < 256; i++) {
+		if (!font->glyphs[i]) continue;
+		FT_Done_Glyph(font->glyphs[i]);
 	}
-	return -1;
 }
 
 void Font_GetNames(StringsBuffer* buffer) {
@@ -883,7 +915,7 @@ void Font_GetNames(StringsBuffer* buffer) {
 	}
 }
 
-static String Font_Lookup(const String* fontName, const char type) {
+static String Font_LookupOf(const String* fontName, const char type) {
 	String name; char nameBuffer[STRING_SIZE + 2];
 	String_InitArray(name, nameBuffer);
 
@@ -891,47 +923,44 @@ static String Font_Lookup(const String* fontName, const char type) {
 	return EntryList_UNSAFE_Get(&font_list, &name);
 }
 
-void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
+String Font_Lookup(const String* fontName, int style) {
 	String path;
-	FT_Stream stream;
+	if (!font_list.Entries.Count) Font_Init();
+	path = String_Empty;
+
+	if (style & FONT_STYLE_BOLD)   path = Font_LookupOf(fontName, 'B');
+	if (style & FONT_STYLE_ITALIC) path = Font_LookupOf(fontName, 'I');
+
+	return path.length ? path : Font_LookupOf(fontName, 'R');
+}
+
+void Font_Make(FontDesc* desc, const String* fontName, int size, int style) {
+	struct FontData* data;
+	String value, path, index;
+	int faceIndex;
 	FT_Open_Args args;
-	FT_Face face;
 	FT_Error err;
 
 	desc->Size  = size;
 	desc->Style = style;
 
-	if (!font_list.Entries.Count) Font_Init();
-	path = String_Empty;
+	value = Font_Lookup(fontName, style);
+	if (!value.length) Logger_Abort("Unknown font");
+	String_UNSAFE_Separate(&value, ',', &path, &index);
+	Convert_ParseInt(&index, &faceIndex);
 
-	if (style & FONT_STYLE_BOLD)   path = Font_Lookup(fontName, 'B');
-	if (style & FONT_STYLE_ITALIC) path = Font_Lookup(fontName, 'I');
+	data = Mem_Alloc(1, sizeof(struct FontData), "FontData");
+	if (!FontData_Init(&path, data, &args)) return;
+	desc->Handle = data;
 
-	if (!path.length) path = Font_Lookup(fontName, 'R');
-	if (!path.length) ErrorHandler_Fail("Unknown font");
-
-	stream = Mem_AllocCleared(1, sizeof(FT_StreamRec), "leaky font"); /* TODO: LEAKS MEMORY!!! */
-	if (!Font_MakeArgs(&path, stream, &args)) return;
-
-	/* For OSX font suitcase files */
-#ifdef CC_BUILD_OSX
-	char filenameBuffer[FILENAME_SIZE + 1];
-	String filename = String_NT_Array(filenameBuffer);
-	String_Copy(&filename, &path);
-	filename.buffer[filename.length] = '\0';
-	args.pathname = filename.buffer;
-#endif
-
-	err = FT_New_Face(ft_lib, &args, 0, &face);
-	if (err) ErrorHandler_Fail2(err, "Creating font failed");
-	desc->Handle = face;
-
-	err = FT_Set_Char_Size(face, size * 64, 0, DPI_DEVICE, 0);
-	if (err) ErrorHandler_Fail2(err, "Resizing font failed");
+	err = FT_New_Face(ft_lib, &args, faceIndex, &data->face);
+	if (err) Logger_Abort2(err, "Creating font failed");
+	err = FT_Set_Char_Size(data->face, size * 64, 0, DPI_DEVICE, 0);
+	if (err) Logger_Abort2(err, "Resizing font failed");
 }
 
 void Font_Free(FontDesc* desc) {
-	FT_Face face;
+	struct FontData* data;
 	FT_Error err;
 
 	desc->Size  = 0;
@@ -939,98 +968,121 @@ void Font_Free(FontDesc* desc) {
 	/* NULL for fonts created by Drawer2D_MakeFont and bitmapped text mode is on */
 	if (!desc->Handle) return;
 
-	face = desc->Handle;
-	err  = FT_Done_Face(face);
-	if (err) ErrorHandler_Fail2(err, "Deleting font failed");
+	data = desc->Handle;
+	err  = FT_Done_Face(data->face);
+	if (err) Logger_Abort2(err, "Deleting font failed");
+
+	Mem_Free(data);
 	desc->Handle = NULL;
 }
 
-static void Font_Add(const String* path, FT_Face face, char type, const char* defStyle) {
-	String name; char nameBuffer[STRING_SIZE];
-	String style;
+static void Font_Add(const String* path, FT_Face face, int index, char type, const char* defStyle) {
+	String key;   char keyBuffer[STRING_SIZE];
+	String value; char valueBuffer[FILENAME_SIZE];
+	String style = String_Empty;
 
 	if (!face->family_name || !(face->face_flags & FT_FACE_FLAG_SCALABLE)) return;
-	String_InitArray(name, nameBuffer);
-	String_AppendConst(&name, face->family_name);
-
 	/* don't want 'Arial Regular' or 'Arial Bold' */
 	if (face->style_name) {
 		style = String_FromReadonly(face->style_name);
-		if (!String_CaselessEqualsConst(&style, defStyle)) {
-			String_Format1(&name, " %c", face->style_name);
-		}
+		if (String_CaselessEqualsConst(&style, defStyle)) style.length = 0;
 	}
 
-	Platform_Log1("Face: %s", &name);
-	String_Append(&name, ' '); String_Append(&name, type);
-	EntryList_Set(&font_list, &name, path);
+	String_InitArray(key, keyBuffer);
+	if (style.length) {
+		String_Format3(&key, "%c %c %r", face->family_name, face->style_name, &type);
+	} else {
+		String_Format2(&key, "%c %r", face->family_name, &type);
+	}
+
+	String_InitArray(value, valueBuffer);
+	String_Format2(&value, "%s,%i", path, &index);
+
+	Platform_Log2("Face: %s = %s", &key, &value);
+	EntryList_Set(&font_list, &key, &value);
 	font_list_changed = true;
 }
 
-static void Font_DirCallback(const String* path, void* obj) {
-	static String fonExt = String_FromConst(".fon");
-	String entry, name, fontPath;
-	FT_StreamRec stream = { 0 };
+static int Font_Register(const String* path, int faceIndex) {
+	struct FontData data;
 	FT_Open_Args args;
-	FT_Face face;
 	FT_Error err;
-	int i, flags;
+	int flags, count;
 
-	if (!Font_MakeArgs(path, &stream, &args)) return;
+	if (!FontData_Init(path, &data, &args)) return 0;
+	err = FT_New_Face(ft_lib, &args, faceIndex, &data.face);
+	if (err) { FontData_Free(&data); return 0; }
 
-	/* For OSX font suitcase files */
-#ifdef CC_BUILD_OSX
-	char filenameBuffer[FILENAME_SIZE + 1];
-	String filename = String_NT_Array(filenameBuffer);
-	String_Copy(&filename, path);
-	filename.buffer[filename.length] = '\0';
-	args.pathname = filename.buffer;
-#endif
+	flags = data.face->style_flags;
+	count = data.face->num_faces;
 
-	/* If font is already known good, skip it */
-	for (i = 0; i < font_list.Entries.Count; i++) {
-		entry = StringsBuffer_UNSAFE_Get(&font_list.Entries, i);
-		String_UNSAFE_Separate(&entry, font_list.Separator, &name, &fontPath);
-		if (String_CaselessEquals(path, &fontPath)) return;
+	if (flags == (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC)) {
+		Font_Add(path, data.face, faceIndex, 'Z', "Bold Italic");
+	} else if (flags == FT_STYLE_FLAG_BOLD) {
+		Font_Add(path, data.face, faceIndex, 'B', "Bold");
+	} else if (flags == FT_STYLE_FLAG_ITALIC) {
+		Font_Add(path, data.face, faceIndex, 'I', "Italic");
+	} else if (flags == 0) {
+		Font_Add(path, data.face, faceIndex, 'R', "Regular");
 	}
+
+	FT_Done_Face(data.face);
+	FontData_Free(&data);
+	return count;
+}
+
+static void Font_DirCallback(const String* path, void* obj) {
+	const static String fonExt = String_FromConst(".fon");
+	String entry, name, value;
+	String fontPath, index;
+	int i, count;
 
 	/* Completely skip windows .FON files */
 	if (String_CaselessEnds(path, &fonExt)) return;
 
-	err = FT_New_Face(ft_lib, &args, 0, &face);
-	if (err) { stream.close(&stream); return; }
-	flags = face->style_flags;
+	/* If font is already known good, skip it */
+	for (i = 0; i < font_list.Entries.Count; i++) {
+		entry = StringsBuffer_UNSAFE_Get(&font_list.Entries, i);
+		String_UNSAFE_Separate(&entry, font_list.Separator, &name, &value);
 
-	if (flags == (FT_STYLE_FLAG_BOLD | FT_STYLE_FLAG_ITALIC)) {
-		Font_Add(path, face, 'Z', "Bold Italic");
-	} else if (flags == FT_STYLE_FLAG_BOLD) {
-		Font_Add(path, face, 'B', "Bold");
-	} else if (flags == FT_STYLE_FLAG_ITALIC) {
-		Font_Add(path, face, 'I', "Italic");
-	} else if (flags == 0) {
-		Font_Add(path, face, 'R', "Regular");
+		String_UNSAFE_Separate(&value, ',', &fontPath, &index);
+		if (String_CaselessEquals(path, &fontPath)) return;
 	}
-	FT_Done_Face(face);
+
+	count = Font_Register(path, 0);
+	/* There may be more than one font in a font file */
+	for (i = 1; i < count; i++) {
+		Font_Register(path, i);
+	}
 }
 
 #define TEXT_CEIL(x) (((x) + 63) >> 6)
-Size2D Platform_TextMeasure(struct DrawTextArgs* args) {
-	FT_Face face = args->Font.Handle;
+int Platform_TextWidth(struct DrawTextArgs* args) {
+	struct FontData* data = args->Font.Handle;
+	FT_Face face = data->face;
 	String text  = args->Text;
-	Size2D s = { 0, 0 };
+	int i, width = 0, charWidth;
 	Codepoint cp;
-	int i;
 
 	for (i = 0; i < text.length; i++) {
-		cp = Convert_CP437ToUnicode(text.buffer[i]);
-		FT_Load_Char(face, cp, 0); /* TODO: Check error */
-		s.Width += face->glyph->advance.x;
-	}
+		charWidth = data->widths[(uint8_t)text.buffer[i]];
+		/* need to calculate glyph width */
+		if (charWidth == UInt16_MaxValue) {
+			cp = Convert_CP437ToUnicode(text.buffer[i]);
+			FT_Load_Char(face, cp, 0); /* TODO: Check error */
 
-	s.Height = face->size->metrics.height;
-	s.Width  = TEXT_CEIL(s.Width);
-	s.Height = TEXT_CEIL(s.Height);
-	return s;
+			charWidth = face->glyph->advance.x;
+			data->widths[(uint8_t)text.buffer[i]] = charWidth;
+		}
+		width += charWidth;
+	}
+	return TEXT_CEIL(width);
+}
+
+int Platform_FontHeight(const FontDesc* font) {
+	struct FontData* data = font->Handle;
+	FT_Face face = data->face;
+	return TEXT_CEIL(face->size->metrics.height);
 }
 
 static void Platform_GrayscaleGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, BitmapCol col) {
@@ -1040,12 +1092,12 @@ static void Platform_GrayscaleGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, B
 	int xx, yy;
 
 	for (yy = 0; yy < img->rows; yy++) {
-		if ((y + yy) < 0 || (y + yy) >= bmp->Height) continue;
+		if ((unsigned)(y + yy) >= (unsigned)bmp->Height) continue;
 		src = img->buffer + (yy * img->pitch);
 		dst = Bitmap_GetRow(bmp, y + yy) + x;
 
-		for (xx = 0; xx < img->width; xx++, src++) {
-			if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
+		for (xx = 0; xx < img->width; xx++, src++, dst++) {
+			if ((unsigned)(x + xx) >= (unsigned)bmp->Width) continue;
 			intensity = *src; invIntensity = UInt8_MaxValue - intensity;
 
 			dst->B = ((col.B * intensity) >> 8) + ((dst->B * invIntensity) >> 8);
@@ -1053,7 +1105,6 @@ static void Platform_GrayscaleGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, B
 			dst->R = ((col.R * intensity) >> 8) + ((dst->R * invIntensity) >> 8);
 			/*dst->A = ((col.A * intensity) >> 8) + ((dst->A * invIntensity) >> 8);*/
 			dst->A = intensity + ((dst->A * invIntensity) >> 8);
-			dst++;
 		}
 	}
 }
@@ -1065,12 +1116,12 @@ static void Platform_BlackWhiteGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, 
 	int xx, yy;
 
 	for (yy = 0; yy < img->rows; yy++) {
-		if ((y + yy) < 0 || (y + yy) >= bmp->Height) continue;
+		if ((unsigned)(y + yy) >= (unsigned)bmp->Height) continue;
 		src = img->buffer + (yy * img->pitch);
 		dst = Bitmap_GetRow(bmp, y + yy) + x;
 
-		for (xx = 0; xx < img->width; xx++) {
-			if ((x + xx) < 0 || (x + xx) >= bmp->Width) continue;
+		for (xx = 0; xx < img->width; xx++, dst++) {
+			if ((unsigned)(x + xx) >= (unsigned)bmp->Width) continue;
 			intensity = src[xx >> 3];
 
 			if (intensity & (1 << (7 - (xx & 7)))) {
@@ -1078,53 +1129,59 @@ static void Platform_BlackWhiteGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, 
 				/*dst->A = col.A*/
 				dst->A = 255;
 			}
-			dst++;
 		}
 	}
 }
 
-Size2D Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, BitmapCol col) {
-	FT_Face face = args->Font.Handle;
-	String text = args->Text;
-	Size2D s = { 0, 0 };
-	int descender, begX = x;
+int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, BitmapCol col) {
+	struct FontData* data = args->Font.Handle;
+	FT_Face face = data->face;
+	String text  = args->Text;
+	int descender, height, begX = x;
 
 	/* glyph state */
+	FT_BitmapGlyph glyph;
 	FT_Bitmap* img;
 	int i, offset;
 	Codepoint cp;
 
-	s.Height  = TEXT_CEIL(face->size->metrics.height);
+	height    = TEXT_CEIL(face->size->metrics.height);
 	descender = TEXT_CEIL(face->size->metrics.descender);
 
 	for (i = 0; i < text.length; i++) {
-		cp = Convert_CP437ToUnicode(text.buffer[i]);
-		FT_Load_Char(face, cp, FT_LOAD_RENDER); /* TODO: Check error */
+		glyph = data->glyphs[(uint8_t)text.buffer[i]];
+		if (!glyph) {
+			cp = Convert_CP437ToUnicode(text.buffer[i]);
+			FT_Load_Char(face, cp, FT_LOAD_RENDER); /* TODO: Check error */
 
-		offset = (s.Height + descender) - face->glyph->bitmap_top;
-		x += face->glyph->bitmap_left; y += offset;
+			FT_Get_Glyph(face->glyph, &glyph);
+			data->glyphs[(uint8_t)text.buffer[i]] = glyph;
+		}
 
-		img = &face->glyph->bitmap;
+		offset = (height + descender) - glyph->top;
+		x += glyph->left; y += offset;
+
+		img = &glyph->bitmap;
 		if (img->num_grays == 2) {
 			Platform_BlackWhiteGlyph(img, bmp, x, y, col);
 		} else {
 			Platform_GrayscaleGlyph(img, bmp, x, y, col);
 		}
 
-		x += TEXT_CEIL(face->glyph->advance.x);
-		x -= face->glyph->bitmap_left; y -= offset;
+		x += TEXT_CEIL(glyph->root.advance.x >> 10);
+		x -= glyph->left; y -= offset;
 	}
 
-	if (args->Font.Style == FONT_STYLE_UNDERLINE) {
+	if (args->Font.Style & FONT_FLAG_UNDERLINE) {
 		int ul_pos   = FT_MulFix(face->underline_position,  face->size->metrics.y_scale);
 		int ul_thick = FT_MulFix(face->underline_thickness, face->size->metrics.y_scale);
 
 		int ulHeight = TEXT_CEIL(ul_thick);
-		int ulY      = s.Height + TEXT_CEIL(ul_pos);
+		int ulY      = height + TEXT_CEIL(ul_pos);
 		Drawer2D_Underline(bmp, begX, ulY + y, x - begX, ulHeight, col);
 	}
 
-	s.Width = x - begX; return s;
+	return x - begX;
 }
 
 static void* FT_AllocWrapper(FT_Memory memory, long size) {
@@ -1139,21 +1196,21 @@ static void* FT_ReallocWrapper(FT_Memory memory, long cur_size, long new_size, v
 	return Mem_Realloc(block, new_size, 1, "Freetype data");
 }
 
-#define FONT_CACHE_FILE "fontcache.txt"
+#define FONT_CACHE_FILE "fontscache.txt"
 static void Font_Init(void) {
 #ifdef CC_BUILD_WIN
-	static String dir = String_FromConst("C:\\Windows\\fonts");
+	const static String dir = String_FromConst("C:\\Windows\\Fonts");
 #endif
 #ifdef CC_BUILD_NIX
-	static String dir = String_FromConst("/usr/share/fonts");
+	const static String dir = String_FromConst("/usr/share/fonts");
 #endif
 #ifdef CC_BUILD_SOLARIS
-	static String dir = String_FromConst("/usr/share/fonts");
+	const static String dir = String_FromConst("/usr/share/fonts");
 #endif
 #ifdef CC_BUILD_OSX
-	static String dir = String_FromConst("/Library/Fonts");
+	const static String dir = String_FromConst("/Library/Fonts");
 #endif
-	static String cachePath = String_FromConst(FONT_CACHE_FILE);
+	const static String cachePath = String_FromConst(FONT_CACHE_FILE);
 	FT_Error err;
 
 	ft_mem.alloc   = FT_AllocWrapper;
@@ -1161,7 +1218,7 @@ static void Font_Init(void) {
 	ft_mem.realloc = FT_ReallocWrapper;
 
 	err = FT_New_Library(&ft_mem, &ft_lib);
-	if (err) ErrorHandler_Fail2(err, "Failed to init freetype");
+	if (err) Logger_Abort2(err, "Failed to init freetype");
 
 	FT_Add_Default_Modules(ft_lib);
 	FT_Set_Default_Properties(ft_lib);
@@ -1182,7 +1239,7 @@ static void Font_Init(void) {
 void Socket_Create(SocketHandle* socketResult) {
 	*socketResult = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (*socketResult == -1) {
-		ErrorHandler_Fail2(Socket__Error(), "Failed to create socket");
+		Logger_Abort2(Socket__Error(), "Failed to create socket");
 	}
 }
 
@@ -1251,300 +1308,61 @@ ReturnCode Socket_Close(SocketHandle socket) {
 	return res;
 }
 
-ReturnCode Socket_Select(SocketHandle socket, int selectMode, bool* success) {
+/* Alas, a simple cross-platform select() is not good enough */
+#ifdef CC_BUILD_WIN
+ReturnCode Socket_Poll(SocketHandle socket, int mode, bool* success) {
 	fd_set set;
 	struct timeval time = { 0 };
-	int selectCount, nfds;
+	int selectCount;
+
+	set.fd_count    = 1;
+	set.fd_array[0] = socket;
+
+	if (mode == SOCKET_POLL_READ) {
+		selectCount = select(1, &set, NULL, NULL, &time);
+	} else {
+		selectCount = select(1, NULL, &set, NULL, &time);
+	}
+
+	if (selectCount == -1) { *success = false; return Socket__Error(); }
+
+	*success = set.fd_count != 0; return 0;
+}
+#else
+#ifdef CC_BUILD_OSX
+/* poll is broken on old OSX apparently https://daniel.haxx.se/docs/poll-vs-select.html */
+ReturnCode Socket_Poll(SocketHandle socket, int mode, bool* success) {
+	fd_set set;
+	struct timeval time = { 0 };
+	int selectCount;
 
 	FD_ZERO(&set);
 	FD_SET(socket, &set);
 
-	#ifdef CC_BUILD_WIN
-	nfds = 1;
-	#else
-	nfds = socket + 1;
-	#endif
-
-	if (selectMode == SOCKET_SELECT_READ) {
-		selectCount = select(nfds, &set, NULL, NULL, &time);
+	if (mode == SOCKET_POLL_READ) {
+		selectCount = select(socket + 1, &set, NULL, NULL, &time);
 	} else {
-		selectCount = select(nfds, NULL, &set, NULL, &time);
+		selectCount = select(socket + 1, NULL, &set, NULL, &time);
 	}
 
 	if (selectCount == -1) { *success = false; return Socket__Error(); }
-#ifdef CC_BUILD_WIN
-	*success = set.fd_count != 0; return 0;
-#else
 	*success = FD_ISSET(socket, &set); return 0;
-#endif
 }
+#else
+ReturnCode Socket_Poll(SocketHandle socket, int mode, bool* success) {
+	struct pollfd pfd;
+	int flags;
 
-
-/*########################################################################################################################*
-*----------------------------------------------------------Http-----------------------------------------------------------*
-*#########################################################################################################################*/
-#ifdef CC_BUILD_WIN
-static HINTERNET hInternet;
-/* TODO: Test last modified and etag even work */
-#define FLAG_STATUS  HTTP_QUERY_STATUS_CODE    | HTTP_QUERY_FLAG_NUMBER
-#define FLAG_LENGTH  HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER
-#define FLAG_LASTMOD HTTP_QUERY_LAST_MODIFIED  | HTTP_QUERY_FLAG_SYSTEMTIME
-
-void Http_Init(void) {
-	/* TODO: Should we use INTERNET_OPEN_TYPE_PRECONFIG instead? */
-	hInternet = InternetOpenA(PROGRAM_APP_NAME, INTERNET_OPEN_TYPE_DIRECT, NULL, NULL, 0);
-	if (!hInternet) ErrorHandler_Fail2(GetLastError(), "Failed to init WinINet");
-}
-
-static ReturnCode Http_Make(struct AsyncRequest* req, HINTERNET* handle) {
-	String url = String_FromRawArray(req->URL);
-	char urlStr[STRING_SIZE + 1];
-	Mem_Copy(urlStr, url.buffer, url.length);
-
-	urlStr[url.length] = '\0';
-	char headersBuffer[STRING_SIZE * 3];
-	String headers = String_FromArray(headersBuffer);
-
-	/* https://stackoverflow.com/questions/25308488/c-wininet-custom-http-headers */
-	if (req->Etag[0] || req->LastModified) {
-		if (req->LastModified) {
-			String_AppendConst(&headers, "If-Modified-Since: ");
-			DateTime_HttpDate(req->LastModified, &headers);
-			String_AppendConst(&headers, "\r\n");
-		}
-
-		if (req->Etag[0]) {
-			String etag = String_FromRawArray(req->Etag);
-			String_AppendConst(&headers, "If-None-Match: ");
-			String_AppendString(&headers, &etag);
-			String_AppendConst(&headers, "\r\n");
-		}
-
-		String_AppendConst(&headers, "\r\n\r\n");
-		headers.buffer[headers.length] = '\0';
-	} else { headers.buffer = NULL; }
-
-	*handle = InternetOpenUrlA(hInternet, urlStr, headers.buffer, headers.length,
-		INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, 0);
-	return Win_Return(*handle);
-}
-
-static ReturnCode Http_GetHeaders(struct AsyncRequest* req, HINTERNET handle) {
-	DWORD len;
-
-	len = sizeof(DWORD);
-	if (!HttpQueryInfoA(handle, FLAG_STATUS, &req->StatusCode, &len, NULL)) return GetLastError();
-
-	len = sizeof(DWORD);
-	HttpQueryInfoA(handle, FLAG_LENGTH, &req->ContentLength, &len, NULL);
-
-	SYSTEMTIME sysTime;
-	len = sizeof(SYSTEMTIME);
-	if (HttpQueryInfoA(handle, FLAG_LASTMOD, &sysTime, &len, NULL)) {
-		struct DateTime time;
-		Platform_FromSysTime(&time, &sysTime);
-		req->LastModified = DateTime_TotalMs(&time);
-	}
-
-	String etag = String_ClearedArray(req->Etag);
-	len = etag.capacity;
-	HttpQueryInfoA(handle, HTTP_QUERY_ETAG, etag.buffer, &len, NULL);
-
-	return 0;
-}
-
-static ReturnCode Http_GetData(struct AsyncRequest* req, HINTERNET handle, volatile int* progress) {
-	uint8_t* buffer;
-	uint32_t size, totalRead;
-	uint32_t read, avail;
-	bool success;
+	pfd.fd     = socket;
+	pfd.events = mode == SOCKET_POLL_READ ? POLLIN : POLLOUT;
+	if (poll(&pfd, 1, 0) == -1) { *success = false; return Socket__Error(); }
 	
-	*progress = 0;
-	size      = req->ContentLength ? req->ContentLength : 1;
-	buffer    = Mem_Alloc(size, 1, "http get data");
-	totalRead = 0;
-
-	req->ResultData = buffer;
-	req->ResultSize = 0;
-
-	for (;;) {
-		if (!InternetQueryDataAvailable(handle, &avail, 0, 0)) break;
-		if (!avail) break;
-
-		/* expand if buffer is too small (some servers don't give content length) */
-		if (totalRead + avail > size) {
-			size   = totalRead + avail;
-			buffer = Mem_Realloc(buffer, size, 1, "http inc data");
-			req->ResultData = buffer;
-		}
-
-		success = InternetReadFile(handle, &buffer[totalRead], avail, &read);
-		if (!success) { Mem_Free(buffer); return GetLastError(); }
-		if (!read) break;
-
-		totalRead += read;
-		if (req->ContentLength) *progress = (int)(100.0f * totalRead / size);
-		req->ResultSize += read;
-	}
-
- 	*progress = 100;
+	/* to match select, closed socket still counts as readable */
+	flags    = mode == SOCKET_POLL_READ ? (POLLIN | POLLHUP) : POLLOUT;
+	*success = (pfd.revents & flags) != 0;
 	return 0;
 }
-
-ReturnCode Http_Do(struct AsyncRequest* req, volatile int* progress) {
-	HINTERNET handle;
-	ReturnCode res = Http_Make(req, &handle);
-	if (res) return res;
-
-	*progress = ASYNC_PROGRESS_FETCHING_DATA;
-	res = Http_GetHeaders(req, handle);
-	if (res) { InternetCloseHandle(handle); return res; }
-
-	if (req->RequestType != REQUEST_TYPE_CONTENT_LENGTH && req->StatusCode == 200) {
-		res = Http_GetData(req, handle, progress);
-		if (res) { InternetCloseHandle(handle); return res; }
-	}
-
-	return Win_Return(InternetCloseHandle(handle));
-}
-
-ReturnCode Http_Free(void) { return Win_Return(InternetCloseHandle(hInternet)); }
 #endif
-#ifdef CC_BUILD_POSIX
-CURL* curl;
-
-void Http_Init(void) {
-	CURLcode res = curl_global_init(CURL_GLOBAL_DEFAULT);
-	if (res) ErrorHandler_Fail2(res, "Failed to init curl");
-
-	curl = curl_easy_init();
-	if (!curl) ErrorHandler_Fail("Failed to init easy curl");
-}
-
-static int Http_Progress(int* progress, double total, double received, double a, double b) {
-	if (total == 0) return 0;
-	*progress = (int)(100 * received / total);
-	return 0;
-}
-
-static struct curl_slist* Http_Make(struct AsyncRequest* req) {
-	String tmp; char buffer[STRING_SIZE + 1];
-	struct curl_slist* list = NULL;
-	String etag;
-
-	if (req->Etag[0]) {
-		String_InitArray_NT(tmp, buffer);
-		String_AppendConst(&tmp, "If-None-Match: ");
-
-		etag = String_FromRawArray(req->Etag);
-		String_AppendString(&tmp, &etag);
-		tmp.buffer[tmp.length] = '\0';
-		list = curl_slist_append(list, tmp.buffer);
-	}
-
-	if (req->LastModified) {
-		String_InitArray_NT(tmp, buffer);
-		String_AppendConst(&tmp, "Last-Modified: ");
-
-		DateTime_HttpDate(req->LastModified, &tmp);
-		tmp.buffer[tmp.length] = '\0';
-		list = curl_slist_append(list, tmp.buffer);
-	}
-	return list;
-}
-
-static size_t Http_GetHeaders(char *buffer, size_t size, size_t nitems, struct AsyncRequest* req) {
-	String tmp; char tmpBuffer[STRING_SIZE + 1];
-	String line, name, value;
-	time_t time;
-
-	if (size != 1) return size * nitems; /* non byte header */
-	line = String_Init(buffer, nitems, nitems);
-	if (!String_UNSAFE_Separate(&line, ':', &name, &value)) return nitems;
-
-	/* value usually has \r\n at end */
-	if (value.length && value.buffer[value.length - 1] == '\n') value.length--;
-	if (value.length && value.buffer[value.length - 1] == '\r') value.length--;
-	if (!value.length) return nitems;
-
-	if (String_CaselessEqualsConst(&name, "ETag")) {
-		tmp = String_ClearedArray(req->Etag);
-		String_AppendString(&tmp, &value);
-	} else if (String_CaselessEqualsConst(&name, "Content-Length")) {
-		Convert_TryParseInt(&value, &req->ContentLength);
-		/* TODO: Fix when ContentLength isn't RequestSize */
-		req->ResultSize = req->ContentLength;
-	} else if (String_CaselessEqualsConst(&name, "Last-Modified")) {
-		String_InitArray_NT(tmp, tmpBuffer);
-		String_AppendString(&tmp, &value);
-		tmp.buffer[tmp.length] = '\0';
-
-		time = curl_getdate(tmp.buffer, NULL);
-		if (time == -1) return nitems;
-		req->LastModified = (uint64_t)time * 1000 + UNIX_EPOCH;
-	}
-	return nitems;
-}
-
-static size_t Http_GetData(char *buffer, size_t size, size_t nitems, struct AsyncRequest* req) {
-	uint32_t total, left;
-	uint8_t* dst;
-		
-	total = req->ResultSize;
-	if (!total || req->RequestType == REQUEST_TYPE_CONTENT_LENGTH) return 0;
-	if (!req->ResultData) req->ResultData = Mem_Alloc(total, 1, "http get data");
-
-	/* reuse Result as an offset */
-	left = total - req->Result;
-	left = min(left, nitems);
-	dst  = (uint8_t*)req->ResultData + req->Result;
-
-	Mem_Copy(dst, buffer, left);
-	req->Result += left;
-	return nitems;
-}
-
-ReturnCode Http_Do(struct AsyncRequest* req, volatile int* progress) {
-	struct curl_slist* list;
-	String url = String_FromRawArray(req->URL);
-	char urlStr[600];
-	long status = 0;
-	CURLcode res;
-
-	Platform_ConvertString(urlStr, &url);
-	curl_easy_reset(curl);
-	list = Http_Make(req);
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, list);
-
-	curl_easy_setopt(curl, CURLOPT_URL,            urlStr);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT,      PROGRAM_APP_NAME);
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-
-	curl_easy_setopt(curl, CURLOPT_NOPROGRESS,       0L);
-	curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, Http_Progress);
-	curl_easy_setopt(curl, CURLOPT_PROGRESSDATA,     progress);
-
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, Http_GetHeaders);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA,     req);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,  Http_GetData);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA,      req);
-
-	*progress = ASYNC_PROGRESS_FETCHING_DATA;
-	res = curl_easy_perform(curl);
-	*progress = 100;
-
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
-	req->StatusCode = status;
-
-	curl_slist_free_all(list);
-	return res;
-}
-
-ReturnCode Http_Free(void) {
-	curl_easy_cleanup(curl);
-	curl_global_cleanup();
-	return 0;
-}
 #endif
 
 
@@ -1577,7 +1395,7 @@ void Audio_Init(AudioHandle* handle, int buffers) {
 		ctx->Count = buffers;
 		return;
 	}
-	ErrorHandler_Fail("No free audio contexts");
+	Logger_Abort("No free audio contexts");
 }
 
 ReturnCode Audio_Free(AudioHandle handle) {
@@ -1674,18 +1492,18 @@ static volatile int audio_refs;
 
 static void Audio_CheckContextErrors(void) {
 	ALenum err = alcGetError(audio_device);
-	if (err) ErrorHandler_Fail2(err, "Error creating OpenAL context");
+	if (err) Logger_Abort2(err, "Error creating OpenAL context");
 }
 
 static void Audio_CreateContext(void) {
 	audio_device = alcOpenDevice(NULL);
-	if (!audio_device) ErrorHandler_Fail("Failed to create OpenAL device");
+	if (!audio_device) Logger_Abort("Failed to create OpenAL device");
 	Audio_CheckContextErrors();
 
 	audio_context = alcCreateContext(audio_device, NULL);
 	if (!audio_context) {
 		alcCloseDevice(audio_device);
-		ErrorHandler_Fail("Failed to create OpenAL context");
+		Logger_Abort("Failed to create OpenAL context");
 	}
 	Audio_CheckContextErrors();
 
@@ -1730,7 +1548,7 @@ void Audio_Init(AudioHandle* handle, int buffers) {
 
 	alDistanceModel(AL_NONE);
 	err = alGetError();
-	if (err) { ErrorHandler_Fail2(err, "DistanceModel"); }
+	if (err) { Logger_Abort2(err, "DistanceModel"); }
 
 	for (i = 0; i < Array_Elems(Audio_Contexts); i++) {
 		struct AudioContext* ctx = &Audio_Contexts[i];
@@ -1745,7 +1563,7 @@ void Audio_Init(AudioHandle* handle, int buffers) {
 		ctx->Source = -1;
 		return;
 	}
-	ErrorHandler_Fail("No free audio contexts");
+	Logger_Abort("No free audio contexts");
 }
 
 ReturnCode Audio_Free(AudioHandle handle) {
@@ -1778,7 +1596,7 @@ static ALenum GetALFormat(int channels, int bitsPerSample) {
         if (channels == 1) return AL_FORMAT_MONO8;
         if (channels == 2) return AL_FORMAT_STEREO8;
 	}
-	ErrorHandler_Fail("Unsupported audio format"); return 0;
+	Logger_Abort("Unsupported audio format"); return 0;
 }
 
 ReturnCode Audio_SetFormat(AudioHandle handle, struct AudioFormat* format) {
@@ -1892,7 +1710,7 @@ ReturnCode Audio_StopAndFree(AudioHandle handle) {
 int Platform_ConvertString(void* data, const String* src) {
 	TCHAR* dst = data;
 	int i;
-	if (src->length > FILENAME_SIZE) ErrorHandler_Fail("String too long to expand");
+	if (src->length > FILENAME_SIZE) Logger_Abort("String too long to expand");
 
 	for (i = 0; i < src->length; i++) {
 		*dst = Convert_CP437ToUnicode(src->buffer[i]); dst++;
@@ -1910,7 +1728,7 @@ void Platform_Init(void) {
 	heap = GetProcessHeap();
 	
 	res = WSAStartup(MAKEWORD(2, 2), &wsaData);
-	if (res) ErrorHandler_Fail2(res, "WSAStartup failed");
+	if (res) Logger_Abort2(res, "WSAStartup failed");
 }
 
 void Platform_Free(void) {
@@ -1940,18 +1758,10 @@ static void Platform_InitStopwatch(void) {
 	} else { sw_freqDiv = 10; }
 }
 
-void Platform_SetWorkingDir(void) {
-	TCHAR dirName[FILENAME_SIZE + 1];
-	DWORD len = GetModuleFileName(NULL, dirName, FILENAME_SIZE);
-	if (!len) return;
-
-	/* get rid of filename at end of directory */
-	for (; len > 0; len--) {
-		if (dirName[len] == '/' || dirName[len] == '\\') break;
-	}
-
-	dirName[len] = '\0';
-	SetCurrentDirectory(dirName);
+ReturnCode Platform_SetCurrentDirectory(const String* path) {
+	TCHAR str[300];
+	Platform_ConvertString(str, path);
+	return SetCurrentDirectory(str) ? 0 : GetLastError();
 }
 
 void Platform_Exit(ReturnCode code) { ExitProcess(code); }
@@ -1988,7 +1798,7 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF const char** argv, String* 
 	int i;
 	Platform_NextArg(&cmdArgs); /* skip exe path */
 
-	for (i = 0; i < PROGRAM_MAX_CMDARGS; i++) {
+	for (i = 0; i < GAME_MAX_CMDARGS; i++) {
 		args[i] = Platform_NextArg(&cmdArgs);
 
 		if (!args[i].length) break;
@@ -1996,15 +1806,54 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF const char** argv, String* 
 	return i;
 }
 
+ReturnCode Platform_Encrypt(const uint8_t* data, int len, uint8_t** enc, int* encLen) {
+	DATA_BLOB dataIn, dataOut;
+	dataIn.cbData = len; dataIn.pbData = data;
+	if (!CryptProtectData(&dataIn, NULL, NULL, NULL, NULL, 0, &dataOut)) return GetLastError();
+
+	/* copy to memory we can free */
+	*enc    = Mem_Alloc(dataOut.cbData, 1, "encrypt data");
+	*encLen = dataOut.cbData;
+	Mem_Copy(*enc, dataOut.pbData, dataOut.cbData);
+	LocalFree(dataOut.pbData);
+	return 0;
+}
+ReturnCode Platform_Decrypt(const uint8_t* data, int len, uint8_t** dec, int* decLen) {
+	DATA_BLOB dataIn, dataOut;
+	dataIn.cbData = len; dataIn.pbData = data;
+	if (!CryptUnprotectData(&dataIn, NULL, NULL, NULL, NULL, 0, &dataOut)) return GetLastError();
+
+	/* copy to memory we can free */
+	*dec    = Mem_Alloc(dataOut.cbData, 1, "decrypt data");
+	*decLen = dataOut.cbData;
+	Mem_Copy(*dec, dataOut.pbData, dataOut.cbData);
+	LocalFree(dataOut.pbData);
+	return 0;
+}
+
+ReturnCode Platform_GetExePath(String* path) {
+	TCHAR chars[FILENAME_SIZE + 1];
+	DWORD len = GetModuleFileName(NULL, chars, FILENAME_SIZE);
+	if (!len) return GetLastError();
+
+#ifdef UNICODE
+	Convert_DecodeUtf16(path, chars, len * 2);
+#else
+	Convert_DecodeAscii(path, chars, len);
+#endif
+	return 0;
+}
+
 ReturnCode Platform_StartProcess(const String* path, const String* args) {
-	String argv; char argvBuffer[300];
+	String file, argv; char argvBuffer[300];
 	TCHAR str[300], raw[300];
 	STARTUPINFO si = { 0 };
 	PROCESS_INFORMATION pi = { 0 };
 	BOOL ok;
 
+	file = *path; Utils_UNSAFE_GetFilename(&file);
 	String_InitArray(argv, argvBuffer);
-	String_Format2(&argv, "%s %s", path, args);
+	String_Format2(&argv, "%s %s", &file, args);
 	Platform_ConvertString(str, path);
 	Platform_ConvertString(raw, &argv);
 
@@ -2025,17 +1874,26 @@ ReturnCode Platform_StartOpen(const String* args) {
 	instance = ShellExecute(NULL, NULL, str, NULL, NULL, SW_SHOWNORMAL);
 	return instance > 32 ? 0 : (ReturnCode)instance;
 }
+/* Don't need special execute permission on windows */
+ReturnCode Platform_MarkExecutable(const String* path) { return 0; }
 
 ReturnCode Platform_LoadLibrary(const String* path, void** lib) {
 	TCHAR str[300];
 	Platform_ConvertString(str, path);
 	*lib = LoadLibrary(str);
-	return Win_Return(*lib);
+	return *lib ? 0 : GetLastError();
 }
 
 ReturnCode Platform_GetSymbol(void* lib, const char* name, void** symbol) {
 	*symbol = GetProcAddress(lib, name);
-	return Win_Return(*symbol);
+	return *symbol ? 0 : GetLastError();
+}
+#else
+ReturnCode Platform_Encrypt(const uint8_t* data, int len, uint8_t** enc, int* encLen) {
+	return ReturnCode_NotSupported;
+}
+ReturnCode Platform_Decrypt(const uint8_t* data, int len, uint8_t** dec, int* decLen) {
+	return ReturnCode_NotSupported;
 }
 #endif
 #ifdef CC_BUILD_POSIX
@@ -2045,7 +1903,7 @@ int Platform_ConvertString(void* data, const String* src) {
 
 	Codepoint cp;
 	int i, len = 0;
-	if (src->length > FILENAME_SIZE) ErrorHandler_Fail("String too long to expand");
+	if (src->length > FILENAME_SIZE) Logger_Abort("String too long to expand");
 
 	for (i = 0; i < src->length; i++) {
 		cur = dst + len;
@@ -2057,6 +1915,7 @@ int Platform_ConvertString(void* data, const String* src) {
 }
 
 void Platform_Init(void) {
+	signal(SIGCHLD, SIG_IGN);
 	Platform_InitDisplay();
 	Platform_InitStopwatch();
 	pthread_mutex_init(&event_mutex, NULL);
@@ -2068,12 +1927,18 @@ void Platform_Free(void) {
 	pthread_mutex_destroy(&audio_lock);
 }
 
+ReturnCode Platform_SetCurrentDirectory(const String* path) {
+	char str[600];
+	Platform_ConvertString(str, path);
+	return chdir(str) == -1 ? errno : 0;
+}
+
 void Platform_Exit(ReturnCode code) { exit(code); }
 
 int Platform_GetCommandLineArgs(int argc, STRING_REF const char** argv, String* args) {
 	int i, count;
 	argc--; /* skip executable path argument */
-	count = min(argc, PROGRAM_MAX_CMDARGS);
+	count = min(argc, GAME_MAX_CMDARGS);
 
 	for (i = 0; i < count; i++) {
 		args[i] = String_FromReadonly(argv[i + 1]);
@@ -2084,6 +1949,7 @@ int Platform_GetCommandLineArgs(int argc, STRING_REF const char** argv, String* 
 ReturnCode Platform_StartProcess(const String* path, const String* args) {
 	char str[600], raw[600];
 	pid_t pid;
+	int i, j;
 	Platform_ConvertString(str, path);
 	Platform_ConvertString(raw, args);
 
@@ -2092,8 +1958,18 @@ ReturnCode Platform_StartProcess(const String* path, const String* args) {
 
 	if (pid == 0) {
 		/* Executed in child process */
-		char* argv[3];
-		argv[0] = str; argv[1] = raw; argv[2] = NULL;
+		char* argv[15];
+		argv[0] = str; argv[1] = raw;
+
+		/* need to null-terminate multiple arguments */
+		for (i = 0, j = 2; raw[i] && i < Array_Elems(raw); i++) {
+			if (raw[i] != ' ') continue;
+
+			/* null terminate previous argument */
+			raw[i]    = '\0';
+			argv[j++] = &raw[i + 1];
+		}
+		argv[j] = NULL;
 
 		execvp(str, argv);
 		_exit(127); /* "command not found" */
@@ -2104,12 +1980,14 @@ ReturnCode Platform_StartProcess(const String* path, const String* args) {
 	}
 }
 
-static void Platform_TrimFilename(char* path, int len) {
-	/* get rid of filename at end of directory */
-	for (; len > 0; len--) {
-		if (path[len] == '/' || path[len] == '\\') break;
-		path[len] = '\0';
-	}
+ReturnCode Platform_MarkExecutable(const String* path) {
+	char str[600];
+	struct stat st;
+	Platform_ConvertString(str, path);
+
+	if (stat(str, &st) == -1) return errno;
+	st.st_mode |= S_IXUSR;
+	return chmod(str, st.st_mode) == -1 ? errno : 0;
 }
 
 ReturnCode Platform_LoadLibrary(const String* path, void** lib) {
@@ -2128,7 +2006,7 @@ ReturnCode Platform_GetSymbol(void* lib, const char* name, void** symbol) {
 static void Platform_InitDisplay(void) {
 	Display* display = XOpenDisplay(NULL);
 	int screen;
-	if (!display) ErrorHandler_Fail("Failed to open display");
+	if (!display) Logger_Abort("Failed to open display");
 
 	DisplayDevice_Meta = display;
 	screen = DefaultScreen(display);
@@ -2143,64 +2021,49 @@ static void Platform_InitDisplay(void) {
 #endif
 #ifdef CC_BUILD_NIX
 ReturnCode Platform_StartOpen(const String* args) {
-	static String path = String_FromConst("xdg-open");
+	const static String path = String_FromConst("xdg-open");
 	return Platform_StartProcess(&path, args);
 }
 static void Platform_InitStopwatch(void) { sw_freqDiv = 1000; }
 
-void Platform_SetWorkingDir(void) {
-	char path[FILENAME_SIZE + 1] = { 0 };
-	int len = readlink("/proc/self/exe", path, FILENAME_SIZE);
-	if (len <= 0) return;
+ReturnCode Platform_GetExePath(String* path) {
+	char str[600];
+	int len = readlink("/proc/self/exe", str, 600);
+	if (len == -1) return errno;
 
-	Platform_TrimFilename(path, len);
-	chdir(path);
+	Convert_DecodeUtf8(path, str, len);
+	return 0;
 }
 #endif
 #ifdef CC_BUILD_SOLARIS
 ReturnCode Platform_StartOpen(const String* args) {
 	/* TODO: Is this on solaris, or just an OpenIndiana thing */
-	static String path = String_FromConst("xdg-open");
+	const static String path = String_FromConst("xdg-open");
 	return Platform_StartProcess(&path, args);
 }
 static void Platform_InitStopwatch(void) { sw_freqDiv = 1000; }
 
-void Platform_SetWorkingDir(void) {
-	char path[FILENAME_SIZE + 1] = { 0 };
-	int len = readlink("/proc/self/path/a.out", path, FILENAME_SIZE);
-	if (len <= 0) return;
+ReturnCode Platform_GetExePath(String* path) {
+	char str[600];
+	int len = readlink("/proc/self/path/a.out", str, 600);
+	if (len == -1) return errno;
 
-	Platform_TrimFilename(path, len);
-	chdir(path);
+	Convert_DecodeUtf8(path, str, len);
+	return 0;
 }
 #endif
 #ifdef CC_BUILD_OSX
 ReturnCode Platform_StartOpen(const String* args) {
-	static String path = String_FromConst("/usr/bin/open");
+	const static String path = String_FromConst("/usr/bin/open");
 	return Platform_StartProcess(&path, args);
 }
-void Platform_SetWorkingDir(void) {
-	char path[1024];
-	CFBundleRef bundle;
-	CFURLRef bundleUrl;
-	CFStringRef cfPath;
-	int len;
+ReturnCode Platform_GetExePath(String* path) {
+	char str[600];
+	int len = 600;
 
-	bundle = CFBundleGetMainBundle();
-	if (!bundle) return;
-	bundleUrl = CFBundleCopyBundleURL(bundle);
-	if (!bundleUrl) return;
-
-	cfPath = CFURLCopyFileSystemPath(bundleUrl, kCFURLPOSIXPathStyle);
-	if (!cfPath) return;
-	CFStringGetCString(cfPath, path, Array_Elems(path), kCFStringEncodingUTF8);
-
-	CFRelease(bundleUrl);
-	CFRelease(cfPath);
-
-	len = String_CalcLen(path, Array_Elems(path));
-	Platform_TrimFilename(path, len);
-	chdir(path);
+	if (_NSGetExecutablePath(str, &len) != 0) return ReturnCode_InvalidArg;
+	Convert_DecodeUtf8(path, str, len);
+	return 0;
 }
 
 static void Platform_InitDisplay(void) {

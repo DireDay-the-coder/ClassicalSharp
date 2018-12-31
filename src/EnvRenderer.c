@@ -9,7 +9,7 @@
 #include "Event.h"
 #include "Utils.h"
 #include "Game.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Stream.h"
 #include "Block.h"
 #include "Event.h"
@@ -128,13 +128,11 @@ static GfxResourceID clouds_vb, clouds_tex;
 static int clouds_vertices;
 
 void EnvRenderer_RenderClouds(double deltaTime) {
-	double time;
 	float offset;
 	struct Matrix m;
 
 	if (!clouds_vb || Env_CloudsHeight < -2000) return;
-	time   = Game_Accumulator;
-	offset = (float)(time / 2048.0f * 0.6f * Env_CloudsSpeed);
+	offset = (float)(Game_Time / 2048.0f * 0.6f * Env_CloudsSpeed);
 
 	m = Matrix_Identity; m.Row3.X = offset; /* translate X axis */
 	Gfx_LoadMatrix(MATRIX_TEXTURE, &m);
@@ -304,7 +302,7 @@ void EnvRenderer_RenderSkybox(double deltaTime) {
 
 	/* Base skybox rotation */
 	m       = Matrix_Identity;
-	rotTime = (float)(Game_Accumulator * 2 * MATH_PI); /* So speed of 1 rotates whole skybox every second */
+	rotTime = (float)(Game_Time * 2 * MATH_PI); /* So speed of 1 rotates whole skybox every second */
 	Matrix_RotateY(&rotY, Env_SkyboxHorSpeed * rotTime); Matrix_MulBy(&m, &rotY);
 	Matrix_RotateX(&rotX, Env_SkyboxVerSpeed * rotTime); Matrix_MulBy(&m, &rotX);
 
@@ -472,7 +470,7 @@ void EnvRenderer_RenderWeather(double deltaTime) {
 	pos.Y = max(World_Height, pos.Y);
 
 	speed     = (weather == WEATHER_RAINY ? 1.0f : 0.2f) * Env_WeatherSpeed;
-	vOffset   = (float)Game_Accumulator * speed;
+	vOffset   = (float)Game_Time * speed;
 	particles = weather == WEATHER_RAINY;
 	weather_accumulator += deltaTime;
 
@@ -827,14 +825,19 @@ static void EnvRenderer_ContextRecreated(void* obj) {
 	EnvRenderer_UpdateAll();
 }
 
-void EnvRenderer_UseLegacyMode(bool legacy) {
-	EnvRenderer_Legacy = legacy;
+void EnvRenderer_SetMode(int flags) {
+	EnvRenderer_Legacy  = flags & ENV_LEGACY;
+	EnvRenderer_Minimal = flags & ENV_MINIMAL;
 	EnvRenderer_ContextRecreated(NULL);
 }
 
-void EnvRenderer_UseMinimalMode(bool minimal) {
-	EnvRenderer_Minimal = minimal;
-	EnvRenderer_ContextRecreated(NULL);
+int EnvRenderer_CalcFlags(const String* mode) {
+	if (String_CaselessEqualsConst(mode, "legacyfast")) return ENV_LEGACY | ENV_MINIMAL;
+	if (String_CaselessEqualsConst(mode, "legacy"))     return ENV_LEGACY;
+	if (String_CaselessEqualsConst(mode, "normal"))     return 0;
+	if (String_CaselessEqualsConst(mode, "normalfast")) return ENV_MINIMAL;
+
+	return -1;
 }
 
 
@@ -898,32 +901,32 @@ static void EnvRenderer_Init(void) {
 	int flags;
 	Options_UNSAFE_Get(OPT_RENDER_TYPE, &renderType);
 
-	flags = Game_CalcRenderType(&renderType);
+	flags = EnvRenderer_CalcFlags(&renderType);
 	if (flags == -1) flags = 0;
-	EnvRenderer_Legacy  = (flags & 1);
-	EnvRenderer_Minimal = (flags & 2);
+	EnvRenderer_Legacy  = flags & ENV_LEGACY;
+	EnvRenderer_Minimal = flags & ENV_MINIMAL;
 
-	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, EnvRenderer_FileChanged);
-	Event_RegisterVoid(&TextureEvents_PackChanged,  NULL, EnvRenderer_TexturePackChanged);
-	Event_RegisterVoid(&TextureEvents_AtlasChanged, NULL, EnvRenderer_TerrainAtlasChanged);
+	Event_RegisterEntry(&TextureEvents.FileChanged, NULL, EnvRenderer_FileChanged);
+	Event_RegisterVoid(&TextureEvents.PackChanged,  NULL, EnvRenderer_TexturePackChanged);
+	Event_RegisterVoid(&TextureEvents.AtlasChanged, NULL, EnvRenderer_TerrainAtlasChanged);
 
-	Event_RegisterVoid(&GfxEvents_ViewDistanceChanged, NULL, EnvRenderer_ViewDistanceChanged);
-	Event_RegisterInt(&WorldEvents_EnvVarChanged,      NULL, EnvRenderer_EnvVariableChanged);
-	Event_RegisterVoid(&GfxEvents_ContextLost,         NULL, EnvRenderer_ContextLost);
-	Event_RegisterVoid(&GfxEvents_ContextRecreated,    NULL, EnvRenderer_ContextRecreated);
+	Event_RegisterVoid(&GfxEvents.ViewDistanceChanged, NULL, EnvRenderer_ViewDistanceChanged);
+	Event_RegisterInt(&WorldEvents.EnvVarChanged,      NULL, EnvRenderer_EnvVariableChanged);
+	Event_RegisterVoid(&GfxEvents.ContextLost,         NULL, EnvRenderer_ContextLost);
+	Event_RegisterVoid(&GfxEvents.ContextRecreated,    NULL, EnvRenderer_ContextRecreated);
 
 	Game_SetViewDistance(Game_UserViewDistance);
 }
 
 static void EnvRenderer_Free(void) {
-	Event_UnregisterEntry(&TextureEvents_FileChanged, NULL, EnvRenderer_FileChanged);
-	Event_UnregisterVoid(&TextureEvents_PackChanged,  NULL, EnvRenderer_TexturePackChanged);
-	Event_UnregisterVoid(&TextureEvents_AtlasChanged, NULL, EnvRenderer_TerrainAtlasChanged);
+	Event_UnregisterEntry(&TextureEvents.FileChanged, NULL, EnvRenderer_FileChanged);
+	Event_UnregisterVoid(&TextureEvents.PackChanged,  NULL, EnvRenderer_TexturePackChanged);
+	Event_UnregisterVoid(&TextureEvents.AtlasChanged, NULL, EnvRenderer_TerrainAtlasChanged);
 
-	Event_UnregisterVoid(&GfxEvents_ViewDistanceChanged, NULL, EnvRenderer_ViewDistanceChanged);
-	Event_UnregisterInt(&WorldEvents_EnvVarChanged,      NULL, EnvRenderer_EnvVariableChanged);
-	Event_UnregisterVoid(&GfxEvents_ContextLost,         NULL, EnvRenderer_ContextLost);
-	Event_UnregisterVoid(&GfxEvents_ContextRecreated,    NULL, EnvRenderer_ContextRecreated);
+	Event_UnregisterVoid(&GfxEvents.ViewDistanceChanged, NULL, EnvRenderer_ViewDistanceChanged);
+	Event_UnregisterInt(&WorldEvents.EnvVarChanged,      NULL, EnvRenderer_EnvVariableChanged);
+	Event_UnregisterVoid(&GfxEvents.ContextLost,         NULL, EnvRenderer_ContextLost);
+	Event_UnregisterVoid(&GfxEvents.ContextRecreated,    NULL, EnvRenderer_ContextRecreated);
 
 	EnvRenderer_ContextLost(NULL);
 	Mem_Free(Weather_Heightmap);

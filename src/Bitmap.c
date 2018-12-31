@@ -3,7 +3,7 @@
 #include "PackedCol.h"
 #include "ExtMath.h"
 #include "Deflate.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Stream.h"
 #include "Errors.h"
 #include "Utils.h"
@@ -119,7 +119,7 @@ static void Png_Reconstruct(uint8_t type, uint8_t bytesPerPixel, uint8_t* line, 
 		return;
 
 	default:
-		ErrorHandler_Fail("PNG scanline has invalid filter type");
+		Logger_Abort("PNG scanline has invalid filter type");
 		return;
 	}
 }
@@ -507,42 +507,17 @@ ReturnCode Png_Decode(Bitmap* bmp, struct Stream* stream) {
 /*########################################################################################################################*
 *------------------------------------------------------PNG encoder--------------------------------------------------------*
 *#########################################################################################################################*/
-static ReturnCode Bitmap_Crc32StreamWrite(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
-	struct Stream* source;
-	uint32_t i, crc32 = stream->Meta.CRC32.CRC32;
-
-	/* TODO: Optimise this calculation */
-	for (i = 0; i < count; i++) {
-		crc32 = Utils_Crc32Table[(crc32 ^ data[i]) & 0xFF] ^ (crc32 >> 8);
-	}
-	stream->Meta.CRC32.CRC32 = crc32;
-
-	source = stream->Meta.CRC32.Source;
-	return source->Write(source, data, count, modified);
-}
-
-static void Bitmap_Crc32Stream(struct Stream* stream, struct Stream* underlying) {
-	Stream_Init(stream);
-	stream->Meta.CRC32.Source = underlying;
-	stream->Meta.CRC32.CRC32  = 0xFFFFFFFFUL;
-	stream->Write = Bitmap_Crc32StreamWrite;
-}
-
-static void Png_Filter(uint8_t filter, uint8_t* cur, uint8_t* prior, uint8_t* best, int lineLen) {
+static void Png_Filter(uint8_t filter, const uint8_t* cur, const uint8_t* prior, uint8_t* best, int lineLen, int bpp) {
 	/* 3 bytes per pixel constant */
 	uint8_t a, b, c;
 	int i, p, pa, pb, pc;
 
 	switch (filter) {
-	case PNG_FILTER_NONE:
-		Mem_Copy(best, cur, lineLen);
-		break;
-
 	case PNG_FILTER_SUB:
-		best[0] = cur[0]; best[1] = cur[1]; best[2] = cur[2];
+		for (i = 0; i < bpp; i++) { best[i] = cur[i]; }
 
-		for (i = 3; i < lineLen; i++) {
-			best[i] = cur[i] - cur[i - 3];
+		for (; i < lineLen; i++) {
+			best[i] = cur[i] - cur[i - bpp];
 		}
 		break;
 
@@ -553,22 +528,18 @@ static void Png_Filter(uint8_t filter, uint8_t* cur, uint8_t* prior, uint8_t* be
 		break;
 
 	case PNG_FILTER_AVERAGE:
-		best[0] = cur[0] - (prior[0] >> 1);
-		best[1] = cur[1] - (prior[1] >> 1);
-		best[2] = cur[2] - (prior[2] >> 1);
+		for (i = 0; i < bpp; i++) { best[i] = cur[i] - (prior[i] >> 1); }
 
-		for (i = 3; i < lineLen; i++) {
-			best[i] = cur[i] - ((prior[i] + cur[i - 3]) >> 1);
+		for (; i < lineLen; i++) {
+			best[i] = cur[i] - ((prior[i] + cur[i - bpp]) >> 1);
 		}
 		break;
 
 	case PNG_FILTER_PAETH:
-		best[0] = cur[0] - prior[0]; 
-		best[1] = cur[1] - prior[1];
-		best[2] = cur[2] - prior[2];
+		for (i = 0; i < bpp; i++) { best[i] = cur[i] - prior[i]; }
 
-		for (i = 3; i < lineLen; i++) {
-			a = cur[i - 3]; b = prior[i]; c = prior[i - 3];
+		for (; i < lineLen; i++) {
+			a = cur[i - bpp]; b = prior[i]; c = prior[i - bpp];
 			p = a + b - c;
 
 			pa = Math_AbsI(p - a);
@@ -583,20 +554,29 @@ static void Png_Filter(uint8_t filter, uint8_t* cur, uint8_t* prior, uint8_t* be
 	}
 }
 
-static void Png_EncodeRow(const BitmapCol* src, uint8_t* cur, uint8_t* prior, uint8_t* best, int lineLen) {
-	uint8_t* dst = cur;
+static void Png_MakeRow(const BitmapCol* src, uint8_t* dst, int lineLen, bool alpha) {
+	uint8_t* end = dst + lineLen;
+
+	if (alpha) {
+		for (; dst < end; src++, dst += 4) {
+			dst[0] = src->R; dst[1] = src->G; dst[2] = src->B; dst[3] = src->A;
+		}
+	} else {
+		for (; dst < end; src++, dst += 3) {
+			dst[0] = src->R; dst[1] = src->G; dst[2] = src->B;
+		}
+	}
+}
+
+static void Png_EncodeRow(const uint8_t* cur, const uint8_t* prior, uint8_t* best, int lineLen, bool alpha) {
+	uint8_t* dst;
 	int bestFilter, bestEstimate = Int32_MaxValue;
 	int x, filter, estimate;
-
-	for (x = 0; x < lineLen; x += 3) {
-		dst[0] = src->R; dst[1] = src->G; dst[2] = src->B;
-		src++; dst += 3;
-	}
 
 	dst = best + 1;
 	/* NOTE: Waste of time trying the PNG_NONE filter */
 	for (filter = PNG_FILTER_SUB; filter <= PNG_FILTER_PAETH; filter++) {
-		Png_Filter(filter, cur, prior, dst, lineLen);
+		Png_Filter(filter, cur, prior, dst, lineLen, alpha ? 4 : 3);
 
 		/* Estimate how well this filtered line will compress, based on */
 		/* smallest sum of magnitude of each byte (signed) in the line */
@@ -614,26 +594,31 @@ static void Png_EncodeRow(const BitmapCol* src, uint8_t* cur, uint8_t* prior, ui
 	/* The bytes in dst are from last filter run (paeth) */
 	/* However, we want dst to be bytes from the best filter */
 	if (bestFilter != PNG_FILTER_PAETH) {
-		Png_Filter(bestFilter, cur, prior, dst, lineLen);
+		Png_Filter(bestFilter, cur, prior, dst, lineLen, alpha ? 4 : 3);
 	}
+
 	best[0] = bestFilter;
 }
 
 static int Png_SelectRow(Bitmap* bmp, int y) { return y; }
-ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector selectRow) {	
+ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector selectRow, bool alpha) {	
 	uint8_t tmp[32];
+	/* TODO: This should be * 4 for alpha (should switch to mem_alloc though) */
 	uint8_t prevLine[PNG_MAX_DIMS * 3], curLine[PNG_MAX_DIMS * 3];
 	uint8_t bestLine[PNG_MAX_DIMS * 3 + 1];
 
 	struct ZLibState zlState;
 	struct Stream chunk, zlStream;
-	uint32_t stream_len;
+	uint32_t stream_end, stream_beg;
 	int y, lineSize;
 	ReturnCode res;
 
+	/* stream may not start at 0 (e.g. when making default.zip) */
+	if ((res = stream->Position(stream, &stream_beg))) return res;
+
 	if (!selectRow) selectRow = Png_SelectRow;
 	if ((res = Stream_Write(stream, png_sig, PNG_SIG_SIZE))) return res;
-	Bitmap_Crc32Stream(&chunk, stream);
+	Stream_WriteonlyCrc32(&chunk, stream);
 
 	/* Write header chunk */
 	Stream_SetU32_BE(&tmp[0], PNG_IHDR_SIZE);
@@ -642,7 +627,7 @@ ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector select
 		Stream_SetU32_BE(&tmp[8],  bmp->Width);
 		Stream_SetU32_BE(&tmp[12], bmp->Height);
 		tmp[16] = 8;           /* bits per sample */
-		tmp[17] = PNG_COL_RGB; /* TODO: RGBA but mask all alpha to 255? */
+		tmp[17] = alpha ? PNG_COL_RGB_A : PNG_COL_RGB;
 		tmp[18] = 0;           /* DEFLATE compression method */
 		tmp[19] = 0;           /* ADAPTIVE filter method */
 		tmp[20] = 0;           /* Not using interlacing */
@@ -656,7 +641,7 @@ ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector select
 	if ((res = Stream_Write(&chunk, tmp, 4))) return res;
 
 	ZLib_MakeStream(&zlStream, &zlState, &chunk); 
-	lineSize = bmp->Width * 3;
+	lineSize = bmp->Width * (alpha ? 4 : 3);
 	Mem_Set(prevLine, 0, lineSize);
 
 	for (y = 0; y < bmp->Height; y++) {
@@ -665,7 +650,9 @@ ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector select
 		uint8_t* prev  = (y & 1) == 0 ? prevLine : curLine;
 		uint8_t* cur   = (y & 1) == 0 ? curLine  : prevLine;
 
-		Png_EncodeRow(src, cur, prev, bestLine, lineSize);
+		Png_MakeRow(src, cur, lineSize, alpha);
+		Png_EncodeRow(cur, prev, bestLine, lineSize, alpha);
+
 		/* +1 for filter byte */
 		if ((res = Stream_Write(&zlStream, bestLine, lineSize + 1))) return res;
 	}
@@ -675,13 +662,14 @@ ReturnCode Png_Encode(Bitmap* bmp, struct Stream* stream, Png_RowSelector select
 	/* Write end chunk */
 	Stream_SetU32_BE(&tmp[4],  0);
 	Stream_SetU32_BE(&tmp[8],  PNG_FourCC('I','E','N','D'));
-	Stream_SetU32_BE(&tmp[12], 0xAE426082UL); /* CRC32 of iend */
+	Stream_SetU32_BE(&tmp[12], 0xAE426082UL); /* CRC32 of IEND */
 	if ((res = Stream_Write(stream, tmp, 16))) return res;
 
-	/* Come back to write size of data chunk */
-	if ((res = stream->Length(stream, &stream_len))) return res;
-	if ((res = stream->Seek(stream, 33)))            return res;
+	/* Come back to fixup size of data in data chunk */
+	if ((res = stream->Length(stream, &stream_end)))   return res;
+	if ((res = stream->Seek(stream, stream_beg + 33))) return res;
 
-	Stream_SetU32_BE(&tmp[0], stream_len - 57);
-	return Stream_Write(stream, tmp, 4);
+	Stream_SetU32_BE(&tmp[0], (stream_end - stream_beg) - 57);
+	if ((res = Stream_Write(stream, tmp, 4))) return res;
+	return stream->Seek(stream, stream_end);
 }

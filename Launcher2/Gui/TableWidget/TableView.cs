@@ -295,4 +295,5 @@ namespace Launcher.Gui.Widgets
 
     private delegate string ColumnFilter(TableEntry entry);
   }
+
 }

@@ -4,8 +4,10 @@
    Copyright 2017 ClassicalSharp | Licensed under BSD-3
 */
 
-#define PROGRAM_MAX_CMDARGS 5
-#define PROGRAM_APP_NAME "ClassiCube 0.99.9.2"
+#define GAME_MAX_CMDARGS 5
+#define GAME_APP_NAME "ClassiCube 0.99.9.2"
+#define GAME_APP_VER  "0.99.9.2"
+#define GAME_API_VER 1
 
 /* Max number of characters strings can have. */
 #define STRING_SIZE 64
@@ -19,9 +21,9 @@
 #define CHUNK_SIZE_3 (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE)
 
 #define CHUNK_MAX 15
-/* Local index in a chunk for a coordinate */
+/* Local index in a chunk for a coordinate. */
 #define CHUNK_MASK 15
-/* Chunk index for a coordinate */
+/* Chunk index for a coordinate. */
 #define CHUNK_SHIFT 4
 
 /* Chunk axis length (plus neighbours) in blocks. */
@@ -46,7 +48,7 @@ enum FACE_CONSTS {
 };
 
 enum SKIN_TYPE { SKIN_64x32, SKIN_64x64, SKIN_64x64_SLIM, SKIN_INVALID = 0xF0 };
-enum FONT_STYLE { FONT_STYLE_NORMAL, FONT_STYLE_BOLD, FONT_STYLE_ITALIC, FONT_STYLE_UNDERLINE };
+enum FONT_STYLE { FONT_STYLE_NORMAL, FONT_STYLE_BOLD, FONT_STYLE_ITALIC, FONT_FLAG_UNDERLINE = 0x80 };
 #define DRAWER2D_MAX_COLS 256
 
 #define UInt8_MaxValue  ((uint8_t)255)

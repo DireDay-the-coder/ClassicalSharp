@@ -17,9 +17,9 @@
 #include "Model.h"
 #include "Funcs.h"
 #include "Lighting.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Drawer2D.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "TexturePack.h"
 #include "Gui.h"
 #include "Errors.h"
@@ -125,16 +125,16 @@ static void Handlers_AddTablistEntry(EntityID id, const String* playerName, cons
 			   || !String_Equals(groupName,  &oldGroupName)  || groupRank != oldGroupRank;	
 		if (changed) {
 			TabList_Set(id, playerName, listName, groupName, groupRank);
-			Event_RaiseInt(&TabListEvents_Changed, id);
+			Event_RaiseInt(&TabListEvents.Changed, id);
 		}
 	} else {
 		TabList_Set(id, playerName, listName, groupName, groupRank);
-		Event_RaiseInt(&TabListEvents_Added, id);
+		Event_RaiseInt(&TabListEvents.Added, id);
 	}
 }
 
 static void Handlers_RemoveTablistEntry(EntityID id) {
-	Event_RaiseInt(&TabListEvents_Removed, id);
+	Event_RaiseInt(&TabListEvents.Removed, id);
 	TabList_Remove(id);
 }
 
@@ -165,7 +165,7 @@ static void Handlers_AddEntity(uint8_t* data, EntityID id, const String* display
 
 		NetPlayer_Init(pl, displayName, skinName);
 		Entities_List[id] = &pl->Base;
-		Event_RaiseInt(&EntityEvents_Added, id);
+		Event_RaiseInt(&EntityEvents.Added, id);
 	} else {
 		p = &LocalPlayer_Instance;
 		p->Base.VTABLE->Despawn(&p->Base);
@@ -223,7 +223,7 @@ static void WoM_UpdateIdentifier(void) {
 }
 
 static void WoM_CheckMotd(void) {
-	static String cfg = String_FromConst("cfg=");
+	const static String cfg = String_FromConst("cfg=");
 	String url; char urlBuffer[STRING_SIZE];
 	String motd, host;
 	int index;	
@@ -243,12 +243,12 @@ static void WoM_CheckMotd(void) {
 	applied in the new world if the async 'get env request' didn't complete before the old world was unloaded */
 	wom_counter++;
 	WoM_UpdateIdentifier();
-	AsyncDownloader_GetData(&url, true, &wom_identifier);
+	Http_AsyncGetData(&url, true, &wom_identifier);
 	wom_sendId = true;
 }
 
 static void WoM_CheckSendWomID(void) {
-	static String msg = String_FromConst("/womid WoMClient-2.0.7");
+	const static String msg = String_FromConst("/womid WoMClient-2.0.7");
 
 	if (wom_sendId && !wom_sentId) {
 		Chat_Send(&msg, false);
@@ -259,7 +259,7 @@ static void WoM_CheckSendWomID(void) {
 static PackedCol WoM_ParseCol(const String* value, PackedCol defaultCol) {
 	PackedCol col;
 	int argb;
-	if (!Convert_TryParseInt(value, &argb)) return defaultCol;
+	if (!Convert_ParseInt(value, &argb)) return defaultCol;
 
 	col.A = 255;
 	col.R = (uint8_t)(argb >> 16);
@@ -268,7 +268,7 @@ static PackedCol WoM_ParseCol(const String* value, PackedCol defaultCol) {
 	return col;
 }
 
-static void WoM_ParseConfig(struct AsyncRequest* item) {
+static void WoM_ParseConfig(struct HttpRequest* item) {
 	String line; char lineBuffer[STRING_SIZE * 2];
 	struct Stream mem;
 	String key, value;
@@ -276,7 +276,7 @@ static void WoM_ParseConfig(struct AsyncRequest* item) {
 	PackedCol col;
 
 	String_InitArray(line, lineBuffer);
-	Stream_ReadonlyMemory(&mem, item->ResultData, item->ResultSize);
+	Stream_ReadonlyMemory(&mem, item->Data, item->Size);
 
 	while (!Stream_ReadLine(&mem, &line)) {
 		Platform_Log(&line);
@@ -292,7 +292,7 @@ static void WoM_ParseConfig(struct AsyncRequest* item) {
 			col = WoM_ParseCol(&value, Env_DefaultFogCol);
 			Env_SetFogCol(col);
 		} else if (String_CaselessEqualsConst(&key, "environment.level")) {
-			if (Convert_TryParseInt(&value, &waterLevel)) {
+			if (Convert_ParseInt(&value, &waterLevel)) {
 				Env_SetEdgeHeight(waterLevel);
 			}
 		} else if (String_CaselessEqualsConst(&key, "user.detail") && !cpe_useMessageTypes) {
@@ -308,11 +308,11 @@ static void WoM_Reset(void) {
 }
 
 static void WoM_Tick(void) {
-	struct AsyncRequest item;
-	if (!AsyncDownloader_Get(&wom_identifier, &item)) return;
+	struct HttpRequest item;
+	if (!Http_GetResult(&wom_identifier, &item)) return;
 
-	if (item.ResultData) WoM_ParseConfig(&item);
-	ASyncRequest_Free(&item);
+	if (item.Success) WoM_ParseConfig(&item);
+	HttpRequest_Free(&item);
 }
 
 
@@ -407,7 +407,7 @@ static void Classic_Ping(uint8_t* data) { }
 
 static void Classic_StartLoading(void) {
 	World_Reset();
-	Event_RaiseVoid(&WorldEvents_NewMap);
+	Event_RaiseVoid(&WorldEvents.NewMap);
 	Stream_ReadonlyMemory(&map_part, NULL, 0);
 
 	classic_prevScreen = Gui_Active;
@@ -468,7 +468,7 @@ static void Classic_LevelDataChunk(uint8_t* data) {
 
 	if (!map_gzHeader.Done) {
 		res = GZipHeader_Read(&map_part, &map_gzHeader);
-		if (res && res != ERR_END_OF_STREAM) ErrorHandler_Fail2(res, "reading map data");
+		if (res && res != ERR_END_OF_STREAM) Logger_Abort2(res, "reading map data");
 	}
 
 	if (map_gzHeader.Done) {
@@ -506,7 +506,7 @@ static void Classic_LevelDataChunk(uint8_t* data) {
 	}
 
 	progress = !map_blocks ? 0.0f : (float)map_index / map_volume;
-	Event_RaiseFloat(&WorldEvents_Loading, progress);
+	Event_RaiseFloat(&WorldEvents.Loading, progress);
 }
 
 static void Classic_LevelFinalise(uint8_t* data) {
@@ -534,7 +534,7 @@ static void Classic_LevelFinalise(uint8_t* data) {
 	}
 #endif
 
-	Event_RaiseVoid(&WorldEvents_MapLoaded);
+	Event_RaiseVoid(&WorldEvents.MapLoaded);
 	WoM_CheckSendWomID();
 
 	map_blocks       = NULL;
@@ -560,7 +560,7 @@ static void Classic_SetBlock(uint8_t* data) {
 }
 
 static void Classic_AddEntity(uint8_t* data) {
-	static String group = String_FromConst("Players");
+	const static String group = String_FromConst("Players");
 	String name; char nameBuffer[STRING_SIZE];
 	String skin; char skinBuffer[STRING_SIZE];
 	EntityID id;
@@ -629,9 +629,9 @@ static void Classic_RemoveEntity(uint8_t* data) {
 }
 
 static void Classic_Message(uint8_t* data) {
+	const static String detailMsg  = String_FromConst("^detail.user=");
+	const static String detailUser = String_FromConst("^detail.user");
 	String text; char textBuffer[STRING_SIZE + 2];
-	static String detailMsg  = String_FromConst("^detail.user=");
-	static String detailUser = String_FromConst("^detail.user");
 
 	uint8_t type = *data++;
 	String_InitArray(text, textBuffer);
@@ -653,7 +653,7 @@ static void Classic_Message(uint8_t* data) {
 }
 
 static void Classic_Kick(uint8_t* data) {
-	static String title = String_FromConst("&eLost connection to the server");
+	const static String title = String_FromConst("&eLost connection to the server");
 	String reason; char reasonBuffer[STRING_SIZE];
 
 	String_InitArray(reason, reasonBuffer);
@@ -741,13 +741,13 @@ const char* cpe_clientExtensions[30] = {
 static void CPE_SetMapEnvUrl(uint8_t* data);
 
 #define Ext_Deg2Packed(x) ((int16_t)((x) * 65536.0f / 360.0f))
-void CPE_WritePlayerClick(MouseButton button, bool buttonDown, uint8_t targetId, struct PickedPos* pos) {
+void CPE_WritePlayerClick(MouseButton button, bool pressed, uint8_t targetId, struct PickedPos* pos) {
 	struct Entity* p = &LocalPlayer_Instance.Base;
 	uint8_t* data = ServerConnection_WriteBuffer;
 	*data++ = OPCODE_PLAYER_CLICK;
 	{
 		*data++ = button;
-		*data++ = buttonDown;
+		*data++ = !pressed;
 		Stream_SetU16_BE(data, Ext_Deg2Packed(p->HeadY)); data += 2;
 		Stream_SetU16_BE(data, Ext_Deg2Packed(p->HeadX)); data += 2;
 
@@ -862,7 +862,7 @@ static void CPE_SendCpeExtInfoReply(void) {
 }
 
 static void CPE_ExtInfo(uint8_t* data) {
-	static String d3Server = String_FromConst("D3 server");
+	const static String d3Server = String_FromConst("D3 server");
 	String appName; char appNameBuffer[STRING_SIZE];
 
 	String_InitArray(appName, appNameBuffer);
@@ -954,7 +954,7 @@ static void CPE_CustomBlockLevel(uint8_t* data) {
 	CPE_WriteCustomBlockLevel(1);
 	Net_SendPacket();
 	Game_UseCPEBlocks = true;
-	Event_RaiseVoid(&BlockEvents_PermissionsChanged);
+	Event_RaiseVoid(&BlockEvents.PermissionsChanged);
 }
 
 static void CPE_HoldThis(uint8_t* data) {
@@ -964,10 +964,10 @@ static void CPE_HoldThis(uint8_t* data) {
 	Handlers_ReadBlock(data, block);
 	canChange = *data == 0;
 
-	Inventory_CanChangeHeldBlock = true;
+	Inventory_CanChangeSelected = true;
 	Inventory_SetSelectedBlock(block);
-	Inventory_CanChangeHeldBlock = canChange;
-	Inventory_CanPick = block != BLOCK_AIR;
+	Inventory_CanChangeSelected = canChange;
+	Inventory_CanUse = block != BLOCK_AIR;
 }
 
 static void CPE_SetTextHotkey(uint8_t* data) {
@@ -1100,7 +1100,7 @@ static void CPE_SetBlockPermission(uint8_t* data) {
 
 	Block_CanPlace[block]  = *data++ != 0;
 	Block_CanDelete[block] = *data++ != 0;
-	Event_RaiseVoid(&BlockEvents_PermissionsChanged);
+	Event_RaiseVoid(&BlockEvents.PermissionsChanged);
 }
 
 static void CPE_ChangeModel(uint8_t* data) {
@@ -1157,7 +1157,7 @@ static void CPE_HackControl(uint8_t* data) {
 	}
 
 	physics->ServerJumpVel = physics->JumpVel;
-	Event_RaiseVoid(&UserEvents_HackPermissionsChanged);
+	Event_RaiseVoid(&UserEvents.HackPermissionsChanged);
 }
 
 static void CPE_ExtAddEntity2(uint8_t* data) {
@@ -1227,7 +1227,7 @@ static void CPE_SetTextColor(uint8_t* data) {
 	if (code == '%' || code == '&') return;
 
 	Drawer2D_Cols[code] = c;
-	Event_RaiseInt(&ChatEvents_ColCodeChanged, code);
+	Event_RaiseInt(&ChatEvents.ColCodeChanged, code);
 }
 
 static void CPE_SetMapEnvUrl(uint8_t* data) {
@@ -1507,7 +1507,7 @@ static void BlockDefs_UndefineBlock(uint8_t* data) {
 	if (block < BLOCK_CPE_COUNT) { Inventory_AddDefault(block); }
 
 	Block_SetCustomDefined(block, false);
-	Event_RaiseVoid(&BlockEvents_BlockDefChanged);
+	Event_RaiseVoid(&BlockEvents.BlockDefChanged);
 }
 
 static void BlockDefs_DefineBlockExt(uint8_t* data) {

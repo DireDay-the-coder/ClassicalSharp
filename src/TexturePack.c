@@ -6,7 +6,7 @@
 #include "Graphics.h"
 #include "Event.h"
 #include "Game.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Platform.h"
 #include "Deflate.h"
 #include "Stream.h"
@@ -16,6 +16,7 @@
 #include "ExtMath.h"
 #include "Chat.h"
 #include "Options.h"
+#include "Logger.h"
 
 #define LIQUID_ANIM_MAX 64
 /* Based off the incredible work from https://dl.dropboxusercontent.com/u/12694594/lava.txt
@@ -180,7 +181,7 @@ static void Animations_ReadDescription(struct Stream* stream, const String* path
 	for (;;) {
 		res = Stream_ReadLine(&buffered, &line);
 		if (res == ERR_END_OF_STREAM) break;
-		if (res) { Chat_LogError2(res, "reading from", path); break; }
+		if (res) { Logger_Warn2(res, "reading from", path); break; }
 
 		if (!line.length || line.buffer[0] == '#') continue;
 		count = String_UNSAFE_Split(&line, ' ', parts, ANIM_MIN_ARGS);
@@ -188,25 +189,25 @@ static void Animations_ReadDescription(struct Stream* stream, const String* path
 			Chat_Add1("&cNot enough arguments for anim: %s", &line); continue;
 		}
 
-		if (!Convert_TryParseUInt8(&parts[0], &tileX) || tileX >= ATLAS2D_TILES_PER_ROW) {
+		if (!Convert_ParseUInt8(&parts[0], &tileX) || tileX >= ATLAS2D_TILES_PER_ROW) {
 			Chat_Add1("&cInvalid anim tile X coord: %s", &line); continue;
 		}
-		if (!Convert_TryParseUInt8(&parts[1], &tileY) || tileY >= ATLAS2D_MAX_ROWS_COUNT) {
+		if (!Convert_ParseUInt8(&parts[1], &tileY) || tileY >= ATLAS2D_MAX_ROWS_COUNT) {
 			Chat_Add1("&cInvalid anim tile Y coord: %s", &line); continue;
 		}
-		if (!Convert_TryParseUInt16(&parts[2], &data.FrameX)) {
+		if (!Convert_ParseUInt16(&parts[2], &data.FrameX)) {
 			Chat_Add1("&cInvalid anim frame X coord: %s", &line); continue;
 		}
-		if (!Convert_TryParseUInt16(&parts[3], &data.FrameY)) {
+		if (!Convert_ParseUInt16(&parts[3], &data.FrameY)) {
 			Chat_Add1("&cInvalid anim frame Y coord: %s", &line); continue;
 		}
-		if (!Convert_TryParseUInt16(&parts[4], &data.FrameSize)) {
+		if (!Convert_ParseUInt16(&parts[4], &data.FrameSize)) {
 			Chat_Add1("&cInvalid anim frame size: %s", &line); continue;
 		}
-		if (!Convert_TryParseUInt16(&parts[5], &data.StatesCount)) {
+		if (!Convert_ParseUInt16(&parts[5], &data.StatesCount)) {
 			Chat_Add1("&cInvalid anim states count: %s", &line); continue;
 		}
-		if (!Convert_TryParseInt16(&parts[6], &data.TickDelay)) {
+		if (!Convert_ParseInt16(&parts[6], &data.TickDelay)) {
 			Chat_Add1("&cInvalid anim tick delay: %s", &line); continue;
 		}
 
@@ -354,7 +355,7 @@ static void Animations_FileChanged(void* obj, struct Stream* stream, const Strin
 		res = Png_Decode(&anims_bmp, stream);
 		if (!res) return;
 
-		Chat_LogError2(res, "decoding", name);
+		Logger_Warn2(res, "decoding", name);
 		Mem_Free(anims_bmp.Scan0);
 		anims_bmp.Scan0 = NULL;
 	} else if (String_CaselessEqualsConst(name, "animations.txt")) {
@@ -368,14 +369,14 @@ static void Animations_FileChanged(void* obj, struct Stream* stream, const Strin
 
 static void Animations_Init(void) {
 	ScheduledTask_Add(GAME_DEF_TICKS, Animations_Tick);
-	Event_RegisterVoid(&TextureEvents_PackChanged,  NULL, Animations_PackChanged);
-	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, Animations_FileChanged);
+	Event_RegisterVoid(&TextureEvents.PackChanged,  NULL, Animations_PackChanged);
+	Event_RegisterEntry(&TextureEvents.FileChanged, NULL, Animations_FileChanged);
 }
 
 static void Animations_Free(void) {
 	Animations_Clear();
-	Event_UnregisterVoid(&TextureEvents_PackChanged,  NULL, Animations_PackChanged);
-	Event_UnregisterEntry(&TextureEvents_FileChanged, NULL, Animations_FileChanged);
+	Event_UnregisterVoid(&TextureEvents.PackChanged,  NULL, Animations_PackChanged);
+	Event_UnregisterEntry(&TextureEvents.FileChanged, NULL, Animations_FileChanged);
 }
 
 struct IGameComponent Animations_Component = {
@@ -545,7 +546,7 @@ bool TextureCache_Get(const String* url, struct Stream* stream) {
 	res = Stream_OpenFile(stream, &path);
 
 	if (res == ReturnCode_FileNotFound) return false;
-	if (res) { Chat_LogError2(res, "opening cache for", url); return false; }
+	if (res) { Logger_Warn2(res, "opening cache for", url); return false; }
 	return true;
 }
 
@@ -566,14 +567,14 @@ void TextureCache_GetLastModified(const String* url, TimeMS* time) {
 	String_InitArray(entry, entryBuffer);
 	TexturePack_GetFromTags(url, &entry, &cache_lastModified);
 
-	if (entry.length && Convert_TryParseUInt64(&entry, time)) {
+	if (entry.length && Convert_ParseUInt64(&entry, time)) {
 		*time /= TEXCACHE_TICKS_PER_MS;
 	} else {
 		String_InitArray(path, pathBuffer);
 		TextureCache_MakePath(&path, url);
 
-		res = File_GetModifiedTime_MS(&path, time);
-		if (res) { Chat_LogError2(res, "getting last modified time of", url); *time = 0; }
+		res = File_GetModifiedTime(&path, time);
+		if (res) { Logger_Warn2(res, "getting last modified time of", url); *time = 0; }
 	}
 }
 
@@ -583,21 +584,14 @@ void TextureCache_GetETag(const String* url, String* etag) {
 
 void TextureCache_Set(const String* url, uint8_t* data, uint32_t length) {
 	String path; char pathBuffer[FILENAME_SIZE];
-	struct Stream stream;
 	ReturnCode res;
 
 	String_InitArray(path, pathBuffer);
 	TextureCache_MakePath(&path, url);
 	if (!Utils_EnsureDirectory("texturecache")) return;
 	
-	res = Stream_CreateFile(&stream, &path);
-	if (res) { Chat_LogError2(res, "creating cache for", &path); return; }
-
-	res = Stream_Write(&stream, data, length);
-	if (res) { Chat_LogError2(res, "saving data for", url); }
-
-	res = stream.Close(&stream);
-	if (res) { Chat_LogError2(res, "closing cache for", url); }
+	res = Stream_WriteAllTo(&path, data, length);
+	if (res) { Logger_Warn2(res, "caching", url); }
 }
 
 CC_NOINLINE static void TextureCache_SetEntry(const String* url, const String* data, struct EntryList* list) {
@@ -628,14 +622,16 @@ void TextureCache_SetLastModified(const String* url, const TimeMS* lastModified)
 /*########################################################################################################################*
 *-------------------------------------------------------TexturePack-------------------------------------------------------*
 *#########################################################################################################################*/
-static void TexturePack_ProcessZipEntry(const String* path, struct Stream* stream, struct ZipEntry* entry) {
-	String name = *path; Utils_UNSAFE_GetFilename(&name);
-	Event_RaiseEntry(&TextureEvents_FileChanged, stream, &name);
+static ReturnCode TexturePack_ProcessZipEntry(const String* path, struct Stream* stream, struct ZipState* s) {
+	String name = *path; 
+	Utils_UNSAFE_GetFilename(&name);
+	Event_RaiseEntry(&TextureEvents.FileChanged, stream, &name);
+	return 0;
 }
 
 static ReturnCode TexturePack_ExtractZip(struct Stream* stream) {
 	struct ZipState state;
-	Event_RaiseVoid(&TextureEvents_PackChanged);
+	Event_RaiseVoid(&TextureEvents.PackChanged);
 	if (Gfx_LostContext) return 0;
 	
 	Zip_Init(&state, stream);
@@ -652,13 +648,13 @@ void TexturePack_ExtractZip_File(const String* filename) {
 	String_Format1(&path, "texpacks/%s", filename);
 
 	res = Stream_OpenFile(&stream, &path);
-	if (res) { Chat_LogError2(res, "opening", &path); return; }
+	if (res) { Logger_Warn2(res, "opening", &path); return; }
 
 	res = TexturePack_ExtractZip(&stream);
-	if (res) { Chat_LogError2(res, "extracting", &path); }
+	if (res) { Logger_Warn2(res, "extracting", &path); }
 
 	res = stream.Close(&stream);
-	if (res) { Chat_LogError2(res, "closing", &path); }
+	if (res) { Logger_Warn2(res, "closing", &path); }
 }
 
 ReturnCode TexturePack_ExtractTerrainPng(struct Stream* stream) {
@@ -666,7 +662,7 @@ ReturnCode TexturePack_ExtractTerrainPng(struct Stream* stream) {
 	ReturnCode res = Png_Decode(&bmp, stream);
 
 	if (!res) {
-		Event_RaiseVoid(&TextureEvents_PackChanged);
+		Event_RaiseVoid(&TextureEvents.PackChanged);
 		if (Game_ChangeTerrainAtlas(&bmp)) return 0;
 	}
 
@@ -685,7 +681,7 @@ void TexturePack_ExtractDefault(void) {
 }
 
 void TexturePack_ExtractCurrent(const String* url) {
-	static String zipExt = String_FromConst(".zip");
+	const static String zipExt = String_FromConst(".zip");
 	struct Stream stream;
 	bool zip;
 	ReturnCode res = 0;
@@ -702,15 +698,15 @@ void TexturePack_ExtractCurrent(const String* url) {
 
 			res = zip ? TexturePack_ExtractZip(&stream) :
 						TexturePack_ExtractTerrainPng(&stream);		
-			if (res) Chat_LogError2(res, zip ? "extracting" : "decoding", url);
+			if (res) Logger_Warn2(res, zip ? "extracting" : "decoding", url);
 		}
 
 		res = stream.Close(&stream);
-		if (res) { Chat_LogError2(res, "closing cache for", url); }
+		if (res) Logger_Warn2(res, "closing cache for", url);
 	}
 }
 
-void TexturePack_Extract_Req(struct AsyncRequest* item) {
+void TexturePack_Extract_Req(struct HttpRequest* item) {
 	String url, etag;
 	void* data; uint32_t len;
 	struct Stream mem;
@@ -719,8 +715,8 @@ void TexturePack_Extract_Req(struct AsyncRequest* item) {
 
 	url  = String_FromRawArray(item->URL);
 	String_Copy(&World_TextureUrl, &url);
-	data = item->ResultData;
-	len  = item->ResultSize;
+	data = item->Data;
+	len  = item->Size;
 
 	etag = String_FromRawArray(item->Etag);
 	TextureCache_Set(&url, data, len);
@@ -732,6 +728,6 @@ void TexturePack_Extract_Req(struct AsyncRequest* item) {
 	res = png ? TexturePack_ExtractTerrainPng(&mem) 
 			 : TexturePack_ExtractZip(&mem);
 
-	if (res) Chat_LogError2(res, png ? "decoding" : "extracting", &url);
-	ASyncRequest_Free(item);
+	if (res) Logger_Warn2(res, png ? "decoding" : "extracting", &url);
+	HttpRequest_Free(item);
 }

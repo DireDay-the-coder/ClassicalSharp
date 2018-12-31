@@ -25,7 +25,10 @@ typedef enum MsgType_ {
 
 extern String Chat_Status[3], Chat_BottomRight[3], Chat_ClientStatus[3], Chat_Announcement;
 extern StringsBuffer Chat_Log, Chat_InputLog;
+/* Whether chat messages are logged to disc. */
+extern bool Chat_Logging;
 
+/* Time at which last announcement message was received. */
 extern TimeMS Chat_AnnouncementReceived;
 /* Gets the time the ith chat message was received at. */
 TimeMS Chat_GetLogTime(int i);
@@ -41,24 +44,24 @@ struct ChatCommand {
 	struct ChatCommand* Next; /* Next command in linked-list of client commands */
 };
 /* Registers a client-side command, allowing it to be used with /client [cmd name] */
-CC_EXPORT void Commands_Register(struct ChatCommand* cmd);
+CC_API void Commands_Register(struct ChatCommand* cmd);
 
+/* Sets the name of log file (no .txt, so e.g. just "singleplayer") */
+/* NOTE: This can only be set once. */
 void Chat_SetLogName(const String* name);
-/* Sends a chat message, raising ChatEvents_ChatSending event. */
+/* Sends a chat message, raising ChatEvents.ChatSending event. */
 /* NOTE: /client is always interpreted as client-side commands. */
 /* In multiplayer this is sent to the server, in singleplayer just Chat_Add. */
-CC_EXPORT void Chat_Send(const String* text, bool logUsage);
+CC_API void Chat_Send(const String* text, bool logUsage);
 /* Shorthand for Chat_AddOf(str, MSG_TYPE_NORMAL) */
-CC_EXPORT void Chat_Add(const String* text);
-/* Adds a chat message, raising ChatEvents_ChatReceived event. */
+CC_API void Chat_Add(const String* text);
+/* Adds a chat message, raising ChatEvents.ChatReceived event. */
 /* MSG_TYPE_NORMAL is usually used for player chat and command messages. */
 /* Other message types are usually used for info/status messages. */
-CC_EXPORT void Chat_AddOf(const String* text, MsgType type);
+CC_API void Chat_AddOf(const String* text, MsgType type);
 /* Shorthand for Chat_AddOf(String_FromReadonly(raw), MSG_TYPE_NORMAL) */
 void Chat_AddRaw(const char* raw);
 
-CC_NOINLINE void Chat_LogError(ReturnCode result,  const char* place);
-CC_NOINLINE void Chat_LogError2(ReturnCode result, const char* place, const String* path);
 void Chat_Add1(const char* format, const void* a1);
 void Chat_Add2(const char* format, const void* a1, const void* a2);
 void Chat_Add3(const char* format, const void* a1, const void* a2, const void* a3);

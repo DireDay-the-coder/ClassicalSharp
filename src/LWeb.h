@@ -1,10 +1,14 @@
 #ifndef CC_LWEB_H
 #define CC_LWEB_H
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "String.h"
 /* Implements asynchronous web tasks for the launcher.
 	Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 */
+
+struct JsonContext;
+typedef void (*JsonOnValue)(struct JsonContext* ctx, const String* v);
+typedef void (*JsonOnNew)(struct JsonContext* ctx);
 
 /* State for parsing JSON text */
 struct JsonContext {
@@ -13,9 +17,9 @@ struct JsonContext {
 	bool Failed;   /* Whether there was an error parsing the JSON. */
 	String CurKey; /* Key/Name of current member */
 	
-	void (*OnNewArray)(void);       /* Invoked when start of an array is read.  */
-	void (*OnNewObject)(void);      /* Invoked when start of an object is read. */
-	void (*OnValue)(String* value); /* Invoked on each member value in an object/array. */
+	JsonOnNew OnNewArray;  /* Invoked when start of an array is read. */
+	JsonOnNew OnNewObject; /* Invoked when start of an object is read. */
+	JsonOnValue OnValue;   /* Invoked on each member value in an object/array. */
 	String _tmp; /* temp value used for reading String values */
 	char _tmpBuffer[STRING_SIZE];
 };
@@ -27,10 +31,13 @@ void Json_Parse(struct JsonContext* ctx);
 
 /* Represents all known details about a server. */
 struct ServerInfo {
-	String Hash, Name, Flag, IP, Port, Mppass, Software;
-	int Players, MaxPlayers, Uptime;
+	String Hash, Name, IP, Mppass, Software, Country;
+	int Players, MaxPlayers, Port, Uptime;
 	bool Featured;
-	char _Buffer[7][STRING_SIZE];
+	int _order; /* (internal) order in servers table after filtering */
+	char _hashBuffer[32],   _nameBuffer[STRING_SIZE];
+	char _ipBuffer[16],     _mppassBuffer[STRING_SIZE];
+	char _countryBuffer[8], _softBuffer[STRING_SIZE];
 };
 
 struct LWebTask;
@@ -38,24 +45,23 @@ struct LWebTask {
 	bool Completed; /* Whether the task has finished executing. */
 	bool Working;   /* Whether the task is currently in progress, or is scheduled to be. */
 	bool Success;   /* Whether the task completed successfully. */
-	ReturnCode Res;
+	ReturnCode Res; /* Error returned (e.g. for DNS failure) */
+	int Status;     /* HTTP return code for the request */
 	
 	String Identifier; /* Unique identifier for this web task. */
 	String URL;        /* URL this task is downloading from/uploading to. */
 	TimeMS Start;      /* Point in time this task was started at. */
-	/* Function called to begin downloading/uploading. */
-	void (*Begin)(struct LWebTask* task);
 	/* Called when task successfully downloaded/uploaded data. */
-	void (*Handle)(struct LWebTask* task, uint8_t* data, uint32_t len);
+	void (*Handle)(uint8_t* data, uint32_t len);
 };
 void LWebTask_Tick(struct LWebTask* task);
 
 
-extern struct GetCSRFTokenTaskData {
+extern struct GetTokenTaskData {
 	struct LWebTask Base;
 	String Token; /* Random CSRF token for logging in. */
-} GetCSRFTokenTask;
-void GetCSRFTokenTask_Run(void);
+} GetTokenTask;
+void GetTokenTask_Run(void);
 
 extern struct SignInTaskData {
 	struct LWebTask Base;
@@ -75,35 +81,40 @@ void FetchServerTask_Run(const String* hash);
 extern struct FetchServersData {
 	struct LWebTask Base;
 	struct ServerInfo* Servers; /* List of all public servers on server list. */
+	uint16_t* Orders;           /* Order of each server (after sorting) */
 	int NumServers;             /* Number of public servers. */
 } FetchServersTask;
 void FetchServersTask_Run(void);
+void FetchServersTask_ResetOrder(void);
+#define Servers_Get(i) (&FetchServersTask.Servers[FetchServersTask.Orders[i]])
 
 
-extern struct UpdateCheckTaskData {
+extern struct CheckUpdateData {
 	struct LWebTask Base;
 	/* Timestamp latest commit/dev build and release were at. */
-	TimeMS DevTimestamp, ReleaseTimestamp;
+	TimeMS DevTimestamp, RelTimestamp;
 	/* Version of latest release. */
 	String LatestRelease;
-} UpdateCheckTask; /* TODO: Work out the JSON for this.. */
-void UpdateCheckTask_Run(void);
+} CheckUpdateTask; /* TODO: Work out the JSON for this.. */
+void CheckUpdateTask_Run(void);
 
 
-extern struct UpdateDownloadTaskData {
+extern struct FetchUpdateData {
 	struct LWebTask Base;
-	uint8_t* Data; /* The raw downloaded executable. */
-	uint32_t Size; /* Size of data in bytes. */
-} UpdateDownloadTask;
-void UpdateDownloadTask_Run(const String* file);
+	/* Timestamp downloaded build was originally built at. */
+	TimeMS Timestamp;
+} FetchUpdateTask;
+void FetchUpdateTask_Run(bool release, bool d3d9);
 
 
-extern struct FetchFlagsTaskData {
+extern struct FetchFlagsData { 
 	struct LWebTask Base;
-	int NumDownloaded; /* Number of flags that have been downloaded. */
-	Bitmap* Bitmaps;   /* Raw pixels for each downloaded flag. */
-	String* Names;     /* Name for each downloaded flag.*/
+	/* Number of flags downloaded. */
+	int Count;
 } FetchFlagsTask;
-void FetchFlagsTask_Run(void);
 void FetchFlagsTask_Add(const String* name);
+/* Gets the downloaded bitmap for the given flag. */
+Bitmap* Flags_Get(const String* name);
+/* Frees all flag bitmaps. */
+void Flags_Free(void);
 #endif

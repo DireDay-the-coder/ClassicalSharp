@@ -1,5 +1,5 @@
 #include "Deflate.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Funcs.h"
 #include "Platform.h"
 #include "Stream.h"
@@ -193,7 +193,7 @@ static void Huffman_Build(struct HuffmanTable* table, uint8_t* bitLens, int coun
 	bl_count[0] = 0;
 	for (i = 1; i < INFLATE_MAX_BITS; i++) {
 		if (bl_count[i] > (1 << i)) {
-			ErrorHandler_Fail("Too many huffman codes for bit length");
+			Logger_Abort("Too many huffman codes for bit length");
 		}
 	}
 
@@ -289,7 +289,7 @@ static int Huffman_Decode(struct InflateState* state, struct HuffmanTable* table
 		}
 	}
 
-	ErrorHandler_Fail("DEFLATE - Invalid huffman code");
+	Logger_Abort("DEFLATE - Invalid huffman code");
 	return -1;
 }
 
@@ -325,7 +325,7 @@ static int Huffman_Unsafe_Decode_Slow(struct InflateState* state, struct Huffman
 		}
 	}
 
-	ErrorHandler_Fail("DEFLATE - Invalid huffman code");
+	Logger_Abort("DEFLATE - Invalid huffman code");
 	return -1;
 }
 
@@ -496,7 +496,7 @@ void Inflate_Process(struct InflateState* state) {
 			} break;
 
 			case 3: {
-				ErrorHandler_Fail("DEFLATE - Invalid block type");
+				Logger_Abort("DEFLATE - Invalid block type");
 			} break;
 
 			}
@@ -509,7 +509,7 @@ void Inflate_Process(struct InflateState* state) {
 			nlen = Inflate_ReadBits(state, 16);
 
 			if (len != (nlen ^ 0xFFFFUL)) {
-				ErrorHandler_Fail("DEFLATE - Uncompressed block LEN check failed");
+				Logger_Abort("DEFLATE - Uncompressed block LEN check failed");
 			}
 			state->Index = len; /* Reuse for 'uncompressed length' */
 			state->State = INFLATE_STATE_UNCOMPRESSED_DATA;
@@ -602,7 +602,7 @@ void Inflate_Process(struct InflateState* state) {
 			case 16:
 				Inflate_EnsureBits(state, 2);
 				repeatCount = Inflate_ReadBits(state, 2);
-				if (!state->Index) ErrorHandler_Fail("DEFLATE - Tried to repeat invalid byte");
+				if (!state->Index) Logger_Abort("DEFLATE - Tried to repeat invalid byte");
 				repeatCount += 3; repeatValue = state->Buffer[state->Index - 1];
 				break;
 
@@ -621,7 +621,7 @@ void Inflate_Process(struct InflateState* state) {
 
 			count = state->NumLits + state->NumDists;
 			if (state->Index + repeatCount > count) {
-				ErrorHandler_Fail("DEFLATE - Tried to repeat past end");
+				Logger_Abort("DEFLATE - Tried to repeat past end");
 			}
 
 			Mem_Set(&state->Buffer[state->Index], repeatValue, repeatCount);
@@ -895,7 +895,7 @@ static ReturnCode Deflate_FlushBlock(struct DeflateState* state, int len) {
 	return res;
 }
 
-static ReturnCode Deflate_StreamWrite(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode Deflate_StreamWrite(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	struct DeflateState* state;
 	ReturnCode res;
 
@@ -978,7 +978,7 @@ static ReturnCode GZip_StreamClose(struct Stream* stream) {
 	return Stream_Write(state->Base.Dest, data, sizeof(data));
 }
 
-static ReturnCode GZip_StreamWrite(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode GZip_StreamWrite(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	struct GZipState* state = stream->Meta.Inflate;
 	uint32_t i, crc32 = state->Crc32;
 	state->Size += count;
@@ -992,7 +992,7 @@ static ReturnCode GZip_StreamWrite(struct Stream* stream, uint8_t* data, uint32_
 	return Deflate_StreamWrite(stream, data, count, modified);
 }
 
-static ReturnCode GZip_StreamWriteFirst(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode GZip_StreamWriteFirst(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	static uint8_t header[10] = { 0x1F, 0x8B, 0x08 }; /* GZip header */
 	struct GZipState* state = stream->Meta.Inflate;
 	ReturnCode res;
@@ -1024,7 +1024,7 @@ static ReturnCode ZLib_StreamClose(struct Stream* stream) {
 	return Stream_Write(state->Base.Dest, data, sizeof(data));
 }
 
-static ReturnCode ZLib_StreamWrite(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode ZLib_StreamWrite(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	struct ZLibState* state = stream->Meta.Inflate;
 	uint32_t i, adler32 = state->Adler32;
 	uint32_t s1 = adler32 & 0xFFFF, s2 = (adler32 >> 16) & 0xFFFF;
@@ -1040,7 +1040,7 @@ static ReturnCode ZLib_StreamWrite(struct Stream* stream, uint8_t* data, uint32_
 	return Deflate_StreamWrite(stream, data, count, modified);
 }
 
-static ReturnCode ZLib_StreamWriteFirst(struct Stream* stream, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode ZLib_StreamWriteFirst(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	static uint8_t header[2] = { 0x78, 0x9C }; /* ZLib header */
 	struct ZLibState* state = stream->Meta.Inflate;
 	ReturnCode res;
@@ -1095,46 +1095,57 @@ static ReturnCode Zip_ReadLocalFileHeader(struct ZipState* state, struct ZipEntr
 
 	if (method == 0) {
 		Stream_ReadonlyPortion(&portion, stream, uncompressedSize);
-		state->ProcessEntry(&path, &portion, entry);
+		return state->ProcessEntry(&path, &portion, state);
 	} else if (method == 8) {
 		Stream_ReadonlyPortion(&portion, stream, compressedSize);
 		Inflate_MakeStream(&compStream, &inflate, &portion);
-		state->ProcessEntry(&path, &compStream, entry);
+		return state->ProcessEntry(&path, &compStream, state);
 	} else {
 		Platform_Log1("Unsupported.zip entry compression method: %i", &method);
+		/* TODO: Should this be an error */
 	}
 	return 0;
 }
 
-static ReturnCode Zip_ReadCentralDirectory(struct ZipState* state, struct ZipEntry* entry) {
+static ReturnCode Zip_ReadCentralDirectory(struct ZipState* state) {
 	struct Stream* stream = state->Input;
+	struct ZipEntry* entry;
 	uint8_t header[42];
+
+	String path; char pathBuffer[ZIP_MAXNAMELEN];
 	int pathLen, extraLen, commentLen;
 	ReturnCode res;
 	if ((res = Stream_Read(stream, header, sizeof(header)))) return res;
 
-	entry->Crc32            = Stream_GetU32_LE(&header[12]);
-	entry->CompressedSize   = Stream_GetU32_LE(&header[16]);
-	entry->UncompressedSize = Stream_GetU32_LE(&header[20]);
+	pathLen = Stream_GetU16_LE(&header[24]);
+	path    = String_Init(pathBuffer, pathLen, pathLen);
+	if (pathLen > ZIP_MAXNAMELEN) return ZIP_ERR_FILENAME_LEN;
+	if ((res = Stream_Read(stream, pathBuffer, pathLen))) return res;
 
-	pathLen    = Stream_GetU16_LE(&header[24]);
+	/* skip data following central directory entry header */
 	extraLen   = Stream_GetU16_LE(&header[26]);
 	commentLen = Stream_GetU16_LE(&header[28]);
+	if ((res = stream->Skip(stream, extraLen + commentLen))) return res;
 
+	if (!state->SelectEntry(&path)) return 0;
+	if (state->_usedEntries >= ZIP_MAX_ENTRIES) return ZIP_ERR_TOO_MANY_ENTRIES;
+	entry = &state->Entries[state->_usedEntries++];
+
+	entry->CompressedSize    = Stream_GetU32_LE(&header[16]);
+	entry->UncompressedSize  = Stream_GetU32_LE(&header[20]);
 	entry->LocalHeaderOffset = Stream_GetU32_LE(&header[38]);
-	/* skip data following central directory entry header */
-	return stream->Skip(stream, pathLen + extraLen + commentLen);
+	return 0;
 }
 
-static ReturnCode Zip_ReadEndOfCentralDirectory(struct ZipState* state, uint32_t* centralDirectoryOffset) {
+static ReturnCode Zip_ReadEndOfCentralDirectory(struct ZipState* state) {
 	struct Stream* stream = state->Input;
 	uint8_t header[18];
 
 	ReturnCode res;
 	if ((res = Stream_Read(stream, header, sizeof(header)))) return res;
 
-	state->EntriesCount     = Stream_GetU16_LE(&header[6]);
-	*centralDirectoryOffset = Stream_GetU32_LE(&header[12]);
+	state->_totalEntries  = Stream_GetU16_LE(&header[6]);
+	state->_centralDirBeg = Stream_GetU32_LE(&header[12]);
 	return 0;
 }
 
@@ -1144,23 +1155,22 @@ enum ZipSig {
 	ZIP_SIG_LOCALFILEHEADER = 0x04034b50
 };
 
-static void Zip_DefaultProcessor(const String* path, struct Stream* data, struct ZipEntry* entry) { }
+static ReturnCode Zip_DefaultProcessor(const String* path, struct Stream* data, struct ZipState* s) { return 0; }
 static bool Zip_DefaultSelector(const String* path) { return true; }
 void Zip_Init(struct ZipState* state, struct Stream* input) {
 	state->Input = input;
-	state->EntriesCount = 0;
+	state->Obj   = NULL;
 	state->ProcessEntry = Zip_DefaultProcessor;
 	state->SelectEntry  = Zip_DefaultSelector;
 }
 
 ReturnCode Zip_Extract(struct ZipState* state) {
 	struct Stream* stream = state->Input;
-	uint32_t stream_len, centralDirOffset;
+	uint32_t stream_len;
 	uint32_t sig = 0;
 	int i, count;
 
 	ReturnCode res;
-	state->EntriesCount = 0;
 	if ((res = stream->Length(stream, &stream_len))) return res;
 
 	/* At -22 for nearly all zips, but try a bit further back in case of comment */
@@ -1174,19 +1184,19 @@ ReturnCode Zip_Extract(struct ZipState* state) {
 	}
 
 	if (sig != ZIP_SIG_ENDOFCENTRALDIR) return ZIP_ERR_NO_END_OF_CENTRAL_DIR;
-	res = Zip_ReadEndOfCentralDirectory(state, &centralDirOffset);
+	res = Zip_ReadEndOfCentralDirectory(state);
 	if (res) return res;
 
-	res = stream->Seek(stream, centralDirOffset);
+	res = stream->Seek(stream, state->_centralDirBeg);
 	if (res) return ZIP_ERR_SEEK_CENTRAL_DIR;
-	if (state->EntriesCount > ZIP_MAX_ENTRIES) return ZIP_ERR_TOO_MANY_ENTRIES;
+	state->_usedEntries = 0;
 
 	/* Read all the central directory entries */
-	for (count = 0; count < state->EntriesCount; count++) {
+	for (i = 0; i < state->_totalEntries; i++) {
 		if ((res = Stream_ReadU32_LE(stream, &sig))) return res;
 
 		if (sig == ZIP_SIG_CENTRALDIR) {
-			res = Zip_ReadCentralDirectory(state, &state->Entries[count]);
+			res = Zip_ReadCentralDirectory(state);
 			if (res) return res;
 		} else if (sig == ZIP_SIG_ENDOFCENTRALDIR) {
 			break;
@@ -1196,7 +1206,7 @@ ReturnCode Zip_Extract(struct ZipState* state) {
 	}
 
 	/* Now read the local file header entries */
-	for (i = 0; i < count; i++) {
+	for (i = 0; i < state->_usedEntries; i++) {
 		struct ZipEntry* entry = &state->Entries[i];
 		res = stream->Seek(stream, entry->LocalHeaderOffset);
 		if (res) return ZIP_ERR_SEEK_LOCAL_DIR;

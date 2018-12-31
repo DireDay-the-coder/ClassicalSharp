@@ -2,7 +2,7 @@
 #include "Platform.h"
 #include "Input.h"
 #include "Event.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Funcs.h"
 
 bool Window_Exists, Window_Focused;
@@ -11,34 +11,6 @@ Size2D Window_ClientSize;
 
 static bool win_cursorVisible = true;
 bool Window_GetCursorVisible(void) { return win_cursorVisible; }
-
-static void Window_DecodeUtf16(String* value, Codepoint* chars, int numBytes) {
-	int i; char c;
-	
-	for (i = 0; i < (numBytes >> 1); i++) {
-		if (Convert_TryUnicodeToCP437(chars[i], &c)) String_Append(value, c);
-	}
-}
-
-static void Window_DecodeUtf8(String* value, uint8_t* chars, int numBytes) {
-	int len; Codepoint cp; char c;
-
-	for (; numBytes > 0; numBytes -= len) {
-		len = Convert_Utf8ToUnicode(&cp, chars, numBytes);
-		if (!len) return;
-
-		if (Convert_TryUnicodeToCP437(cp, &c)) String_Append(value, c);
-		chars += len;
-	}
-}
-
-static void Window_DecodeAscii(String* value, uint8_t* chars, int numBytes) {
-	int i; char c;
-
-	for (i = 0; i < numBytes; i++) {
-		if (Convert_TryUnicodeToCP437(chars[i], &c)) String_Append(value, c);
-	}
-}
 
 void Window_CreateSimple(int width, int height) {
 	struct DisplayDevice* device = &DisplayDevice_Default;
@@ -182,12 +154,12 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 		Window_Focused = LOWORD(wParam) != 0;
 
 		if (Window_Focused != wasFocused) {
-			Event_RaiseVoid(&WindowEvents_FocusChanged);
+			Event_RaiseVoid(&WindowEvents.FocusChanged);
 		}
 		break;
 
 	case WM_ERASEBKGND:
-		Event_RaiseVoid(&WindowEvents_Redraw);
+		Event_RaiseVoid(&WindowEvents.Redraw);
 		return 1;
 
 	case WM_WINDOWPOSCHANGED:
@@ -197,7 +169,7 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 
 		if (pos->x != Window_Bounds.X || pos->y != Window_Bounds.Y) {
 			Window_Bounds.X = pos->x; Window_Bounds.Y = pos->y;
-			Event_RaiseVoid(&WindowEvents_Moved);
+			Event_RaiseVoid(&WindowEvents.Moved);
 		}
 
 		if (pos->cx != Window_Bounds.Width || pos->cy != Window_Bounds.Height) {
@@ -209,7 +181,7 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 				SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE | SWP_NOSENDCHANGING);
 
 			if (suppress_resize <= 0) {
-				Event_RaiseVoid(&WindowEvents_Resized);
+				Event_RaiseVoid(&WindowEvents.Resized);
 			}
 		}
 	} break;
@@ -236,14 +208,14 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 
 		if (new_state != win_state) {
 			win_state = new_state;
-			Event_RaiseVoid(&WindowEvents_StateChanged);
+			Event_RaiseVoid(&WindowEvents.StateChanged);
 		}
 	} break;
 
 
 	case WM_CHAR:
 		if (Convert_TryUnicodeToCP437((Codepoint)wParam, &keyChar)) {
-			Event_RaiseInt(&KeyEvents_Press, keyChar);
+			Event_RaiseInt(&KeyEvents.Press, keyChar);
 		}
 		break;
 
@@ -340,6 +312,7 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 		return 0;
 
 	case WM_KILLFOCUS:
+		/* TODO: Keep track of keyboard when focus is lost */
 		Key_Clear();
 		break;
 
@@ -355,7 +328,7 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 	} break;
 
 	case WM_CLOSE:
-		Event_RaiseVoid(&WindowEvents_Closing);
+		Event_RaiseVoid(&WindowEvents.Closing);
 		Window_Destroy();
 		break;
 
@@ -363,7 +336,7 @@ static LRESULT CALLBACK Window_Procedure(HWND handle, UINT message, WPARAM wPara
 		Window_Exists = false;
 		UnregisterClass(CC_WIN_CLASSNAME, win_instance);
 		if (win_DC) ReleaseDC(win_handle, win_DC);
-		Event_RaiseVoid(&WindowEvents_Closed);
+		Event_RaiseVoid(&WindowEvents.Closed);
 		break;
 	}
 	return DefWindowProc(handle, message, wParam, lParam);
@@ -391,15 +364,15 @@ void Window_Create(int x, int y, int width, int height, struct GraphicsMode* mod
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
 
 	ATOM atom = RegisterClassEx(&wc);
-	if (!atom) ErrorHandler_Fail2(GetLastError(), "Failed to register window class");
+	if (!atom) Logger_Abort2(GetLastError(), "Failed to register window class");
 
 	win_handle = CreateWindowEx(0, atom, NULL, CC_WIN_STYLE,
 		rect.left, rect.top, Rect_Width(rect), Rect_Height(rect),
 		NULL, NULL, win_instance, NULL);
-	if (!win_handle) ErrorHandler_Fail2(GetLastError(), "Failed to create window");
+	if (!win_handle) Logger_Abort2(GetLastError(), "Failed to create window");
 
 	win_DC = GetDC(win_handle);
-	if (!win_DC) ErrorHandler_Fail2(GetLastError(), "Failed to get device context");
+	if (!win_DC) Logger_Abort2(GetLastError(), "Failed to get device context");
 	Window_Exists = true;
 }
 
@@ -427,15 +400,15 @@ void Window_GetClipboardText(String* value) {
 			isUnicode = false;
 		}
 		if (!hGlobal) { CloseClipboard(); return; }
-		LPVOID src = GlobalLock(hGlobal);
-		DWORD size = GlobalSize(hGlobal);
+		LPVOID src  = GlobalLock(hGlobal);
+		SIZE_T size = GlobalSize(hGlobal);
 
 		/* ignore trailing NULL at end */
 		/* TODO: Verify it's always there */
 		if (isUnicode) {
-			Window_DecodeUtf16(value, (Codepoint*)src, size - 2);
+			Convert_DecodeUtf16(value, (Codepoint*)src, size - 2);
 		} else {
-			Window_DecodeAscii(value, (uint8_t*)src,   size - 1);
+			Convert_DecodeAscii(value, (uint8_t*)src,   size - 1);
 		}
 
 		GlobalUnlock(hGlobal);
@@ -568,7 +541,7 @@ void Window_SetWindowState(int state) {
 Point2D Window_PointToClient(int x, int y) {
 	Point2D point = { x, y };
 	if (!ScreenToClient(win_handle, &point)) {
-		ErrorHandler_Fail2(GetLastError(), "Converting point from client to screen coordinates");
+		Logger_Abort2(GetLastError(), "Converting point from client to screen coordinates");
 	}
 	return point;
 }
@@ -576,7 +549,7 @@ Point2D Window_PointToClient(int x, int y) {
 Point2D Window_PointToScreen(int x, int y) {
 	Point2D point = { x, y };
 	if (!ClientToScreen(win_handle, &point)) {
-		ErrorHandler_Fail2(GetLastError(), "Converting point from screen to client coordinates");
+		Logger_Abort2(GetLastError(), "Converting point from screen to client coordinates");
 	}
 	return point;
 }
@@ -658,7 +631,7 @@ void GLContext_SelectGraphicsMode(struct GraphicsMode* mode) {
 	if (mode->Buffers > 1)    pfd.dwFlags |= PFD_DOUBLEBUFFER;
 
 	int modeIndex = ChoosePixelFormat(win_DC, &pfd);
-	if (modeIndex == 0) { ErrorHandler_Fail("Requested graphics mode not available"); }
+	if (modeIndex == 0) { Logger_Abort("Requested graphics mode not available"); }
 
 	Mem_Set(&pfd, 0, sizeof(PIXELFORMATDESCRIPTOR));
 	pfd.nSize = sizeof(PIXELFORMATDESCRIPTOR);
@@ -666,7 +639,7 @@ void GLContext_SelectGraphicsMode(struct GraphicsMode* mode) {
 
 	DescribePixelFormat(win_DC, modeIndex, pfd.nSize, &pfd);
 	if (!SetPixelFormat(win_DC, modeIndex, &pfd)) {
-		ErrorHandler_Fail2(GetLastError(), "SetPixelFormat failed");
+		Logger_Abort2(GetLastError(), "SetPixelFormat failed");
 	}
 }
 
@@ -683,11 +656,11 @@ void GLContext_Init(struct GraphicsMode* mode) {
 		ctx_Handle = wglCreateContext(win_DC);
 	}
 	if (!ctx_Handle) {
-		ErrorHandler_Fail2(GetLastError(), "Failed to create OpenGL context");
+		Logger_Abort2(GetLastError(), "Failed to create OpenGL context");
 	}
 
 	if (!wglMakeCurrent(win_DC, ctx_Handle)) {
-		ErrorHandler_Fail2(GetLastError(), "Failed to make OpenGL context current");
+		Logger_Abort2(GetLastError(), "Failed to make OpenGL context current");
 	}
 
 	ctx_DC = wglGetCurrentDC();
@@ -698,7 +671,7 @@ void GLContext_Init(struct GraphicsMode* mode) {
 void GLContext_Update(void) { }
 void GLContext_Free(void) {
 	if (!wglDeleteContext(ctx_Handle)) {
-		ErrorHandler_Fail2(GetLastError(), "Failed to destroy OpenGL context");
+		Logger_Abort2(GetLastError(), "Failed to destroy OpenGL context");
 	}
 	ctx_Handle = NULL;
 }
@@ -710,7 +683,7 @@ void* GLContext_GetAddress(const char* function) {
 
 void GLContext_SwapBuffers(void) {
 	if (!SwapBuffers(ctx_DC)) {
-		ErrorHandler_Fail2(GetLastError(), "Failed to swap buffers");
+		Logger_Abort2(GetLastError(), "Failed to swap buffers");
 	}
 }
 
@@ -895,7 +868,7 @@ static void Window_RefreshBounds(XEvent* e) {
 
 	if (loc.X != Window_Bounds.X || loc.Y != Window_Bounds.Y) {
 		Window_Bounds.X = loc.X; Window_Bounds.Y = loc.Y;
-		Event_RaiseVoid(&WindowEvents_Moved);
+		Event_RaiseVoid(&WindowEvents.Moved);
 	}
 
 	/* Note: width and height denote the internal (client) size.
@@ -906,7 +879,7 @@ static void Window_RefreshBounds(XEvent* e) {
 	if (size.Width != Window_Bounds.Width || size.Height != Window_Bounds.Height) {		 
 		Window_ClientSize.Width  = e->xconfigure.width;  Window_Bounds.Width  = size.Width;
 		Window_ClientSize.Height = e->xconfigure.height; Window_Bounds.Height = size.Height;
-		Event_RaiseVoid(&WindowEvents_Resized);
+		Event_RaiseVoid(&WindowEvents.Resized);
 	}
 }
 
@@ -943,7 +916,7 @@ void Window_Create(int x, int y, int width, int height, struct GraphicsMode* mod
 	win_handle = XCreateWindow(win_display, win_rootWin, x, y, width, height,
 		0, win_visual.depth /* CopyFromParent*/, InputOutput, win_visual.visual, 
 		CWColormap | CWEventMask | CWBackPixel | CWBorderPixel, &attributes);
-	if (!win_handle) ErrorHandler_Fail("XCreateWindow failed");
+	if (!win_handle) Logger_Abort("XCreateWindow failed");
 
 	hints.base_width  = width;
 	hints.base_height = height;
@@ -1193,18 +1166,18 @@ void Window_ProcessEvents(void) {
 			win_visible = e.type == MapNotify;
 
 			if (win_visible != wasVisible) {
-				Event_RaiseVoid(&WindowEvents_VisibilityChanged);
+				Event_RaiseVoid(&WindowEvents.VisibilityChanged);
 			}
 			break;
 
 		case ClientMessage:
 			if (!win_isExiting && e.xclient.data.l[0] == wm_destroy) {
 				Platform_LogConst("Exit message received.");
-				Event_RaiseVoid(&WindowEvents_Closing);
+				Event_RaiseVoid(&WindowEvents.Closing);
 
 				win_isExiting = true;
 				Window_Destroy();
-				Event_RaiseVoid(&WindowEvents_Closed);
+				Event_RaiseVoid(&WindowEvents.Closed);
 			} break;
 
 		case DestroyNotify:
@@ -1218,7 +1191,7 @@ void Window_ProcessEvents(void) {
 
 		case Expose:
 			if (e.xexpose.count == 0) {
-				Event_RaiseVoid(&WindowEvents_Redraw);
+				Event_RaiseVoid(&WindowEvents.Redraw);
 			}
 			break;
 
@@ -1232,7 +1205,7 @@ void Window_ProcessEvents(void) {
 			char raw; int i;
 			for (i = 0; i < status; i++) {
 				if (!Convert_TryUnicodeToCP437((uint8_t)data[i], &raw)) continue;
-				Event_RaiseInt(&KeyEvents_Press, raw);
+				Event_RaiseInt(&KeyEvents.Press, raw);
 			}
 		} break;
 
@@ -1272,8 +1245,10 @@ void Window_ProcessEvents(void) {
 			Window_Focused = e.type == FocusIn;
 
 			if (Window_Focused != wasFocused) {
-				Event_RaiseVoid(&WindowEvents_FocusChanged);
+				Event_RaiseVoid(&WindowEvents.FocusChanged);
 			}
+			/* TODO: Keep track of keyboard when focus is lost */
+			if (!Window_Focused) Key_Clear();
 			break;
 
 		case MappingNotify:
@@ -1285,7 +1260,7 @@ void Window_ProcessEvents(void) {
 
 		case PropertyNotify:
 			if (e.xproperty.atom == net_wm_state) {
-				Event_RaiseVoid(&WindowEvents_StateChanged);
+				Event_RaiseVoid(&WindowEvents.StateChanged);
 			}
 
 			/*if (e.xproperty.atom == net_frame_extents) {
@@ -1308,7 +1283,7 @@ void Window_ProcessEvents(void) {
 
 				if (data && items && prop_type == xa_utf8_string) {
 					clipboard_paste_text.length = 0;
-					Window_DecodeUtf8(&clipboard_paste_text, data, items);
+					Convert_DecodeUtf8(&clipboard_paste_text, data, items);
 				}
 				if (data) XFree(data);
 			}
@@ -1633,7 +1608,7 @@ void Window_ShowDialog(const char* title, const char* msg) {
 static GC win_gc;
 static XImage* win_image;
 void Window_InitRaw(Bitmap* bmp) {
-	if (!win_gc) win_gc = XCreateGC(win_display, win_handle, NULL, NULL);
+	if (!win_gc) win_gc = XCreateGC(win_display, win_handle, 0, NULL);
 	if (win_image) XFree(win_image);
 
 	Mem_Free(bmp->Scan0);
@@ -1659,8 +1634,8 @@ static FN_GLXSWAPINTERVAL swapIntervalMESA, swapIntervalSGI;
 static bool ctx_supports_vSync;
 
 void GLContext_Init(struct GraphicsMode* mode) {
-	static String ext_mesa = String_FromConst("GLX_MESA_swap_control");
-	static String ext_sgi  = String_FromConst("GLX_SGI_swap_control");
+	const static String ext_mesa = String_FromConst("GLX_MESA_swap_control");
+	const static String ext_sgi  = String_FromConst("GLX_SGI_swap_control");
 
 	const char* raw_exts;
 	String exts;
@@ -1670,13 +1645,13 @@ void GLContext_Init(struct GraphicsMode* mode) {
 		Platform_LogConst("Context create failed. Trying indirect...");
 		ctx_Handle = glXCreateContext(win_display, &win_visual, NULL, false);
 	}
-	if (!ctx_Handle) ErrorHandler_Fail("Failed to create OpenGL context");
+	if (!ctx_Handle) Logger_Abort("Failed to create OpenGL context");
 
 	if (!glXIsDirect(win_display, ctx_Handle)) {
 		Platform_LogConst("== WARNING: Context is not direct ==");
 	}
 	if (!glXMakeCurrent(win_display, win_handle, ctx_Handle)) {
-		ErrorHandler_Fail("Failed to make OpenGL context current.");
+		Logger_Abort("Failed to make OpenGL context current.");
 	}
 
 	/* GLX may return non-null function pointers that don't actually work */
@@ -1759,7 +1734,7 @@ static XVisualInfo GLContext_SelectVisual(struct GraphicsMode* mode) {
 
 	GLContext_GetAttribs(mode, attribs);	
 	if (!glXQueryVersion(win_display, &major, &minor)) {
-		ErrorHandler_Fail("glXQueryVersion failed");
+		Logger_Abort("glXQueryVersion failed");
 	}
 
 	if (major >= 1 && minor >= 3) {
@@ -1777,7 +1752,7 @@ static XVisualInfo GLContext_SelectVisual(struct GraphicsMode* mode) {
 		visual = glXChooseVisual(win_display, win_screen, attribs);
 	}
 	if (!visual) {
-		ErrorHandler_Fail("Requested GraphicsMode not available.");
+		Logger_Abort("Requested GraphicsMode not available.");
 	}
 
 	info = *visual;
@@ -1840,14 +1815,14 @@ static void Window_UpdateSize(void) {
 	if (win_state == WINDOW_STATE_FULLSCREEN) return;
 	
 	res = GetWindowBounds(win_handle, kWindowStructureRgn, &r);
-	if (res) ErrorHandler_Fail2(res, "Getting window bounds");
+	if (res) Logger_Abort2(res, "Getting window bounds");
 	Window_Bounds.X = r.left;
 	Window_Bounds.Y = r.top;
 	Window_Bounds.Width  = Rect_Width(r);
 	Window_Bounds.Height = Rect_Height(r);
 	
 	res = GetWindowBounds(win_handle, kWindowGlobalPortRgn, &r);
-	if (res) ErrorHandler_Fail2(res, "Getting window clientsize");
+	if (res) Logger_Abort2(res, "Getting window clientsize");
 	Window_ClientSize.Width  = Rect_Width(r);
 	Window_ClientSize.Height = Rect_Height(r);
 }
@@ -1866,33 +1841,32 @@ static void Window_UpdateWindowState(void) {
 		meaning they are maximised up to their reported ideal size. So report a large ideal size. */
 		idealSize.v = 9000; idealSize.h = 9000;
 		res = ZoomWindowIdeal(win_handle, inZoomOut, &idealSize);
-		if (res) ErrorHandler_Fail2(res, "Maximising window");
+		if (res) Logger_Abort2(res, "Maximising window");
 		break;
 
 	case WINDOW_STATE_NORMAL:
 		if (Window_GetWindowState() == WINDOW_STATE_MAXIMISED) {
 			idealSize.v = 0; idealSize.h = 0;
 			res = ZoomWindowIdeal(win_handle, inZoomIn, &idealSize);
-			if (res) ErrorHandler_Fail2(res, "Un-maximising window");
+			if (res) Logger_Abort2(res, "Un-maximising window");
 		}
 		break;
 
 	case WINDOW_STATE_MINIMISED:
 		res = CollapseWindow(win_handle, true);
-		if (res) ErrorHandler_Fail2(res, "Minimising window");
+		if (res) Logger_Abort2(res, "Minimising window");
 		break;
 	}
 
-	Event_RaiseVoid(&WindowEvents_StateChanged);
+	Event_RaiseVoid(&WindowEvents.StateChanged);
 	Window_UpdateSize();
-	Event_RaiseVoid(&WindowEvents_Resized);
+	Event_RaiseVoid(&WindowEvents.Resized);
 }
 
 OSStatus Window_ProcessKeyboardEvent(EventHandlerCallRef inCaller, EventRef inEvent, void* userData) {
 	UInt32 kind, code;
 	Key key;
 	char charCode, raw;
-	bool repeat;
 	OSStatus res;
 	
 	kind = GetEventKind(inEvent);
@@ -1902,11 +1876,11 @@ OSStatus Window_ProcessKeyboardEvent(EventHandlerCallRef inCaller, EventRef inEv
 		case kEventRawKeyUp:
 			res = GetEventParameter(inEvent, kEventParamKeyCode, typeUInt32, 
 									NULL, sizeof(UInt32), NULL, &code);
-			if (res) ErrorHandler_Fail2(res, "Getting key button");
+			if (res) Logger_Abort2(res, "Getting key button");
 			
 			res = GetEventParameter(inEvent, kEventParamKeyMacCharCodes, typeChar, 
 									NULL, sizeof(char), NULL, &charCode);
-			if (res) ErrorHandler_Fail2(res, "Getting key char");
+			if (res) Logger_Abort2(res, "Getting key char");
 			
 			key = Window_MapKey(code);
 			if (key == KEY_NONE) {
@@ -1926,7 +1900,7 @@ OSStatus Window_ProcessKeyboardEvent(EventHandlerCallRef inCaller, EventRef inEv
 			/* TODO: Should we be using kEventTextInputUnicodeForKeyEvent for this */
 			/* Look at documentation for kEventRawKeyRepeat */
 			if (!Convert_TryUnicodeToCP437((uint8_t)charCode, &raw)) return 0;
-			Event_RaiseInt(&KeyEvents_Press, raw);
+			Event_RaiseInt(&KeyEvents.Press, raw);
 			return 0;
 			
 		case kEventRawKeyUp:
@@ -1936,19 +1910,13 @@ OSStatus Window_ProcessKeyboardEvent(EventHandlerCallRef inCaller, EventRef inEv
 		case kEventRawKeyModifiersChanged:
 			res = GetEventParameter(inEvent, kEventParamKeyModifiers, typeUInt32, 
 									NULL, sizeof(UInt32), NULL, &code);
-			if (res) ErrorHandler_Fail2(res, "Getting key modifiers");
+			if (res) Logger_Abort2(res, "Getting key modifiers");
 			
-			/* TODO: Is this even needed */
-			repeat = Key_KeyRepeat; 
-			Key_KeyRepeat = false;
-			
-			Key_SetPressed(KEY_LCTRL,  (code & 0x1000) != 0);
-			Key_SetPressed(KEY_LALT,   (code & 0x0800) != 0);
-			Key_SetPressed(KEY_LSHIFT, (code & 0x0200) != 0);
-			Key_SetPressed(KEY_LWIN,   (code & 0x0100) != 0);			
-			Key_SetPressed(KEY_CAPSLOCK,  (code & 0x0400) != 0);
-			
-			Key_KeyRepeat = repeat;
+			Key_SetPressed(KEY_LCTRL,    (code & 0x1000) != 0);
+			Key_SetPressed(KEY_LALT,     (code & 0x0800) != 0);
+			Key_SetPressed(KEY_LSHIFT,   (code & 0x0200) != 0);
+			Key_SetPressed(KEY_LWIN,     (code & 0x0100) != 0);			
+			Key_SetPressed(KEY_CAPSLOCK, (code & 0x0400) != 0);
 			return 0;
 	}
 	return eventNotHandledErr;
@@ -1959,12 +1927,12 @@ OSStatus Window_ProcessWindowEvent(EventHandlerCallRef inCaller, EventRef inEven
 	
 	switch (GetEventKind(inEvent)) {
 		case kEventWindowClose:
-			Event_RaiseVoid(&WindowEvents_Closing);
+			Event_RaiseVoid(&WindowEvents.Closing);
 			return eventNotHandledErr;
 			
 		case kEventWindowClosed:
 			Window_Exists = false;
-			Event_RaiseVoid(&WindowEvents_Closed);
+			Event_RaiseVoid(&WindowEvents.Closed);
 			return 0;
 			
 		case kEventWindowBoundsChanged:
@@ -1973,18 +1941,18 @@ OSStatus Window_ProcessWindowEvent(EventHandlerCallRef inCaller, EventRef inEven
 			Window_UpdateSize();
 			
 			if (width != Window_ClientSize.Width || height != Window_ClientSize.Height) {
-				Event_RaiseVoid(&WindowEvents_Resized);
+				Event_RaiseVoid(&WindowEvents.Resized);
 			}
 			return eventNotHandledErr;
 			
 		case kEventWindowActivated:
 			Window_Focused = true;
-			Event_RaiseVoid(&WindowEvents_FocusChanged);
+			Event_RaiseVoid(&WindowEvents.FocusChanged);
 			return eventNotHandledErr;
 			
 		case kEventWindowDeactivated:
 			Window_Focused = false;
-			Event_RaiseVoid(&WindowEvents_FocusChanged);
+			Event_RaiseVoid(&WindowEvents.FocusChanged);
 			return eventNotHandledErr;
 	}
 	return eventNotHandledErr;
@@ -2009,7 +1977,7 @@ OSStatus Window_ProcessMouseEvent(EventHandlerCallRef inCaller, EventRef inEvent
 	
 	/* this error comes up from the application event handler */
 	if (res && res != eventParameterNotFoundErr) {
-		ErrorHandler_Fail2(res, "Getting mouse position");
+		Logger_Abort2(res, "Getting mouse position");
 	}
 	
 	mousePos.X = (int)pt.x; mousePos.Y = (int)pt.y;
@@ -2025,7 +1993,7 @@ OSStatus Window_ProcessMouseEvent(EventHandlerCallRef inCaller, EventRef inEvent
 			down = kind == kEventMouseDown;
 			res  = GetEventParameter(inEvent, kEventParamMouseButton, typeMouseButton, 
 									 NULL, sizeof(EventMouseButton), NULL, &button);
-			if (res) ErrorHandler_Fail2(res, "Getting mouse button");
+			if (res) Logger_Abort2(res, "Getting mouse button");
 			
 			switch (button) {
 				case kEventMouseButtonPrimary:
@@ -2040,7 +2008,7 @@ OSStatus Window_ProcessMouseEvent(EventHandlerCallRef inCaller, EventRef inEvent
 		case kEventMouseWheelMoved:
 			res = GetEventParameter(inEvent, kEventParamMouseWheelDelta, typeSInt32,
 									NULL, sizeof(SInt32), NULL, &delta);
-			if (res) ErrorHandler_Fail2(res, "Getting mouse wheel delta");
+			if (res) Logger_Abort2(res, "Getting mouse wheel delta");
 			Mouse_SetWheel(Mouse_Wheel + delta);
 			return 0;
 			
@@ -2112,9 +2080,11 @@ static void Window_ConnectEvents(void) {
 	
 	target = GetApplicationEventTarget();
 	/* TODO: Use EventTargetRef target = GetWindowEventTarget(windowRef); instead?? */
+	/* need WindowEventTargetRef, otherwise message boxes don't work */
+	/* but if use WindowEventTargetRef, can't click quit/move buttons anymore */
 	res = InstallEventHandler(target, NewEventHandlerUPP(Window_EventHandler),
 							  Array_Elems(eventTypes), eventTypes, NULL, NULL);
-	if (res) ErrorHandler_Fail2(res, "Connecting events");
+	if (res) Logger_Abort2(res, "Connecting events");
 }
 
 
@@ -2132,14 +2102,14 @@ void Window_Create(int x, int y, int width, int height, struct GraphicsMode* mod
 						  kWindowStandardDocumentAttributes | kWindowStandardHandlerAttribute |
 						  kWindowInWindowMenuAttribute | kWindowLiveResizeAttribute,
 						  &r, &win_handle);
-	if (res) ErrorHandler_Fail2(res, "Failed to create window");
+	if (res) Logger_Abort2(res, "Failed to create window");
 
 	Window_SetLocation(r.left, r.right);
 	Window_SetSize(Rect_Width(r), Rect_Height(r));
 	Window_UpdateSize();
 	
 	res = GetWindowBounds(win_handle, kWindowTitleBarRgn, &r);
-	if (res) ErrorHandler_Fail2(res, "Failed to get titlebar size");
+	if (res) Logger_Abort2(res, "Failed to get titlebar size");
 	title_height = Rect_Height(r);
 	AcquireRootMenu();
 	
@@ -2170,7 +2140,7 @@ PasteboardRef Window_GetPasteboard(void) {
 	PasteboardRef pbRef;
 	OSStatus err = PasteboardCreate(kPasteboardClipboard, &pbRef);
 	
-	if (err) ErrorHandler_Fail2(err, "Creating Pasteboard reference");
+	if (err) Logger_Abort2(err, "Creating Pasteboard reference");
 	PasteboardSynchronize(pbRef);
 	return pbRef;
 }
@@ -2189,20 +2159,20 @@ void Window_GetClipboardText(String* value) {
 	pbRef = Window_GetPasteboard();
 
 	err = PasteboardGetItemCount(pbRef, &itemCount);
-	if (err) ErrorHandler_Fail2(err, "Getting item count from Pasteboard");
+	if (err) Logger_Abort2(err, "Getting item count from Pasteboard");
 	if (itemCount < 1) return;
 	
 	err = PasteboardGetItemIdentifier(pbRef, 1, &itemID);
-	if (err) ErrorHandler_Fail2(err, "Getting item identifier from Pasteboard");
+	if (err) Logger_Abort2(err, "Getting item identifier from Pasteboard");
 	
 	if (!(err = PasteboardCopyItemFlavorData(pbRef, itemID, FMT_UTF16, &outData))) {	
 		ptr = CFDataGetBytePtr(outData);
 		len = CFDataGetLength(outData);
-		if (ptr) Window_DecodeUtf16(value, (Codepoint*)ptr, len);
+		if (ptr) Convert_DecodeUtf16(value, (Codepoint*)ptr, len);
 	} else if (!(err = PasteboardCopyItemFlavorData(pbRef, itemID, FMT_UTF8, &outData))) {
 		ptr = CFDataGetBytePtr(outData);
 		len = CFDataGetLength(outData);
-		if (ptr) Window_DecodeUtf8(value, (uint8_t*)ptr, len);
+		if (ptr) Convert_DecodeUtf8(value, (uint8_t*)ptr, len);
 	}
 }
 
@@ -2215,12 +2185,12 @@ void Window_SetClipboardText(const String* value) {
 
 	pbRef = Window_GetPasteboard();
 	err   = PasteboardClear(pbRef);
-	if (err) ErrorHandler_Fail2(err, "Clearing Pasteboard");
+	if (err) Logger_Abort2(err, "Clearing Pasteboard");
 	PasteboardSynchronize(pbRef);
 
-	len = Platform_ConvertString(str, value);
-	CFDataCreate(NULL, str, len);
-	if (!cfData) ErrorHandler_Fail("CFDataCreate() returned null pointer");
+	len    = Platform_ConvertString(str, value);
+	cfData = CFDataCreate(NULL, str, len);
+	if (!cfData) Logger_Abort("CFDataCreate() returned null pointer");
 
 	PasteboardPutItemFlavor(pbRef, 1, FMT_UTF8, cfData, 0);
 }
@@ -2264,7 +2234,7 @@ void Window_SetWindowState(int state) {
 	}
 	if (old_state == WINDOW_STATE_MINIMISED) {
 		err = CollapseWindow(win_handle, false);
-		if (err) ErrorHandler_Fail2(err, "Un-minimising window");
+		if (err) Logger_Abort2(err, "Un-minimising window");
 	}
 	Window_UpdateWindowState();
 }
@@ -2292,7 +2262,7 @@ void Window_SetClientSize(int width, int height) {
 }
 
 void Window_Close(void) {
-	Event_RaiseVoid(&WindowEvents_Closed);
+	Event_RaiseVoid(&WindowEvents.Closed);
 	/* TODO: Does this raise the event twice? */
 	Window_Destroy();
 }
@@ -2388,7 +2358,7 @@ void Window_InitRaw(Bitmap* bmp) {
 	
 	colorSpace = CGColorSpaceCreateDeviceRGB();
 	provider   = CGDataProviderCreateWithData(NULL, bmp->Scan0, 
-					Bimap_DataSize(bmp->Width, bmp->Height), NULL);
+					Bitmap_DataSize(bmp->Width, bmp->Height), NULL);
 	
 	win_image = CGImageCreate(bmp->Width, bmp->Height, 8, 32, bmp->Width * 4, colorSpace, 
 					kCGBitmapByteOrder32Little | kCGImageAlphaFirst, provider, NULL, 0, 0);
@@ -2403,17 +2373,17 @@ void Window_DrawRaw(Rect2D r) {
 	OSStatus err;
 	
 	err = QDBeginCGContext(win_winPort, &context);
-	if (err) ErrorHandler_Fail2(err, "Begin draw");
+	if (err) Logger_Abort2(err, "Begin draw");
 	
 	/* TODO: Only update changed bit.. */
 	rect.origin.x = 0; rect.origin.y = 0;
-	rect.size.x   = Window_ClientSize.Width;
-	rect.size.y   = Window_ClientSize.Height;
+	rect.size.width  = Window_ClientSize.Width;
+	rect.size.height = Window_ClientSize.Height;
 	
 	CGContextDrawImage(context, rect, win_image);
 	CGContextSynchronize(context);
 	err = QDEndCGContext(win_winPort, &context);
-	if (err) ErrorHandler_Fail2(err, "End draw");
+	if (err) Logger_Abort2(err, "End draw");
 }
 
 
@@ -2429,7 +2399,7 @@ static void GLContext_Check(int code, const char* place) {
 	if (code) return;
 
 	res = aglGetError();
-	if (res) ErrorHandler_Fail2(res, place);
+	if (res) Logger_Abort2(res, place);
 }
 
 static void GLContext_MakeCurrent(void) {
@@ -2522,7 +2492,7 @@ void GLContext_Init(struct GraphicsMode* mode) {
 
 	/* Initially try creating fullscreen compatible context */	
 	res = DMGetGDeviceByDisplayID(CGMainDisplayID(), &gdevice, false);
-	if (res) ErrorHandler_Fail2(res, "Getting display device failed");
+	if (res) Logger_Abort2(res, "Getting display device failed");
 
 	GLContext_GetAttribs(mode, attribs, true);
 	fmt = aglChoosePixelFormat(&gdevice, 1, attribs);
@@ -2537,7 +2507,7 @@ void GLContext_Init(struct GraphicsMode* mode) {
 		fmt = aglChoosePixelFormat(NULL, 0, attribs);
 		res = aglGetError();
 	}
-	if (res) ErrorHandler_Fail2(res, "Choosing pixel format");
+	if (res) Logger_Abort2(res, "Choosing pixel format");
 
 	ctx_handle = aglCreateContext(fmt, NULL);
 	GLContext_Check(0, "Creating GL context");

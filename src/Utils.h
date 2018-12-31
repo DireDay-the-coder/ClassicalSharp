@@ -9,7 +9,7 @@
 /* Represents a particular instance in time in some timezone. Not necessarily UTC time. */
 /* NOTE: This is not an efficiently sized struct. Store DateTime_TotalMs instead for that. */
 struct DateTime {
-	int Year;  /* Year,   ranges from 0 to 65535 */
+	int Year;   /* Year,   ranges from 0 to 65535 */
 	int Month;  /* Month,  ranges from 1 to 12 */
 	int Day;    /* Day,    ranges from 1 to 31 */
 	int Hour;   /* Hour,   ranges from 0 to 23 */
@@ -18,7 +18,14 @@ struct DateTime {
 	int Milli; /* Milliseconds, ranges from 0 to 999 */
 };
 
-#define DATETIME_MILLIS_PER_SEC 1000
+#define MILLIS_PER_SEC 1000
+#define SECS_PER_MIN 60
+#define SECS_PER_HOUR (60 * 60)
+#define SECS_PER_DAY (60 * 60 * 24)
+#define MINS_PER_HOUR 60
+#define HOURS_PER_DAY 24
+#define MILLIS_PER_DAY (1000 * 60 * 60 * 24)
+
 int DateTime_TotalDays(const struct DateTime* time);
 TimeMS DateTime_TotalMs(const struct DateTime* time);
 void DateTime_FromTotalMs(struct DateTime* time, TimeMS ms);
@@ -40,6 +47,14 @@ uint32_t Utils_CRC32(const uint8_t* data, uint32_t length);
 extern const uint32_t Utils_Crc32Table[256];
 CC_NOINLINE void* Utils_Resize(void* buffer, uint32_t* maxElems, uint32_t elemSize, uint32_t defElems, uint32_t expandElems);
 CC_NOINLINE bool Utils_ParseIP(const String* ip, uint8_t* data);
+/* Converts blocks of 3 bytes into 4 ASCII characters. (pads if needed) */
+/* Returns the number of ASCII characters written. */
+/* NOTE: You MUST ensure that dst is appropriately sized. */
+int Convert_ToBase64(const uint8_t* src, int len, char* dst);
+/* Converts blocks of 4 ASCII characters into 3 bytes. */
+/* Returns the number of bytes written. */
+/* NOTE: You MUST ensure that dst is appropriately sized. */
+int Convert_FromBase64(const char* src, int len, uint8_t* dst);
 
 struct EntryList {
 	const char* Folder;

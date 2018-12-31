@@ -87,7 +87,7 @@ void AnimatedComp_Update(struct Entity* e, Vector3 oldPos, Vector3 newPos, doubl
 
 void AnimatedComp_GetCurrent(struct Entity* e, float t) {
 	struct AnimatedComp* anim = &e->Anim;
-	float idleTime = (float)Game_Accumulator;
+	float idleTime = (float)Game_Time;
 	float idleXRot = Math_SinF(idleTime * ANIM_IDLE_XPERIOD) * ANIM_IDLE_MAX;
 	float idleZRot = Math_CosF(idleTime * ANIM_IDLE_ZPERIOD) * ANIM_IDLE_MAX + ANIM_IDLE_MAX;
 
@@ -195,7 +195,7 @@ static float HacksComp_ParseFlagFloat(const char* flagRaw, struct HacksComp* hac
 	float value;
 
 	if (!raw.length || Game_ClassicMode)      return 1.0f;
-	if (!Convert_TryParseFloat(&raw, &value)) return 1.0f;
+	if (!Convert_ParseFloat(&raw, &value)) return 1.0f;
 	return value;
 }
 
@@ -204,7 +204,7 @@ static int HacksComp_ParseFlagInt(const char* flagRaw, struct HacksComp* hacks) 
 	int value;
 
 	if (!raw.length || Game_ClassicMode)    return 1;
-	if (!Convert_TryParseInt(&raw, &value)) return 1;
+	if (!Convert_ParseInt(&raw, &value)) return 1;
 	return value;
 }
 
@@ -266,7 +266,7 @@ void HacksComp_CheckConsistency(struct HacksComp* hacks) {
 }
 
 void HacksComp_UpdateState(struct HacksComp* hacks) {
-	static String excHacks = String_FromConst("-hax");
+	const static String excHacks = String_FromConst("-hax");
 
 	HacksComp_SetAll(hacks, true);
 	hacks->CanBePushed = true;
@@ -291,7 +291,7 @@ void HacksComp_UpdateState(struct HacksComp* hacks) {
 	hacks->MaxJumps     = HacksComp_ParseFlagInt("jumps=",      hacks);
 
 	HacksComp_CheckConsistency(hacks);
-	Event_RaiseVoid(&UserEvents_HackPermissionsChanged);
+	Event_RaiseVoid(&UserEvents.HackPermissionsChanged);
 }
 
 

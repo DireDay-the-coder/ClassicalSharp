@@ -107,15 +107,15 @@ extern VertexP3fT2fC4b Model_Vertices[MODEL_MAX_VERTICES];
 extern struct Model* Human_ModelPtr;
 
 /* Returns pointer to model whose name caselessly matches given name. */
-CC_EXPORT struct Model* Model_Get(const String* name);
+CC_API struct Model* Model_Get(const String* name);
 /* Returns index of cached texture whose name caselessly matches given name. */
-CC_EXPORT struct ModelTex* Model_GetTexture(const String* name);
+CC_API struct ModelTex* Model_GetTexture(const String* name);
 /* Adds a model to the list of models. (e.g. "skeleton") */
 /* Models can be applied to entities to change their appearance. Use Entity_SetModel for that. */
-CC_EXPORT void Model_Register(struct Model* model);
+CC_API void Model_Register(struct Model* model);
 /* Adds a texture to the list of model textures. (e.g. "skeleton.png") */
 /* Model textures are automatically loaded from texture packs. Used as a 'default skin' for models. */
-CC_EXPORT void Model_RegisterTexture(struct ModelTex* tex);
+CC_API void Model_RegisterTexture(struct ModelTex* tex);
 
 /* Describes data for a box being built. */
 struct BoxDesc {
@@ -124,6 +124,14 @@ struct BoxDesc {
 	float X1,Y1,Z1, X2,Y2,Z2;    /* Box corners coordinates */
 	float RotX,RotY,RotZ;        /* Rotation origin point */
 };
+
+#define BoxDesc_Dim(p1, p2) p1 < p2 ? p2 - p1 : p1 - p2
+/* Macros for making initialising a BoxDesc easier to understand. See Model.c for how these get used. */
+#define BoxDesc_Tex(x, y)                 x,y
+#define BoxDesc_Dims(x1,y1,z1,x2,y2,z2)   BoxDesc_Dim(x1,x2), BoxDesc_Dim(y1,y2), BoxDesc_Dim(z1,z2)
+#define BoxDesc_Bounds(x1,y1,z1,x2,y2,z2) x1/16.0f,y1/16.0f,z1/16.0f, x2/16.0f,y2/16.0f,z2/16.0f
+#define BoxDesc_Rot(x, y, z)              x/16.0f,y/16.0f,z/16.0f
+#define BoxDesc_Box(x1,y1,z1,x2,y2,z2)    BoxDesc_Dims(x1,y1,z1,x2,y2,z2), BoxDesc_Bounds(x1,y1,z1,x2,y2,z2)
 
 /* Builds a box model assuming the follow texture layout:
 let SW = sides width, BW = body width, BH = body height

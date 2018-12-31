@@ -1,5 +1,8 @@
 #include "LWeb.h"
+#include "Launcher.h"
 #include "Platform.h"
+#include "Stream.h"
+#include "Logger.h"
 
 /*########################################################################################################################*
 *----------------------------------------------------------JSON-----------------------------------------------------------*
@@ -12,9 +15,9 @@
 /* Consumes n characters from the JSON stream */
 #define JsonContext_Consume(ctx, n) ctx->Cur += n; ctx->Left -= n;
 
-static String strTrue  = String_FromConst("true");
-static String strFalse = String_FromConst("false");
-static String strNull  = String_FromConst("null");
+const static String strTrue  = String_FromConst("true");
+const static String strFalse = String_FromConst("false");
+const static String strNull  = String_FromConst("null");
 
 static bool Json_IsWhitespace(char c) {
 	return c == '\r' || c == '\n' || c == '\t' || c == ' ';
@@ -24,7 +27,7 @@ static bool Json_IsNumber(char c) {
 	return c == '-' || c == '.' || (c >= '0' && c <= '9');
 }
 
-static bool Json_ConsumeConstant(struct JsonContext* ctx, String* value) {
+static bool Json_ConsumeConstant(struct JsonContext* ctx, const String* value) {
 	int i;
 	if (value->length > ctx->Left) return false;
 
@@ -37,10 +40,11 @@ static bool Json_ConsumeConstant(struct JsonContext* ctx, String* value) {
 }
 
 static int Json_ConsumeToken(struct JsonContext* ctx) {
+	char c;
 	for (; ctx->Left && Json_IsWhitespace(*ctx->Cur); ) { JsonContext_Consume(ctx, 1); }
 	if (!ctx->Left) return TOKEN_NONE;
 
-	char c = *ctx->Cur;
+	c = *ctx->Cur;
 	if (c == '{' || c == '}' || c == '[' || c == ']' || c == ',' || c == '"' || c == ':') {
 		JsonContext_Consume(ctx, 1); return c;
 	}
@@ -101,7 +105,7 @@ static void Json_ConsumeObject(struct JsonContext* ctx) {
 	char keyBuffer[STRING_SIZE];
 	String value, oldKey = ctx->CurKey;
 	int token;
-	ctx->OnNewObject();
+	ctx->OnNewObject(ctx);
 
 	while (true) {
 		token = Json_ConsumeToken(ctx);
@@ -119,7 +123,7 @@ static void Json_ConsumeObject(struct JsonContext* ctx) {
 		if (token == TOKEN_NONE) { ctx->Failed = true; return; }
 
 		value = Json_ConsumeValue(token, ctx);
-		ctx->OnValue(&value);
+		ctx->OnValue(ctx, &value);
 		ctx->CurKey = oldKey;
 	}
 }
@@ -127,7 +131,7 @@ static void Json_ConsumeObject(struct JsonContext* ctx) {
 static void Json_ConsumeArray(struct JsonContext* ctx) {
 	String value;
 	int token;
-	ctx->OnNewArray();
+	ctx->OnNewArray(ctx);
 
 	while (true) {
 		token = Json_ConsumeToken(ctx);
@@ -136,7 +140,7 @@ static void Json_ConsumeArray(struct JsonContext* ctx) {
 
 		if (token == TOKEN_NONE) { ctx->Failed = true; return; }
 		value = Json_ConsumeValue(token, ctx);
-		ctx->OnValue(&value);
+		ctx->OnValue(ctx, &value);
 	}
 }
 
@@ -154,8 +158,8 @@ static String Json_ConsumeValue(int token, struct JsonContext* ctx) {
 	return String_Empty;
 }
 
-static void Json_NullOnNew(void) { }
-static void Json_NullOnValue(String* value) { }
+static void Json_NullOnNew(struct JsonContext* ctx) { }
+static void Json_NullOnValue(struct JsonContext* ctx, const String* v) { }
 void Json_Init(struct JsonContext* ctx, String* str) {
 	ctx->Cur    = str->buffer;
 	ctx->Left   = str->length;
@@ -176,6 +180,18 @@ void Json_Parse(struct JsonContext* ctx) {
 	} while (token != TOKEN_NONE);
 }
 
+static void Json_Handle(uint8_t* data, uint32_t len, 
+						JsonOnValue onVal, JsonOnNew newArr, JsonOnNew newObj) {
+	struct JsonContext ctx;
+	String str = String_Init(data, len, len);
+	Json_Init(&ctx, &str);
+	
+	if (onVal)  ctx.OnValue     = onVal;
+	if (newArr) ctx.OnNewArray  = newArr;
+	if (newObj) ctx.OnNewObject = newObj;
+	Json_Parse(&ctx);
+}
+
 
 /*########################################################################################################################*
 *--------------------------------------------------------Web task---------------------------------------------------------*
@@ -184,303 +200,422 @@ static void LWebTask_Reset(struct LWebTask* task) {
 	task->Completed = false;
 	task->Working   = true;
 	task->Success   = false;
-	task->Start = DateTime_CurrentUTC_MS();
-}
-
-static void LWebTask_StartAsync(struct LWebTask* task) {
-	LWebTask_Reset(task);
-	task->Begin(task);
+	task->Start     = DateTime_CurrentUTC_MS();
+	task->Res       = 0;
+	task->Status    = 0;
 }
 
 void LWebTask_Tick(struct LWebTask* task) {
-	struct AsyncRequest req;
+	struct HttpRequest req;
 	int delta;
 	if (task->Completed) return;
 
-	if (!AsyncDownloader_Get(&task->Identifier, &req)) return;
+	if (!Http_GetResult(&task->Identifier, &req)) return;
 	delta = (int)(DateTime_CurrentUTC_MS() - task->Start);
 	Platform_Log2("%s took %i", &task->Identifier, &delta);
 
+	task->Res    = req.Result;
+	task->Status = req.StatusCode;
+
+	task->Working   = false;
 	task->Completed = true;
-	task->Success   = req.ResultData && req.ResultSize;
-	if (task->Success) task->Handle(task, req.ResultData, req.ResultSize);
-}
-
-static void LWebTask_DefaultBegin(struct LWebTask* task) {
-	AsyncDownloader_GetData(&task->URL, false, &task->Identifier);
+	task->Success   = req.Success;
+	if (task->Success) task->Handle(req.Data, req.Size);
+	HttpRequest_Free(&req);
 }
 
 
-struct GetCSRFTokenTaskData GetCSRFTokenTask;
-void GetCSRFTokenTask_Run(void);
+/*########################################################################################################################*
+*-------------------------------------------------------GetTokenTask------------------------------------------------------*
+*#########################################################################################################################*/
+struct GetTokenTaskData GetTokenTask;
+char tokenBuffer[STRING_SIZE];
 
+static void GetTokenTask_OnValue(struct JsonContext* ctx, const String* str) {
+	if (!String_CaselessEqualsConst(&ctx->CurKey, "token")) return;
+	String_Copy(&GetTokenTask.Token, str);
+}
+
+static void GetTokenTask_Handle(uint8_t* data, uint32_t len) {
+	Json_Handle(data, len, GetTokenTask_OnValue, NULL, NULL);
+}
+
+void GetTokenTask_Run(void) {
+	const static String id  = String_FromConst("CC get token");
+	const static String url = String_FromConst("https://www.classicube.net/api/login");
+	if (GetTokenTask.Base.Working) return;
+
+	LWebTask_Reset(&GetTokenTask.Base);
+	String_InitArray(GetTokenTask.Token, tokenBuffer);
+
+	GetTokenTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	GetTokenTask.Base.Handle     = GetTokenTask_Handle;
+}
+
+
+/*########################################################################################################################*
+*--------------------------------------------------------SignInTask-------------------------------------------------------*
+*#########################################################################################################################*/
 struct SignInTaskData SignInTask;
-void SignInTask_Run(const String* user, const String* pass);
+char userBuffer[STRING_SIZE];
+
+static void SignInTask_LogError(const String* str) {
+	const static String userErr = String_FromConst("&cWrong username or password");
+	const static String verErr  = String_FromConst("&cAccount verification required");
+	const static String unkErr  = String_FromConst("&cUnknown error occurred");
+
+	if (String_CaselessEqualsConst(str, "username") || String_CaselessEqualsConst(str, "password")) {
+		SignInTask.Error = userErr;
+	} else if (String_CaselessEqualsConst(str, "verification")) {
+		SignInTask.Error = verErr;
+	} else if (str->length) {
+		SignInTask.Error = unkErr;
+	}
+}
+
+static void SignInTask_OnValue(struct JsonContext* ctx, const String* str) {
+	if (String_CaselessEqualsConst(&ctx->CurKey, "username")) {
+		String_Copy(&SignInTask.Username, str);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "errors")) {
+		SignInTask_LogError(str);
+	}
+}
+
+static void SignInTask_Handle(uint8_t* data, uint32_t len) {
+	Json_Handle(data, len, SignInTask_OnValue, NULL, NULL);
+}
+
+void SignInTask_Run(const String* user, const String* pass) {
+	const static String id  = String_FromConst("CC post login");
+	const static String url = String_FromConst("https://www.classicube.net/api/login");
+	String tmp; char tmpBuffer[STRING_SIZE * 5];
+	if (SignInTask.Base.Working) return;
+
+	LWebTask_Reset(&SignInTask.Base);
+	String_InitArray(SignInTask.Username, userBuffer);
+	SignInTask.Error.length = 0;
+
+	String_InitArray(tmp, tmpBuffer);
+	/* TODO: URL ENCODE THIS.. */
+	String_Format3(&tmp, "username=%s&password=%s&token=%s",
+					user, pass, &GetTokenTask.Token);
+
+	SignInTask.Base.Identifier = id;
+	Http_AsyncPostData(&url, false, &id, tmp.buffer, tmp.length);
+	SignInTask.Base.Handle     = SignInTask_Handle;
+}
 
 
+/*########################################################################################################################*
+*-----------------------------------------------------FetchServerTask-----------------------------------------------------*
+*#########################################################################################################################*/
 struct FetchServerData FetchServerTask;
-void FetchServerTask_Run(const String* hash);
+static struct ServerInfo* curServer;
+
+static void ServerInfo_Init(struct ServerInfo* info) {
+	String_InitArray(info->Hash, info->_hashBuffer);
+	String_InitArray(info->Name, info->_nameBuffer);
+	String_InitArray(info->IP,   info->_ipBuffer);
+
+	String_InitArray(info->Mppass,   info->_mppassBuffer);
+	String_InitArray(info->Software, info->_softBuffer);
+	String_InitArray(info->Country,  info->_countryBuffer);
+
+	info->Players    = 0;
+	info->MaxPlayers = 0;
+	info->Uptime     = 0;
+	info->Featured   = false;
+	info->_order     = -100000;
+}
+
+static void ServerInfo_Parse(struct JsonContext* ctx, const String* val) {
+	struct ServerInfo* info = curServer;
+	if (String_CaselessEqualsConst(&ctx->CurKey, "hash")) {
+		String_Copy(&info->Hash, val);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "name")) {
+		String_Copy(&info->Name, val);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "players")) {
+		Convert_ParseInt(val, &info->Players);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "maxplayers")) {
+		Convert_ParseInt(val, &info->MaxPlayers);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "uptime")) {
+		Convert_ParseInt(val, &info->Uptime);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "mppass")) {
+		String_Copy(&info->Mppass, val);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "ip")) {
+		String_Copy(&info->IP, val);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "port")) {
+		Convert_ParseInt(val, &info->Port);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "software")) {
+		String_Copy(&info->Software, val);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "featured")) {
+		Convert_ParseBool(val, &info->Featured);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "country_abbr")) {
+		String_Copy(&info->Country, val);
+	}
+}
+
+static void FetchServerTask_Handle(uint8_t* data, uint32_t len) {
+	curServer = &FetchServerTask.Server;
+	Json_Handle(data, len, ServerInfo_Parse, NULL, NULL);
+}
+
+void FetchServerTask_Run(const String* hash) {
+	const static String id  = String_FromConst("CC fetch server");
+	String url; char urlBuffer[STRING_SIZE];
+	if (FetchServerTask.Base.Working) return;
+
+	LWebTask_Reset(&FetchServerTask.Base);
+	ServerInfo_Init(&FetchServerTask.Server);
+	String_InitArray(url, urlBuffer);
+	String_Format1(&url, "https://www.classicube.net/api/server/%s", hash);
+
+	FetchServerTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	FetchServerTask.Base.Handle  = FetchServerTask_Handle;
+}
 
 
+/*########################################################################################################################*
+*-----------------------------------------------------FetchServersTask----------------------------------------------------*
+*#########################################################################################################################*/
 struct FetchServersData FetchServersTask;
-void FetchServersTask_Run(void);
-
-
-struct UpdateCheckTaskData UpdateCheckTask;
-void UpdateCheckTask_Run(void);
-
-
-struct UpdateDownloadTaskData UpdateDownloadTask;
-void UpdateDownloadTask_Run(const String* file);
-
-
-struct FetchFlagsTaskData FetchFlagsTask;
-void FetchFlagsTask_Run(void);
-void FetchFlagsTask_Add(const String* name);
-
-/*
-protected static JsonObject ParseJson(Request req) {
-	JsonContext ctx = new JsonContext();
-	ctx.Val = (string)req.Data;
-	return (JsonObject)Json.ParseStream(ctx);
+static void FetchServersTask_Count(struct JsonContext* ctx) {
+	FetchServersTask.NumServers++;
 }
 
-public sealed class GetCSRFTokenTask : WebTask {
-	public GetCSRFTokenTask() {
-		identifier = "CC get login";
-		uri = "https://www.classicube.net/api/login/";
-	}
-	public string Token;
-
-	protected override void Handle(Request req) {
-		JsonObject data = ParseJson(req);
-		Token = (string)data["token"];
-	}
+static void FetchServersTask_Next(struct JsonContext* ctx) {
+	curServer++;
+	if (curServer < FetchServersTask.Servers) return;
+	ServerInfo_Init(curServer);
 }
 
-public sealed class SignInTask : WebTask {
-	public SignInTask() {
-		identifier = "CC post login";
-		uri = "https://www.classicube.net/api/login/";
-	}
-	public string Username, Password, Token, Error;
+static void FetchServersTask_Handle(uint8_t* data, uint32_t len) {
+	Mem_Free(FetchServersTask.Servers);
+	Mem_Free(FetchServersTask.Orders);
 
-	protected override void Begin() {
-		string data = String.Format(
-			"username={0}&password={1}&token={2}",
-			Uri.EscapeDataString(Username),
-			Uri.EscapeDataString(Password),
-			Uri.EscapeDataString(Token)
-		);
-		Game.Downloader.AsyncPostString(uri, false, identifier, data);
-	}
+	FetchServersTask.NumServers = 0;
+	FetchServersTask.Servers    = NULL;
+	FetchServersTask.Orders     = NULL;
 
-	protected override void Handle(Request req) {
-		JsonObject data = ParseJson(req);
-		Error = GetLoginError(data);
-		Username = (string)data["username"];
-	}
+	/* -1 because servers is surrounded by a { */
+	FetchServersTask.NumServers = -1;
+	Json_Handle(data, len, NULL, NULL, FetchServersTask_Count);
 
-	static string GetLoginError(JsonObject obj) {
-		List<object> errors = (List<object>)obj["errors"];
-		if (errors.Count == 0) return null;
+	if (FetchServersTask.NumServers <= 0) return;
+	FetchServersTask.Servers = Mem_Alloc(FetchServersTask.NumServers, sizeof(struct ServerInfo), "servers list");
+	FetchServersTask.Orders  = Mem_Alloc(FetchServersTask.NumServers, 2, "servers order");
 
-		string err = (string)errors[0];
-		if (err == "username" || err == "password") return "Wrong username or password";
-		if (err == "verification") return "Account verification required";
-		return "Unknown error occurred";
+	/* -2 because servers is surrounded by a { */
+	curServer = FetchServersTask.Servers - 2;
+	Json_Handle(data, len, ServerInfo_Parse, NULL, FetchServersTask_Next);
+}
+
+void FetchServersTask_Run(void) {
+	const static String id  = String_FromConst("CC fetch servers");
+	const static String url = String_FromConst("https://www.classicube.net/api/servers");
+	if (FetchServersTask.Base.Working) return;
+	LWebTask_Reset(&FetchServersTask.Base);
+
+	FetchServersTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	FetchServersTask.Base.Handle = FetchServersTask_Handle;
+}
+
+void FetchServersTask_ResetOrder(void) {
+	int i;
+	for (i = 0; i < FetchServersTask.NumServers; i++) {
+		FetchServersTask.Orders[i] = i;
 	}
 }
 
 
-public class ServerInfo {
-	public string Hash, Name, Players, MaxPlayers, Flag;
-	public string Uptime, IPAddress, Port, Mppass, Software;
-	public bool Featured;
+/*########################################################################################################################*
+*-----------------------------------------------------CheckUpdateTask-----------------------------------------------------*
+*#########################################################################################################################*/
+struct CheckUpdateData CheckUpdateTask;
+static char relVersionBuffer[16];
+
+CC_NOINLINE static TimeMS CheckUpdateTask_ParseTime(const String* str) {
+	String time, fractional;
+	TimeMS ms;
+	/* timestamp is in form of "seconds.fractional" */
+	/* But only need to care about the seconds here */
+	String_UNSAFE_Separate(str, '.', &time, &fractional);
+
+	Convert_ParseUInt64(&time, &ms);
+	if (!ms) return 0;
+	return ms * 1000 + UNIX_EPOCH;
 }
 
-public sealed class FetchServerTask : WebTask {
-	public FetchServerTask(string user, string hash) {
-		Username = user;
-		identifier = "CC get servers";
-		uri = "https://www.classicube.net/api/server/" + hash;
-	}
-
-	public static ServerInfo ParseEntry(JsonObject obj) {
-		ServerInfo entry = new ServerInfo();
-		entry.Hash = (string)obj["hash"];
-		entry.Name = (string)obj["name"];
-		entry.Players = (string)obj["players"];
-		entry.MaxPlayers = (string)obj["maxplayers"];
-		entry.Uptime = (string)obj["uptime"];
-		entry.Mppass = (string)obj["mppass"];
-		entry.IPAddress = (string)obj["ip"];
-		entry.Port = (string)obj["port"];
-		entry.Software = (string)obj["software"];
-
-		if (obj.ContainsKey("featured")) {
-			entry.Featured = (bool)obj["featured"];
-		}
-		if (obj.ContainsKey("country_abbr")) {
-			entry.Flag = Utils.ToLower((string)obj["country_abbr"]);
-		}
-		return entry;
-	}
-
-	public string Username;
-	public ClientStartData Info;
-
-	protected override void Handle(Request req) {
-		JsonObject root = ParseJson(req);
-		List<object> list = (List<object>)root["servers"];
-
-		JsonObject obj = (JsonObject)list[0];
-		ServerInfo entry = ParseEntry(obj);
-		Info = new ClientStartData(Username, entry.Mppass, entry.IPAddress, entry.Port, entry.Name);
+static void CheckUpdateTask_OnValue(struct JsonContext* ctx, const String* str) {
+	if (String_CaselessEqualsConst(&ctx->CurKey, "release_version")) {
+		String_Copy(&CheckUpdateTask.LatestRelease, str);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "latest_ts")) {
+		CheckUpdateTask.DevTimestamp = CheckUpdateTask_ParseTime(str);
+	} else if (String_CaselessEqualsConst(&ctx->CurKey, "release_ts")) {
+		CheckUpdateTask.RelTimestamp = CheckUpdateTask_ParseTime(str);
 	}
 }
 
-public sealed class FetchServersTask : WebTask {
-	public FetchServersTask() {
-		identifier = "CC get servers";
-		uri = "https://www.classicube.net/api/servers";
-	}
+static void CheckUpdateTask_Handle(uint8_t* data, uint32_t len) {
+	Json_Handle(data, len, CheckUpdateTask_OnValue, NULL, NULL);
+}
 
-	public List<ServerInfo> Servers;
-	protected override void Reset() {
-		base.Reset();
-		Servers = new List<ServerInfo>();
-	}
+void CheckUpdateTask_Run(void) {
+	const static String id  = String_FromConst("CC update check");
+	const static String url = String_FromConst("http://cs.classicube.net/c_client/builds.json");
+	if (CheckUpdateTask.Base.Working) return;
 
-	protected override void Handle(Request req) {
-		JsonObject root = ParseJson(req);
-		List<object> list = (List<object>)root["servers"];
+	LWebTask_Reset(&CheckUpdateTask.Base);
+	CheckUpdateTask.DevTimestamp = 0;
+	CheckUpdateTask.RelTimestamp = 0;
+	String_InitArray(CheckUpdateTask.LatestRelease, relVersionBuffer);
 
-		for (int i = 0; i < list.Count; i++) {
-			JsonObject obj = (JsonObject)list[i];
-			ServerInfo entry = FetchServerTask.ParseEntry(obj);
-			Servers.Add(entry);
-		}
-	}
+	CheckUpdateTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	CheckUpdateTask.Base.Handle     = CheckUpdateTask_Handle;
 }
 
 
-public class Build {
-	public DateTime TimeBuilt;
-	public string DirectXPath, OpenGLPath;
-	public int DirectXSize, OpenGLSize;
-	public string Version;
+/*########################################################################################################################*
+*-----------------------------------------------------FetchUpdateTask-----------------------------------------------------*
+*#########################################################################################################################*/
+struct FetchUpdateData FetchUpdateTask;
+static void FetchUpdateTask_Handle(uint8_t* data, uint32_t len) {
+	const static String path = String_FromConst("ClassiCube.update");
+	ReturnCode res;
+
+	res = Stream_WriteAllTo(&path, data, len);
+	if (res) { Logger_Warn(res, "saving update"); return; }
+
+	res = File_SetModifiedTime(&path, FetchUpdateTask.Timestamp);
+	if (res) Logger_Warn(res, "setting update time");
+
+	res = Platform_MarkExecutable(&path);
+	if (res) Logger_Warn(res, "making update executable");
 }
 
-public sealed class UpdateCheckTask : WebTask {
-	public UpdateCheckTask() {
-		identifier = "CC update check";
-		uri = "http://cs.classicube.net/builds.json";
-	}
+void FetchUpdateTask_Run(bool release, bool d3d9) {
+#ifdef CC_BUILD_WIN
+#ifdef _WIN64
+	const char* exe_d3d9 = "ClassiCube.64.exe";
+	const char* exe_ogl  = "ClassiCube.64-opengl.exe";
+#else
+	const char* exe_d3d9 = "ClassiCube.exe";
+	const char* exe_ogl  = "ClassiCube.opengl.exe";
+#endif
+#else
+	/* TODO: OSX, 32 bit linux */
+	const char* exe_d3d9 = "ClassiCube";
+	const char* exe_ogl  = "ClassiCube";
+#endif
+	const static String id = String_FromConst("CC update fetch");
+	String url; char urlBuffer[STRING_SIZE];
+	String_InitArray(url, urlBuffer);
 
-	public Build LatestDev, LatestStable;
+	String_Format2(&url, "http://cs.classicube.net/c_client/%c/%c",
+		release ? "release" : "latest",
+		d3d9    ? exe_d3d9  : exe_ogl);
+	if (FetchUpdateTask.Base.Working) return;
 
-	protected override void Handle(Request req) {
-		JsonObject data = ParseJson(req);
-		JsonObject latest = (JsonObject)data["latest"];
+	LWebTask_Reset(&FetchUpdateTask.Base);
+	FetchUpdateTask.Timestamp = release ? CheckUpdateTask.RelTimestamp : CheckUpdateTask.DevTimestamp;
 
-		LatestDev = MakeBuild(latest, false);
-		JsonObject releases = (JsonObject)data["releases"];
-
-		DateTime releaseTime = DateTime.MinValue;
-		foreach(KeyValuePair<string, object> pair in releases) {
-			Build build = MakeBuild((JsonObject)pair.Value, true);
-			if (build.TimeBuilt < releaseTime) continue;
-
-			LatestStable = build;
-			releaseTime = build.TimeBuilt;
-		}
-	}
-
-	static readonly DateTime epoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-	Build MakeBuild(JsonObject obj, bool release) {
-		Build build = new Build();
-		string timeKey = release ? "release_ts" : "ts";
-		double rawTime = Double.Parse((string)obj[timeKey], CultureInfo.InvariantCulture);
-		build.TimeBuilt = epoch.AddSeconds(rawTime).ToLocalTime();
-
-		build.DirectXSize = Int32.Parse((string)obj["dx_size"]);
-		build.DirectXPath = (string)obj["dx_file"];
-		build.OpenGLSize = Int32.Parse((string)obj["ogl_size"]);
-		build.OpenGLPath = (string)obj["ogl_file"];
-		if (obj.ContainsKey("version"))
-			build.Version = (string)obj["version"];
-		return build;
-	}
-}
-
-public sealed class UpdateDownloadTask : WebTask {
-	public UpdateDownloadTask(string dir) {
-		identifier = "CC update download";
-		uri = "http://cs.classicube.net/" + dir;
-	}
-
-	public byte[] ZipFile;
-
-	protected override void Begin() {
-		Game.Downloader.AsyncGetData(uri, false, identifier);
-	}
-
-	protected override void Handle(Request req) {
-		ZipFile = (byte[])req.Data;
-	}
-}
-
-public sealed class UpdateCClientTask : WebTask {
-	public UpdateCClientTask(string file) {
-		identifier = "CC CClient download";
-		uri = "http://cs.classicube.net/c_client/latest/" + file;
-	}
-
-	public byte[] File;
-
-	protected override void Begin() {
-		Game.Downloader.AsyncGetData(uri, false, identifier);
-	}
-
-	protected override void Handle(Request req) {
-		File = (byte[])req.Data;
-	}
+	FetchUpdateTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	FetchUpdateTask.Base.Handle = FetchUpdateTask_Handle;
 }
 
 
-public sealed class FetchFlagsTask : WebTask {
-	public FetchFlagsTask() {
-		identifier = "CC get flag";
-	}
+/*########################################################################################################################*
+*-----------------------------------------------------FetchFlagsTask-----------------------------------------------------*
+*#########################################################################################################################*/
+struct FetchFlagsData FetchFlagsTask;
+static int flagsCount, flagsBufferCount;
+struct FlagData {
+	Bitmap  Bmp;
+	String Name;
+	char _nameBuffer[8];
+};
+static struct FlagData* flags;
 
-	public bool PendingRedraw;
-	public static int DownloadedCount;
-	public static List<string> Flags = new List<string>();
-	public static List<FastBitmap> Bitmaps = new List<FastBitmap>();
+static void FetchFlagsTask_DownloadNext(void);
+static void FetchFlagsTask_Handle(uint8_t* data, uint32_t len) {
+	struct Stream s;
+	ReturnCode res;
 
-	public void AsyncGetFlag(string flag) {
-		for (int i = 0; i < Flags.Count; i++) {
-			if (Flags[i] == flag) return;
-		}
-		Flags.Add(flag);
-	}
+	Stream_ReadonlyMemory(&s, data, len);
+	res = Png_Decode(&flags[FetchFlagsTask.Count].Bmp, &s);
+	if (res) Logger_Warn(res, "decoding flag");
 
-	protected override void Begin() {
-		if (Flags.Count == DownloadedCount) return;
-		uri = "http://static.classicube.net/img/flags/" + Flags[DownloadedCount] + ".png";
-		Game.Downloader.AsyncGetImage(uri, false, identifier);
-	}
+	FetchFlagsTask.Count++;
+	FetchFlagsTask_DownloadNext();
+}
 
-	protected override void Handle(Request req) {
-		Bitmap bmp = (Bitmap)req.Data;
-		FastBitmap fast = new FastBitmap(bmp, true, true);
-		Bitmaps.Add(fast);
-		DownloadedCount++;
-		PendingRedraw = true;
+static void FetchFlagsTask_DownloadNext(void) {
+	const static String id = String_FromConst("CC get flag");
+	String url; char urlBuffer[STRING_SIZE];
+	String_InitArray(url, urlBuffer);
 
-		Reset();
-		Begin();
+	if (FetchFlagsTask.Base.Working)        return;
+	if (FetchFlagsTask.Count == flagsCount) return;
+
+	LWebTask_Reset(&FetchFlagsTask.Base);
+	String_Format1(&url, "http://static.classicube.net/img/flags/%s.png", &flags[FetchFlagsTask.Count].Name);
+
+	FetchFlagsTask.Base.Identifier = id;
+	Http_AsyncGetData(&url, false, &id);
+	FetchFlagsTask.Base.Handle = FetchFlagsTask_Handle;
+}
+
+static void FetchFlagsTask_Ensure(void) {
+	if (flagsCount < flagsBufferCount) return;
+	flagsBufferCount = flagsCount + 10;
+
+	if (flags) {
+		flags = Mem_Realloc(flags, flagsBufferCount, sizeof(struct FlagData), "flags");
+	} else {
+		flags = Mem_Alloc(flagsBufferCount, sizeof(struct FlagData), "flags");
 	}
 }
-}*/
+
+void FetchFlagsTask_Add(const String* name) {
+	char c;
+	int i;
+
+	for (i = 0; i < flagsCount; i++) {
+		if (String_CaselessEquals(name, &flags[i].Name)) return;
+	}
+	FetchFlagsTask_Ensure();
+	
+	Bitmap_Create(&flags[flagsCount].Bmp, 0, 0, NULL);
+	String_InitArray(flags[flagsCount].Name, flags[flagsCount]._nameBuffer);
+
+	/* classicube.net only works with lowercase flag urls */
+	for (i = 0; i < name->length; i++) {
+		c = name->buffer[i];
+		Char_MakeLower(c);
+		String_Append(&flags[flagsCount].Name, c);
+	}
+
+	flagsCount++;
+	FetchFlagsTask_DownloadNext();
+}
+
+Bitmap* Flags_Get(const String* name) {
+	int i;
+	for (i = 0; i < FetchFlagsTask.Count; i++) {
+		if (!String_CaselessEquals(name, &flags[i].Name)) continue;
+		return &flags[i].Bmp;
+	}
+	return NULL;
+}
+
+void Flags_Free(void) {
+	int i;
+	for (i = 0; i < FetchFlagsTask.Count; i++) {
+		Mem_Free(flags[i].Bmp.Scan0);
+	}
+}

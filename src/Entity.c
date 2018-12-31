@@ -11,13 +11,14 @@
 #include "Lighting.h"
 #include "Drawer2D.h"
 #include "Particle.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Chat.h"
 #include "Model.h"
 #include "Input.h"
 #include "Gui.h"
 #include "Stream.h"
 #include "Bitmap.h"
+#include "Logger.h"
 
 NameMode Entities_NameMode;
 ShadowMode Entities_ShadowMode;
@@ -109,7 +110,7 @@ void Entity_GetBounds(struct Entity* e, struct AABB* bb) {
 
 static void Entity_ParseScale(struct Entity* e, const String* scale) {
 	float value, maxScale;
-	if (!Convert_TryParseFloat(scale, &value)) return;
+	if (!Convert_ParseFloat(scale, &value)) return;
 
 	maxScale = e->Model->MaxScale;
 	Math_Clamp(value, 0.01f, maxScale);
@@ -117,7 +118,7 @@ static void Entity_ParseScale(struct Entity* e, const String* scale) {
 }
 
 static void Entity_SetBlockModel(struct Entity* e, const String* model) {
-	static String block = String_FromConst("block");
+	const static String block = String_FromConst("block");
 	int raw = Block_Parse(model);
 
 	if (raw == -1) {
@@ -325,7 +326,7 @@ static void Entities_ChatFontChanged(void* obj) {
 }
 
 void Entities_Remove(EntityID id) {
-	Event_RaiseInt(&EntityEvents_Removed, id);
+	Event_RaiseInt(&EntityEvents.Removed, id);
 	Entities_List[id]->VTABLE->Despawn(Entities_List[id]);
 	Entities_List[id] = NULL;
 }
@@ -578,7 +579,8 @@ static struct Player* Player_FirstOtherWithSameSkinAndFetchedSkin(struct Player*
 	return NULL;
 }
 
-static void Player_ApplySkin(struct Player* player, struct Player* from) {
+/* Copies skin data from another player */
+static void Player_CopySkin(struct Player* player, struct Player* from) {
 	struct Entity* dst = &player->Base;
 	struct Entity* src = &from->Base;
 	String skin;
@@ -591,9 +593,10 @@ static void Player_ApplySkin(struct Player* player, struct Player* from) {
 	/* Custom mob textures */
 	dst->MobTextureId = GFX_NULL;
 	skin = String_FromRawArray(dst->SkinNameRaw);
-	if (Utils_IsUrlPrefix(&skin, 0)) { dst->MobTextureId = dst->TextureId; }
+	if (Utils_IsUrlPrefix(&skin, 0)) dst->MobTextureId = dst->TextureId;
 }
 
+/* Resets skin data for the given player */
 void Player_ResetSkin(struct Player* player) {
 	struct Entity* e = &player->Base;
 	e->uScale = 1.0f; e->vScale = 1.0f;
@@ -602,7 +605,7 @@ void Player_ResetSkin(struct Player* player) {
 	e->SkinType     = SKIN_64x32;
 }
 
-/* Apply or reset skin, for all players with same skin */
+/* Copies or resets skin data for all players with same skin */
 static void Player_SetSkinAll(struct Player* player, bool reset) {
 	struct Entity* entity = &player->Base;
 	struct Player* p;
@@ -621,11 +624,13 @@ static void Player_SetSkinAll(struct Player* player, bool reset) {
 		if (reset) {
 			Player_ResetSkin(p);
 		} else {
-			Player_ApplySkin(p, player);
+			Player_CopySkin(p, player);
 		}
 	}
 }
 
+/* Clears hat area from a skin bitmap if it's completely white or black,
+   so skins edited with Microsoft Paint or similiar don't have a solid hat */
 static void Player_ClearHat(Bitmap* bmp, uint8_t skinType) {
 	int sizeX  = (bmp->Width / 64) * 32;
 	int yScale = skinType == SKIN_64x32 ? 32 : 64;
@@ -652,6 +657,7 @@ static void Player_ClearHat(Bitmap* bmp, uint8_t skinType) {
 	}
 }
 
+/* Ensures skin is a power of two size, resizing if needed. */
 static void Player_EnsurePow2(struct Player* p, Bitmap* bmp) {
 	uint32_t stride;
 	int width, height;
@@ -682,7 +688,7 @@ static void Player_CheckSkin(struct Player* p) {
 	struct Player* first;
 	String url, skin = String_FromRawArray(e->SkinNameRaw);
 
-	struct AsyncRequest item;
+	struct HttpRequest item;
 	struct Stream mem;
 	Bitmap bmp;
 	ReturnCode res;
@@ -690,26 +696,26 @@ static void Player_CheckSkin(struct Player* p) {
 	if (!p->FetchedSkin && e->Model->UsesSkin) {
 		first = Player_FirstOtherWithSameSkinAndFetchedSkin(p);
 		if (!first) {
-			AsyncDownloader_GetSkin(&skin, &skin);
+			Http_AsyncGetSkin(&skin, &skin);
 		} else {
-			Player_ApplySkin(p, first);
+			Player_CopySkin(p, first);
 		}
 		p->FetchedSkin = true;
 	}
 
-	if (!AsyncDownloader_Get(&skin, &item)) return;
-	if (!item.ResultData) { Player_SetSkinAll(p, true); return; }
-	Stream_ReadonlyMemory(&mem, item.ResultData, item.ResultSize);
+	if (!Http_GetResult(&skin, &item)) return;
+	if (!item.Success) { Player_SetSkinAll(p, true); return; }
+	Stream_ReadonlyMemory(&mem, item.Data, item.Size);
 
 	if ((res = Png_Decode(&bmp, &mem))) {
 		url = String_FromRawArray(item.URL);
-		Chat_LogError2(res, "decoding", &url);
+		Logger_Warn2(res, "decoding", &url);
 		Mem_Free(bmp.Scan0); return;
 	}
 
 	Gfx_DeleteTexture(&e->TextureId);
-	Player_EnsurePow2(p, &bmp);
 	Player_SetSkinAll(p, true);
+	Player_EnsurePow2(p, &bmp);
 	e->SkinType = Utils_GetSkinType(&bmp);
 
 	if (bmp.Width > Gfx_MaxTexWidth || bmp.Height > Gfx_MaxTexHeight) {
@@ -753,7 +759,7 @@ void Player_SetName(struct Player* p, const String* name, const String* skin) {
 }
 
 static void Player_Init(struct Entity* e) {
-	static String model = String_FromConst("humanoid");
+	const static String model = String_FromConst("humanoid");
 	Entity_Init(e);
 
 	e->StepSize   = 0.5f;
@@ -766,6 +772,7 @@ static void Player_Init(struct Entity* e) {
 *------------------------------------------------------LocalPlayer--------------------------------------------------------*
 *#########################################################################################################################*/
 struct LocalPlayer LocalPlayer_Instance;
+static bool hackPermMsgs;
 float LocalPlayer_JumpHeight(void) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
 	return (float)PhysicsComp_GetMaxHeight(p->Physics.JumpVel);
@@ -901,6 +908,7 @@ static void LocalPlayer_Init(void) {
 	hacks->FullBlockStep   = Options_GetBool(OPT_FULL_BLOCK_STEP, false);
 	p->Physics.UserJumpVel = Options_GetFloat(OPT_JUMP_VELOCITY, 0.0f, 52.0f, 0.42f);
 	p->Physics.JumpVel     = p->Physics.UserJumpVel;
+	hackPermMsgs           = Options_GetBool(OPT_HACK_PERM_MSGS, true);
 }
 
 static void LocalPlayer_Reset(void) {
@@ -970,7 +978,7 @@ static bool LocalPlayer_HandleRespawn(void) {
 		return true;
 	} else if (!p->_WarnedRespawn) {
 		p->_WarnedRespawn = true;
-		if (!Game_ClassicMode) Chat_AddRaw("&cRespawning is currently disabled");
+		if (hackPermMsgs) Chat_AddRaw("&cRespawning is currently disabled");
 	}
 	return false;
 }
@@ -994,7 +1002,7 @@ static bool LocalPlayer_HandleFly(void) {
 		return true;
 	} else if (!p->_WarnedFly) {
 		p->_WarnedFly = true;
-		if (!Game_ClassicMode) Chat_AddRaw("&cFlying is currently disabled");		
+		if (hackPermMsgs) Chat_AddRaw("&cFlying is currently disabled");
 	}
 	return false;
 }
@@ -1009,7 +1017,7 @@ static bool LocalPlayer_HandleNoClip(void) {
 		return true;
 	} else if (!p->_WarnedNoclip) {
 		p->_WarnedNoclip = true;
-		if (!Game_ClassicMode) Chat_AddRaw("&cNoclip is currently disabled");		
+		if (hackPermMsgs) Chat_AddRaw("&cNoclip is currently disabled");
 	}
 	return false;
 }
@@ -1097,9 +1105,9 @@ void NetPlayer_Init(struct NetPlayer* p, const String* displayName, const String
 *--------------------------------------------------------Entities---------------------------------------------------------*
 *#########################################################################################################################*/
 static void Entities_Init(void) {
-	Event_RegisterVoid(&GfxEvents_ContextLost,      NULL, Entities_ContextLost);
-	Event_RegisterVoid(&GfxEvents_ContextRecreated, NULL, Entities_ContextRecreated);
-	Event_RegisterVoid(&ChatEvents_FontChanged,     NULL, Entities_ChatFontChanged);
+	Event_RegisterVoid(&GfxEvents.ContextLost,      NULL, Entities_ContextLost);
+	Event_RegisterVoid(&GfxEvents.ContextRecreated, NULL, Entities_ContextRecreated);
+	Event_RegisterVoid(&ChatEvents.FontChanged,     NULL, Entities_ChatFontChanged);
 
 	Entities_NameMode = Options_GetEnum(OPT_NAMES_MODE, NAME_MODE_HOVERED,
 		NameMode_Names, Array_Elems(NameMode_Names));
@@ -1120,9 +1128,9 @@ static void Entities_Free(void) {
 		Entities_Remove((EntityID)i);
 	}
 
-	Event_UnregisterVoid(&GfxEvents_ContextLost,      NULL, Entities_ContextLost);
-	Event_UnregisterVoid(&GfxEvents_ContextRecreated, NULL, Entities_ContextRecreated);
-	Event_UnregisterVoid(&ChatEvents_FontChanged,     NULL, Entities_ChatFontChanged);
+	Event_UnregisterVoid(&GfxEvents.ContextLost,      NULL, Entities_ContextLost);
+	Event_UnregisterVoid(&GfxEvents.ContextRecreated, NULL, Entities_ContextRecreated);
+	Event_UnregisterVoid(&ChatEvents.FontChanged,     NULL, Entities_ChatFontChanged);
 
 	if (ShadowComponent_ShadowTex) {
 		Gfx_DeleteTexture(&ShadowComponent_ShadowTex);

@@ -5,17 +5,12 @@
 #include "Platform.h"
 #include "Stream.h"
 #include "Errors.h"
+#include "Logger.h"
 
 
 /*########################################################################################################################*
 *--------------------------------------------------------DateTime---------------------------------------------------------*
 *#########################################################################################################################*/
-#define DATETIME_SECONDS_PER_MINUTE 60
-#define DATETIME_SECONDS_PER_HOUR (60 * 60)
-#define DATETIME_SECONDS_PER_DAY (60 * 60 * 24)
-#define DATETIME_MINUTES_PER_HOUR 60
-#define DATETIME_HOURS_PER_DAY 24
-#define DATETIME_MILLISECS_PER_DAY (1000 * 60 * 60 * 24)
 
 #define DAYS_IN_400_YEARS 146097   /* (400*365) + 97 */
 static uint16_t DateTime_DaysTotal[13]     = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334, 365 };
@@ -47,11 +42,11 @@ int DateTime_TotalDays(const struct DateTime* time) {
 TimeMS DateTime_TotalMs(const struct DateTime* time) {
 	int days = DateTime_TotalDays(time);
 	uint64_t seconds =
-		(uint64_t)days * DATETIME_SECONDS_PER_DAY +
-		time->Hour     * DATETIME_SECONDS_PER_HOUR +
-		time->Minute   * DATETIME_SECONDS_PER_MINUTE +
+		(uint64_t)days * SECS_PER_DAY +
+		time->Hour     * SECS_PER_HOUR +
+		time->Minute   * SECS_PER_MIN +
 		time->Second;
-	return seconds * DATETIME_MILLIS_PER_SEC + time->Milli;
+	return seconds * MILLIS_PER_SEC + time->Milli;
 }
 
 void DateTime_FromTotalMs(struct DateTime* time, TimeMS ms) {
@@ -61,16 +56,16 @@ void DateTime_FromTotalMs(struct DateTime* time, TimeMS ms) {
 	bool leap;
 
 	/* Work out time component for just this day */
-	dayMS = (int)(ms % DATETIME_MILLISECS_PER_DAY);
-	time->Milli  = dayMS % DATETIME_MILLIS_PER_SEC;     dayMS /= DATETIME_MILLIS_PER_SEC;
-	time->Second = dayMS % DATETIME_SECONDS_PER_MINUTE; dayMS /= DATETIME_SECONDS_PER_MINUTE;
-	time->Minute = dayMS % DATETIME_MINUTES_PER_HOUR;   dayMS /= DATETIME_MINUTES_PER_HOUR;
-	time->Hour   = dayMS % DATETIME_HOURS_PER_DAY;      dayMS /= DATETIME_HOURS_PER_DAY;
+	dayMS = (int)(ms % MILLIS_PER_DAY);
+	time->Milli  = dayMS % MILLIS_PER_SEC; dayMS /= MILLIS_PER_SEC;
+	time->Second = dayMS % SECS_PER_MIN;   dayMS /= SECS_PER_MIN;
+	time->Minute = dayMS % MINS_PER_HOUR;  dayMS /= MINS_PER_HOUR;
+	time->Hour   = dayMS % HOURS_PER_DAY;  dayMS /= HOURS_PER_DAY;
 
 	/* Then work out day/month/year component (inverse TotalDays operation) */
 	/* Probably not the most efficient way of doing this. But it passes my tests at */
 	/* https://gist.github.com/UnknownShadow200/30993c66464bb03ead01577f3ab2a653 */
-	days = (int)(ms / DATETIME_MILLISECS_PER_DAY);
+	days = (int)(ms / MILLIS_PER_DAY);
 	year = 1 + ((days / DAYS_IN_400_YEARS) * 400); days %= DAYS_IN_400_YEARS;
 
 	for (; ; year++) {
@@ -94,8 +89,8 @@ void DateTime_FromTotalMs(struct DateTime* time, TimeMS ms) {
 }
 
 void DateTime_HttpDate(TimeMS ms, String* str) {
-	static char* days_of_week[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
-	static char* month_names[13] = { NULL, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+	static const char* days_of_week[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+	static const char* month_names[13] = { NULL, "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 	struct DateTime t;
 	int days;
 
@@ -124,8 +119,8 @@ bool Utils_IsValidInputChar(char c, bool supportsCP437) {
 }
 
 bool Utils_IsUrlPrefix(const String* value, int index) {
-	static String http  = String_FromConst("http://");
-	static String https = String_FromConst("https://");
+	const static String http  = String_FromConst("http://");
+	const static String https = String_FromConst("https://");
 
 	return String_IndexOfString(value, &http)  == index
 		|| String_IndexOfString(value, &https) == index;
@@ -137,7 +132,7 @@ bool Utils_EnsureDirectory(const char* dirName) {
 	if (Directory_Exists(&dir)) return true;
 
 	res = Directory_Create(&dir);
-	if (res) { Chat_LogError2(res, "creating directory", &dir); }
+	if (res) { Logger_Warn2(res, "creating directory", &dir); }
 	return res == 0;
 }
 
@@ -222,8 +217,76 @@ bool Utils_ParseIP(const String* ip, uint8_t* data) {
 	if (count != 4) return false;
 
 	return
-		Convert_TryParseUInt8(&parts[0], &data[0]) && Convert_TryParseUInt8(&parts[1], &data[1]) &&
-		Convert_TryParseUInt8(&parts[2], &data[2]) && Convert_TryParseUInt8(&parts[3], &data[3]);
+		Convert_ParseUInt8(&parts[0], &data[0]) && Convert_ParseUInt8(&parts[1], &data[1]) &&
+		Convert_ParseUInt8(&parts[2], &data[2]) && Convert_ParseUInt8(&parts[3], &data[3]);
+}
+
+const static char base64_table[64] = {
+	'A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P',
+	'Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f',
+	'g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v',
+	'w','x','y','z','0','1','2','3','4','5','6','7','8','9','+','/'
+};
+int Convert_ToBase64(const uint8_t* src, int len, char* dst) {
+	char* beg = dst;
+	/* 3 bytes to 4 chars */
+	for (; len >= 3; len -= 3, src += 3) {
+		*dst++ = base64_table[                         (src[0] >> 2)];
+		*dst++ = base64_table[((src[0] & 0x03) << 4) | (src[1] >> 4)];
+		*dst++ = base64_table[((src[1] & 0x0F) << 2) | (src[2] >> 6)];
+		*dst++ = base64_table[((src[2] & 0x3F))];
+	}
+
+	switch (len) {
+	case 1:
+		*dst++ = base64_table[                         (src[0] >> 2)];
+		*dst++ = base64_table[((src[0] & 0x03) << 4)                ];
+		*dst++ = '=';
+		*dst++ = '=';
+		break;
+	case 2:
+		*dst++ = base64_table[                         (src[0] >> 2)];
+		*dst++ = base64_table[((src[0] & 0x03) << 4) | (src[1] >> 4)];
+		*dst++ = base64_table[((src[1] & 0x0F) << 2)                ];
+		*dst++ = '=';
+		break;
+	}
+	return (int)(dst - beg);
+}
+
+CC_NOINLINE static int Convert_DecodeBase64(char c) {
+	if (c >= 'A' && c <= 'Z') return (c - 'A');
+	if (c >= 'a' && c <= 'z') return (c - 'a') + 26;
+	if (c >= '0' && c <= '9') return (c - '0') + 52;
+	
+	if (c == '+') return 62;
+	if (c == '/') return 63;
+	return -1;
+}
+
+int Convert_FromBase64(const char* src, int len, uint8_t* dst) {
+	uint8_t* beg = dst;
+	int a, b, c, d;
+	/* base 64 must be padded with = to 4 characters */
+	if (len & 0x3) return 0;
+
+	/* 4 chars to 3 bytes */
+	/* stops on any invalid chars (also handles = padding) */
+	for (; len >= 4; len -= 4, src += 4) {
+		a = Convert_DecodeBase64(src[0]);
+		b = Convert_DecodeBase64(src[1]);
+		if (a == -1 || b == -1) break;
+		*dst++ = (a << 2) | (b >> 4);
+
+		c = Convert_DecodeBase64(src[2]);
+		if (c == -1) break;
+		*dst++ = (b << 4) | (c >> 2);
+
+		d = Convert_DecodeBase64(src[3]);
+		if (d == -1) break;
+		*dst++ = (c << 6) | (d     );
+	}
+	return (int)(dst - beg);
 }
 
 
@@ -248,7 +311,7 @@ void EntryList_Load(struct EntryList* list, EntryList_Filter filter) {
 	
 	res = Stream_OpenFile(&stream, &path);
 	if (res == ReturnCode_FileNotFound) return;
-	if (res) { Chat_LogError2(res, "opening", &path); return; }
+	if (res) { Logger_Warn2(res, "opening", &path); return; }
 
 	/* ReadLine reads single byte at a time */
 	Stream_ReadonlyBuffered(&buffered, &stream, buffer, sizeof(buffer));
@@ -257,7 +320,7 @@ void EntryList_Load(struct EntryList* list, EntryList_Filter filter) {
 	for (;;) {
 		res = Stream_ReadLine(&buffered, &entry);
 		if (res == ERR_END_OF_STREAM) break;
-		if (res) { Chat_LogError2(res, "reading from", &path); break; }
+		if (res) { Logger_Warn2(res, "reading from", &path); break; }
 		
 		String_UNSAFE_TrimStart(&entry);
 		String_UNSAFE_TrimEnd(&entry);
@@ -270,7 +333,7 @@ void EntryList_Load(struct EntryList* list, EntryList_Filter filter) {
 	}
 
 	res = stream.Close(&stream);
-	if (res) { Chat_LogError2(res, "closing", &path); }
+	if (res) { Logger_Warn2(res, "closing", &path); }
 }
 
 void EntryList_Save(struct EntryList* list) {
@@ -288,16 +351,16 @@ void EntryList_Save(struct EntryList* list) {
 	}
 	
 	res = Stream_CreateFile(&stream, &path);
-	if (res) { Chat_LogError2(res, "creating", &path); return; }
+	if (res) { Logger_Warn2(res, "creating", &path); return; }
 
 	for (i = 0; i < list->Entries.Count; i++) {
 		entry = StringsBuffer_UNSAFE_Get(&list->Entries, i);
 		res   = Stream_WriteLine(&stream, &entry);
-		if (res) { Chat_LogError2(res, "writing to", &path); break; }
+		if (res) { Logger_Warn2(res, "writing to", &path); break; }
 	}
 
 	res = stream.Close(&stream);
-	if (res) { Chat_LogError2(res, "closing", &path); }
+	if (res) { Logger_Warn2(res, "closing", &path); }
 }
 
 int EntryList_Remove(struct EntryList* list, const String* key) {

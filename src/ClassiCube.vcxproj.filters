@@ -150,9 +150,6 @@
     <ClInclude Include="VertexStructs.h">
       <Filter>Header Files\Graphics</Filter>
     </ClInclude>
-    <ClInclude Include="ErrorHandler.h">
-      <Filter>Header Files\Platform</Filter>
-    </ClInclude>
     <ClInclude Include="World.h">
       <Filter>Header Files\Map</Filter>
     </ClInclude>
@@ -222,9 +219,6 @@
     <ClInclude Include="Widgets.h">
       <Filter>Header Files\2D</Filter>
     </ClInclude>
-    <ClInclude Include="Inventory.h">
-      <Filter>Header Files\Game</Filter>
-    </ClInclude>
     <ClInclude Include="Input.h">
       <Filter>Header Files\Platform</Filter>
     </ClInclude>
@@ -238,9 +232,6 @@
       <Filter>Header Files\Game</Filter>
     </ClInclude>
     <ClInclude Include="ServerConnection.h">
-      <Filter>Header Files\Network</Filter>
-    </ClInclude>
-    <ClInclude Include="AsyncDownloader.h">
       <Filter>Header Files\Network</Filter>
     </ClInclude>
     <ClInclude Include="Event.h">
@@ -317,6 +308,15 @@
     </ClInclude>
     <ClInclude Include="LScreens.h">
       <Filter>Header Files\Launcher</Filter>
+    </ClInclude>
+    <ClInclude Include="Inventory.h">
+      <Filter>Header Files\Game</Filter>
+    </ClInclude>
+    <ClInclude Include="Logger.h">
+      <Filter>Header Files\Platform</Filter>
+    </ClInclude>
+    <ClInclude Include="Http.h">
+      <Filter>Header Files\Network</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -401,9 +401,6 @@
     <ClCompile Include="Widgets.c">
       <Filter>Source Files\2D</Filter>
     </ClCompile>
-    <ClCompile Include="Inventory.c">
-      <Filter>Source Files\Game</Filter>
-    </ClCompile>
     <ClCompile Include="Input.c">
       <Filter>Source Files\Platform</Filter>
     </ClCompile>
@@ -443,9 +440,6 @@
     <ClCompile Include="PacketHandlers.c">
       <Filter>Source Files\Network</Filter>
     </ClCompile>
-    <ClCompile Include="AsyncDownloader.c">
-      <Filter>Source Files\Network</Filter>
-    </ClCompile>
     <ClCompile Include="EnvRenderer.c">
       <Filter>Source Files\Rendering</Filter>
     </ClCompile>
@@ -456,9 +450,6 @@
       <Filter>Source Files\Audio</Filter>
     </ClCompile>
     <ClCompile Include="Platform.c">
-      <Filter>Source Files\Platform</Filter>
-    </ClCompile>
-    <ClCompile Include="ErrorHandler.c">
       <Filter>Source Files\Platform</Filter>
     </ClCompile>
     <ClCompile Include="MapGenerator.c">
@@ -498,9 +489,6 @@
       <Filter>Source Files\Freetype</Filter>
     </ClCompile>
     <ClCompile Include="_ftinit.c">
-      <Filter>Source Files\Freetype</Filter>
-    </ClCompile>
-    <ClCompile Include="_ftmm.c">
       <Filter>Source Files\Freetype</Filter>
     </ClCompile>
     <ClCompile Include="_ftpfr.c">
@@ -545,9 +533,6 @@
     <ClCompile Include="_truetype.c">
       <Filter>Source Files\Freetype</Filter>
     </ClCompile>
-    <ClCompile Include="_ftcache.c">
-      <Filter>Source Files\Freetype</Filter>
-    </ClCompile>
     <ClCompile Include="Graphics.c">
       <Filter>Source Files\Graphics</Filter>
     </ClCompile>
@@ -568,6 +553,15 @@
     </ClCompile>
     <ClCompile Include="LScreens.c">
       <Filter>Source Files\Launcher</Filter>
+    </ClCompile>
+    <ClCompile Include="Inventory.c">
+      <Filter>Source Files\Game</Filter>
+    </ClCompile>
+    <ClCompile Include="Logger.c">
+      <Filter>Source Files\Platform</Filter>
+    </ClCompile>
+    <ClCompile Include="Http.c">
+      <Filter>Source Files\Network</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

@@ -146,7 +146,7 @@ static bool InputHandler_HandleNonClassicKey(Key key) {
 	if (key == KeyBind_Get(KEYBIND_HIDE_GUI)) {
 		Game_HideGui = !Game_HideGui;
 	} else if (key == KeyBind_Get(KEYBIND_SMOOTH_CAMERA)) {
-		InputHandler_Toggle(key, &Game_SmoothCamera,
+		InputHandler_Toggle(key, &Camera_Smooth,
 			"  &eSmooth camera is &aenabled",
 			"  &eSmooth camera is &cdisabled");
 	} else if (key == KeyBind_Get(KEYBIND_AXIS_LINES)) {
@@ -154,17 +154,17 @@ static bool InputHandler_HandleNonClassicKey(Key key) {
 			"  &eAxis lines (&4X&e, &2Y&e, &1Z&e) now show",
 			"  &eAxis lines no longer show");
 	} else if (key == KeyBind_Get(KEYBIND_AUTOROTATE)) {
-		InputHandler_Toggle(key, &Game_AutoRotate,
+		InputHandler_Toggle(key, &AutoRotate_Enabled,
 			"  &eAuto rotate is &aenabled",
 			"  &eAuto rotate is &cdisabled");
-	} else if (key == KeyBind_Get(KEYBIND_THIRD_PERSO)) {
+	} else if (key == KeyBind_Get(KEYBIND_THIRD_PERSON)) {
 		Camera_CycleActive();
 	} else if (key == KeyBind_Get(KEYBIND_DROP_BLOCK)) {
-		if (Inventory_CanChangeSelected() && Inventory_SelectedBlock != BLOCK_AIR) {
+		if (Inventory_CheckChangeSelected() && Inventory_SelectedBlock != BLOCK_AIR) {
 			/* Don't assign SelectedIndex directly, because we don't want held block
 			switching positions if they already have air in their inventory hotbar. */
 			Inventory_Set(Inventory_SelectedIndex, BLOCK_AIR);
-			Event_RaiseVoid(&UserEvents_HeldBlockChanged);
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 		}
 	} else if (key == KeyBind_Get(KEYBIND_IDOVERLAY)) {
 		if (Gui_OverlaysCount) return true;
@@ -183,7 +183,7 @@ static bool InputHandler_HandleCoreKey(Key key) {
 	struct Screen* active = Gui_GetActiveScreen();
 
 	if (key == KeyBind_Get(KEYBIND_HIDE_FPS)) {
-		Game_ShowFPS = !Game_ShowFPS;
+		Gui_ShowFPS = !Gui_ShowFPS;
 	} else if (key == KeyBind_Get(KEYBIND_FULLSCREEN)) {
 		int state = Window_GetWindowState();
 		if (state != WINDOW_STATE_MAXIMISED) {
@@ -191,15 +191,15 @@ static bool InputHandler_HandleCoreKey(Key key) {
 			Window_SetWindowState(fullscreen ? WINDOW_STATE_NORMAL : WINDOW_STATE_FULLSCREEN);
 		}
 	} else if (key == KeyBind_Get(KEYBIND_FOG)) {
-		int16_t* viewDists = Game_UseClassicOptions ? input_classicViewDists : input_normViewDists;
-		int count = Game_UseClassicOptions ? Array_Elems(input_classicViewDists) : Array_Elems(input_normViewDists);
+		int16_t* viewDists = Gui_ClassicMenu ? input_classicViewDists : input_normViewDists;
+		int count = Gui_ClassicMenu ? Array_Elems(input_classicViewDists) : Array_Elems(input_normViewDists);
 
 		if (Key_IsShiftPressed()) {
 			InputHandler_CycleDistanceBackwards(viewDists, count);
 		} else {
 			InputHandler_CycleDistanceForwards(viewDists, count);
 		}
-	} else if ((key == KeyBind_Get(KEYBIND_PAUSE_EXIT) || key == KEY_PAUSE) && !active->HandlesAllInput) {
+	} else if ((key == KEY_ESCAPE || key == KEY_PAUSE) && !active->HandlesAllInput) {
 		Gui_FreeActive();
 		Gui_SetActive(PauseScreen_MakeInstance());
 	} else if (key == KeyBind_Get(KEYBIND_INVENTORY) && active == Gui_HUD) {
@@ -335,7 +335,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		InputHandler_ButtonStateChanged(MOUSE_MIDDLE, middle);
 	}
 
-	if (Gui_GetActiveScreen()->HandlesAllInput || !Inventory_CanPick) return;
+	if (Gui_GetActiveScreen()->HandlesAllInput || !Inventory_CanUse) return;
 
 	if (left) {
 		/* always play delete animations, even if we aren't picking a block */
@@ -348,14 +348,14 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		if (Block_Draw[old] == DRAW_GAS || !Block_CanDelete[old]) return;
 
 		Game_ChangeBlock(p.X, p.Y, p.Z, BLOCK_AIR);
-		Event_RaiseBlock(&UserEvents_BlockChanged, p, old, BLOCK_AIR);
+		Event_RaiseBlock(&UserEvents.BlockChanged, p, old, BLOCK_AIR);
 	} else if (right) {
 		p = Game_SelectedPos.TranslatedPos;
 		if (!Game_SelectedPos.Valid || !World_IsValidPos_3I(p)) return;
 
 		old   = World_GetBlock(p.X, p.Y, p.Z);
 		block = Inventory_SelectedBlock;
-		if (Game_AutoRotate) { block = AutoRotate_RotateBlock(block); }
+		if (AutoRotate_Enabled) block = AutoRotate_RotateBlock(block);
 
 		if (Game_CanPick(old) || !Block_CanPlace[block]) return;
 		/* air-ish blocks can only replace over other air-ish blocks */
@@ -363,7 +363,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		if (!InputHandler_CheckIsFree(block)) return;
 
 		Game_ChangeBlock(p.X, p.Y, p.Z, block);
-		Event_RaiseBlock(&UserEvents_BlockChanged, p, old, block);
+		Event_RaiseBlock(&UserEvents.BlockChanged, p, old, block);
 	} else if (middle) {
 		p = Game_SelectedPos.BlockPos;
 		if (!World_IsValidPos_3I(p)) return;
@@ -371,7 +371,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		cur = World_GetBlock(p.X, p.Y, p.Z);
 		if (Block_Draw[cur] == DRAW_GAS) return;
 		if (!(Block_CanPlace[cur] || Block_CanDelete[cur])) return;
-		if (!Inventory_CanChangeSelected() || Inventory_SelectedBlock == cur) return;
+		if (!Inventory_CheckChangeSelected() || Inventory_SelectedBlock == cur) return;
 
 		/* Is the currently selected block an empty slot? */
 		if (Inventory_SelectedBlock == BLOCK_AIR) {
@@ -404,7 +404,7 @@ static void InputHandler_MouseWheel(void* obj, float delta) {
 
 	hotbar = Key_IsAltPressed() || Key_IsControlPressed() || Key_IsShiftPressed();
 	if (!hotbar && Camera_Active->Zoom(delta)) return;
-	if (InputHandler_DoFovZoom(delta) || !Inventory_CanChangeHeldBlock) return;
+	if (InputHandler_DoFovZoom(delta) || !Inventory_CanChangeSelected) return;
 
 	widget = HUDScreen_GetHotbar(Gui_HUD);
 	Elem_HandlesMouseScroll(widget, delta);
@@ -450,7 +450,7 @@ static bool InputHandler_SimulateMouse(Key key, bool pressed) {
 	return true;
 }
 
-static void InputHandler_KeyDown(void* obj, int key) {
+static void InputHandler_KeyDown(void* obj, int key, bool was) {
 	struct Screen* active;
 	int idx;
 	struct HotkeyData* hkey;
@@ -461,11 +461,14 @@ static void InputHandler_KeyDown(void* obj, int key) {
 
 	if (InputHandler_IsShutdown(key)) {
 		/* TODO: Do we need a separate exit function in Game class? */
-		Window_Close();
-	} else if (key == KeyBind_Get(KEYBIND_SCREENSHOT)) {
-		Game_ScreenshotRequested = true;
-	} else if (Elem_HandlesKeyDown(active, key)) {
-	} else if (InputHandler_HandleCoreKey(key)) {
+		Window_Close(); return;
+	} else if (key == KeyBind_Get(KEYBIND_SCREENSHOT) && !was) {
+		Game_ScreenshotRequested = true; return;
+	} else if (Elem_HandlesKeyDown(active, key, was)) { return; }
+
+	/* These should not be triggered multiple times when holding down */
+	if (was) return;
+	if (InputHandler_HandleCoreKey(key)) {
 	} else if (LocalPlayer_HandlesKey(key)) {
 	} else {
 		idx = Hotkeys_FindPartial(key);
@@ -500,13 +503,13 @@ static void InputHandler_KeyPress(void* obj, int keyChar) {
 }
 
 void InputHandler_Init(void) {
-	Event_RegisterFloat(&MouseEvents_Wheel,     NULL, InputHandler_MouseWheel);
-	Event_RegisterMouseMove(&MouseEvents_Moved, NULL, InputHandler_MouseMove);
-	Event_RegisterInt(&MouseEvents_Down,        NULL, InputHandler_MouseDown);
-	Event_RegisterInt(&MouseEvents_Up,          NULL, InputHandler_MouseUp);
-	Event_RegisterInt(&KeyEvents_Down,          NULL, InputHandler_KeyDown);
-	Event_RegisterInt(&KeyEvents_Up,            NULL, InputHandler_KeyUp);
-	Event_RegisterInt(&KeyEvents_Press,         NULL, InputHandler_KeyPress);
+	Event_RegisterFloat(&MouseEvents.Wheel,     NULL, InputHandler_MouseWheel);
+	Event_RegisterMouseMove(&MouseEvents.Moved, NULL, InputHandler_MouseMove);
+	Event_RegisterInt(&MouseEvents.Down,        NULL, InputHandler_MouseDown);
+	Event_RegisterInt(&MouseEvents.Up,          NULL, InputHandler_MouseUp);
+	Event_RegisterInt(&KeyEvents.Down,          NULL, InputHandler_KeyDown);
+	Event_RegisterInt(&KeyEvents.Up,            NULL, InputHandler_KeyUp);
+	Event_RegisterInt(&KeyEvents.Press,         NULL, InputHandler_KeyPress);
 
 	KeyBind_Init();
 	Hotkeys_Init();

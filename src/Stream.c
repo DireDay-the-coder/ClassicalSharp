@@ -1,8 +1,9 @@
 #include "Stream.h"
 #include "Platform.h"
 #include "Funcs.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Errors.h"
+#include "Utils.h"
 
 /*########################################################################################################################*
 *---------------------------------------------------------Stream----------------------------------------------------------*
@@ -21,7 +22,7 @@ ReturnCode Stream_Read(struct Stream* s, uint8_t* buffer, uint32_t count) {
 	return 0;
 }
 
-ReturnCode Stream_Write(struct Stream* s, uint8_t* buffer, uint32_t count) {
+ReturnCode Stream_Write(struct Stream* s, const uint8_t* buffer, uint32_t count) {
 	uint32_t write;
 	ReturnCode res;
 
@@ -35,7 +36,7 @@ ReturnCode Stream_Write(struct Stream* s, uint8_t* buffer, uint32_t count) {
 	return 0;
 }
 
-static ReturnCode Stream_DefaultIO(struct Stream* s, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode Stream_DefaultIO(struct Stream* s, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	*modified = 0; return ReturnCode_NotSupported;
 }
 ReturnCode Stream_DefaultReadU8(struct Stream* s, uint8_t* data) {
@@ -86,7 +87,7 @@ void Stream_Init(struct Stream* s) {
 static ReturnCode Stream_FileRead(struct Stream* s, uint8_t* data, uint32_t count, uint32_t* modified) {
 	return File_Read(s->Meta.File, data, count, modified);
 }
-static ReturnCode Stream_FileWrite(struct Stream* s, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode Stream_FileWrite(struct Stream* s, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	return File_Write(s->Meta.File, data, count, modified);
 }
 static ReturnCode Stream_FileClose(struct Stream* s) {
@@ -113,11 +114,24 @@ ReturnCode Stream_OpenFile(struct Stream* s, const String* path) {
 	Stream_FromFile(s, file);
 	return res;
 }
+
 ReturnCode Stream_CreateFile(struct Stream* s, const String* path) {
 	FileHandle file;
 	ReturnCode res = File_Create(&file, path);
 	Stream_FromFile(s, file);
 	return res;
+}
+
+ReturnCode Stream_WriteAllTo(const String* path, const uint8_t* data, uint32_t length) {
+	struct Stream stream;
+	ReturnCode res, closeRes;
+
+	res = Stream_CreateFile(&stream, path);
+	if (res) return res;
+
+	res      = Stream_Write(&stream, data, length);
+	closeRes = stream.Close(&stream);
+	return res ? res : closeRes;
 }
 
 void Stream_FromFile(struct Stream* s, FileHandle file) {
@@ -213,7 +227,7 @@ static ReturnCode Stream_MemoryReadU8(struct Stream* s, uint8_t* data) {
 	return 0;
 }
 
-static ReturnCode Stream_MemoryWrite(struct Stream* s, uint8_t* data, uint32_t count, uint32_t* modified) {
+static ReturnCode Stream_MemoryWrite(struct Stream* s, const uint8_t* data, uint32_t count, uint32_t* modified) {
 	count = min(count, s->Meta.Mem.Left);
 	Mem_Copy(s->Meta.Mem.Cur, data, count);
 
@@ -350,26 +364,56 @@ void Stream_ReadonlyBuffered(struct Stream* s, struct Stream* source, void* data
 
 
 /*########################################################################################################################*
+*-----------------------------------------------------CRC32Stream---------------------------------------------------------*
+*#########################################################################################################################*/
+static ReturnCode Stream_Crc32Write(struct Stream* stream, const uint8_t* data, uint32_t count, uint32_t* modified) {
+	struct Stream* source;
+	uint32_t i, crc32 = stream->Meta.CRC32.CRC32;
+
+	/* TODO: Optimise this calculation */
+	for (i = 0; i < count; i++) {
+		crc32 = Utils_Crc32Table[(crc32 ^ data[i]) & 0xFF] ^ (crc32 >> 8);
+	}
+	stream->Meta.CRC32.CRC32 = crc32;
+
+	source = stream->Meta.CRC32.Source;
+	return source->Write(source, data, count, modified);
+}
+
+void Stream_WriteonlyCrc32(struct Stream* s, struct Stream* source) {
+	Stream_Init(s);
+	s->Write = Stream_Crc32Write;
+
+	s->Meta.CRC32.Source = source;
+	s->Meta.CRC32.CRC32  = 0xFFFFFFFFUL;
+}
+
+
+/*########################################################################################################################*
 *-------------------------------------------------Read/Write primitives---------------------------------------------------*
 *#########################################################################################################################*/
-uint16_t Stream_GetU16_LE(uint8_t* data) {
+uint16_t Stream_GetU16_LE(const uint8_t* data) {
 	return (uint16_t)(data[0] | (data[1] << 8));
 }
 
-uint16_t Stream_GetU16_BE(uint8_t* data) {
+uint16_t Stream_GetU16_BE(const uint8_t* data) {
 	return (uint16_t)((data[0] << 8) | data[1]);
 }
 
-uint32_t Stream_GetU32_LE(uint8_t* data) {
+uint32_t Stream_GetU32_LE(const uint8_t* data) {
 	return (uint32_t)(
 		 (uint32_t)data[0]        | ((uint32_t)data[1] << 8) |
 		((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24));
 }
 
-uint32_t Stream_GetU32_BE(uint8_t* data) {
+uint32_t Stream_GetU32_BE(const uint8_t* data) {
 	return (uint32_t)(
 		((uint32_t)data[0] << 24) | ((uint32_t)data[1] << 16) |
 		((uint32_t)data[2] << 8)  |  (uint32_t)data[3]);
+}
+
+void Stream_SetU16_LE(uint8_t* data, uint16_t value) {
+	data[0] = (uint8_t)(value      ); data[1] = (uint8_t)(value >> 8 );
 }
 
 void Stream_SetU16_BE(uint8_t* data, uint16_t value) {
@@ -428,6 +472,9 @@ ReturnCode Stream_ReadLine(struct Stream* s, String* text) {
 		/* Handle \r\n or \n line endings */
 		if (cp == '\r') continue;
 		if (cp == '\n') return 0;
+
+		/* ignore byte order mark */
+		if (cp == 0xFEFF) continue;
 		String_Append(text, Convert_UnicodeToCP437(cp));
 	}
 	return readAny ? 0 : ERR_END_OF_STREAM;

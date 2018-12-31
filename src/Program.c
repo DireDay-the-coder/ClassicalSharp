@@ -1,15 +1,15 @@
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Platform.h"
 #include "Window.h"
 #include "Constants.h"
 #include "Game.h"
 #include "Funcs.h"
-#include "ExtMath.h"
 #include "Utils.h"
 #include "Launcher.h"
 
 /*#define CC_TEST_VORBIS*/
 #ifdef CC_TEST_VORBIS
+#include "ExtMath.h"
 #include "Vorbis.h"
 
 #define VORBIS_N 1024
@@ -40,9 +40,15 @@ int main_imdct() {
 #endif
 
 static void Program_RunGame(void) {
+	const static String defPath = String_FromConst("texpacks/default.zip");
 	String title; char titleBuffer[STRING_SIZE];
 	struct DisplayDevice device;
 	int width, height;
+
+	if (!File_Exists(&defPath)) {
+		Window_ShowDialog("Missing file",
+			"default.zip is missing, try running launcher first.\n\nThe game will still run, but without any textures");
+	}
 
 	device = DisplayDevice_Default;
 	width  = Options_GetInt(OPT_WINDOW_WIDTH,  0, device.Bounds.Width,  0);
@@ -55,39 +61,52 @@ static void Program_RunGame(void) {
 	}
 
 	String_InitArray(title, titleBuffer);
-	String_Format2(&title, "%c (%s)", PROGRAM_APP_NAME, &Game_Username);
+	String_Format2(&title, "%c (%s)", GAME_APP_NAME, &Game_Username);
 	Game_Run(width, height, &title);
 }
 
+static void Program_SetCurrentDirectory(void) {
+	String path; char pathBuffer[FILENAME_SIZE];
+	int i;
+	ReturnCode res;
+	String_InitArray(path, pathBuffer);
+
+	res = Platform_GetExePath(&path);
+	if (res) { Logger_Warn(res, "getting exe path"); return; }
+
+	/* get rid of filename at end of directory */
+	for (i = path.length - 1; i >= 0; i--, path.length--) {
+		if (path.buffer[i] == '/' || path.buffer[i] == '\\') break;
+	}
+	res = Platform_SetCurrentDirectory(&path);
+	if (res) { Logger_Warn(res, "setting current directory"); return; }
+}
+
 int main(int argc, char** argv) {
-	static String defPath = String_FromConst("texpacks/default.zip");	
-	String args[PROGRAM_MAX_CMDARGS];
+	String args[GAME_MAX_CMDARGS];
 	int argsCount;
 	uint8_t ip[4];
 	uint16_t port;
 
-	argsCount = Platform_GetCommandLineArgs(argc, argv, args);
-	/* NOTE: Make sure to comment this out before pushing a commit */
-	/* String rawArgs = String_FromConst("UnknownShadow200 fffff 127.0.0.1 25565"); */
-	/* argsCount = String_UNSAFE_Split(&rawArgs, ' ', args, 4); */
-
-	Platform_SetWorkingDir();
-	ErrorHandler_Init();
+	Program_SetCurrentDirectory();
+	Logger_Hook();
 	Platform_Init();
 #ifdef CC_TEST_VORBIS
 	main_imdct();
 #endif
-	Platform_LogConst("Starting " PROGRAM_APP_NAME " ..");
+	Platform_LogConst("Starting " GAME_APP_NAME " ..");
 
 	Utils_EnsureDirectory("maps");
 	Utils_EnsureDirectory("texpacks");
 	Utils_EnsureDirectory("texturecache");
-
-	if (!File_Exists(&defPath)) {
-		Window_ShowDialog("Missing file",
-			"default.zip is missing, try running launcher first.\n\nThe game will still run, but without any textures");
-	}
+	Utils_EnsureDirectory("plugins");
 	Options_Load();
+
+	argsCount = Platform_GetCommandLineArgs(argc, argv, args);
+	/* NOTE: Make sure to comment this out before pushing a commit */
+	/* String rawArgs = String_FromConst("UnknownShadow200 fffff 127.0.0.1 25565"); */
+	/* String rawArgs = String_FromConst("UnknownShadow200"); */
+	/* argsCount = String_UNSAFE_Split(&rawArgs, ' ', args, 4); */
 
 	if (argsCount == 0) {
 		Launcher_Run();
@@ -108,7 +127,7 @@ int main(int argc, char** argv) {
 			Window_ShowDialog("Failed to start", "Invalid IP");
 			Platform_Exit(1); return 1;
 		}
-		if (!Convert_TryParseUInt16(&args[3], &port)) {
+		if (!Convert_ParseUInt16(&args[3], &port)) {
 			Window_ShowDialog("Failed to start", "Invalid port");
 			Platform_Exit(1); return 1;
 		}

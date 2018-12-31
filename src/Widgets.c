@@ -14,7 +14,7 @@
 #include "Event.h"
 #include "Chat.h"
 #include "Game.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Bitmap.h"
 #include "Block.h"
 
@@ -23,7 +23,8 @@ static void Widget_NullFunc(void* widget) { }
 static Size2D Size2D_Empty;
 
 static bool Widget_Mouse(void* elem, int x, int y, MouseButton btn) { return false; }
-static bool Widget_Key(void* elem, Key key) { return false; }
+static bool Widget_KeyDown(void* elem, Key key, bool was) { return false; }
+static bool Widget_KeyUp(void* elem, Key key) { return false; }
 static bool Widget_KeyPress(void* elem, char keyChar) { return false; }
 static bool Widget_MouseMove(void* elem, int x, int y) { return false; }
 static bool Widget_MouseScroll(void* elem, float delta) { return false; }
@@ -52,7 +53,7 @@ static void TextWidget_Reposition(void* widget) {
 
 static struct WidgetVTABLE TextWidget_VTABLE = {
 	Widget_NullFunc, TextWidget_Render, TextWidget_Free,  Gui_DefaultRecreate,
-	Widget_Key,	     Widget_Key,        Widget_KeyPress,
+	Widget_KeyDown,	 Widget_KeyUp,      Widget_KeyPress,
 	Widget_Mouse,    Widget_Mouse,      Widget_MouseMove, Widget_MouseScroll,
 	TextWidget_Reposition,
 };
@@ -126,7 +127,7 @@ static void ButtonWidget_Render(void* widget, double delta) {
 	back = w->Active ? Button_SelectedTex : Button_ShadowTex;
 	if (w->Disabled) back = Button_DisabledTex;
 
-	back.ID = Game_UseClassicGui ? Gui_GuiClassicTex : Gui_GuiTex;
+	back.ID = Gui_ClassicTexture ? Gui_GuiClassicTex : Gui_GuiTex;
 	back.X = w->X; back.Width  = w->Width;
 	back.Y = w->Y; back.Height = w->Height;
 
@@ -154,7 +155,7 @@ static void ButtonWidget_Render(void* widget, double delta) {
 
 static struct WidgetVTABLE ButtonWidget_VTABLE = {
 	Widget_NullFunc, ButtonWidget_Render, ButtonWidget_Free, Gui_DefaultRecreate,
-	Widget_Key,	     Widget_Key,          Widget_KeyPress,
+	Widget_KeyDown,	 Widget_KeyUp,        Widget_KeyPress,
 	Widget_Mouse,    Widget_Mouse,        Widget_MouseMove,  Widget_MouseScroll,
 	ButtonWidget_Reposition,
 };
@@ -298,7 +299,7 @@ static bool ScrollbarWidget_MouseMove(void* widget, int x, int y) {
 
 static struct WidgetVTABLE ScrollbarWidget_VTABLE = {
 	Widget_NullFunc,           ScrollbarWidget_Render,  Widget_NullFunc,           Gui_DefaultRecreate,
-	Widget_Key,	               Widget_Key,              Widget_KeyPress,
+	Widget_KeyDown,	           Widget_KeyUp,            Widget_KeyPress,
 	ScrollbarWidget_MouseDown, ScrollbarWidget_MouseUp, ScrollbarWidget_MouseMove, ScrollbarWidget_MouseScroll,
 	Widget_CalcPosition,
 };
@@ -323,7 +324,7 @@ static void HotbarWidget_RenderHotbarOutline(struct HotbarWidget* w) {
 	float width;
 	int i, x;
 	
-	tex = Game_UseClassicGui ? Gui_GuiClassicTex : Gui_GuiTex;
+	tex = Gui_ClassicTexture ? Gui_GuiClassicTex : Gui_GuiTex;
 	w->BackTex.ID = tex;
 	Texture_Render(&w->BackTex);
 
@@ -411,7 +412,7 @@ static void HotbarWidget_Render(void* widget, double delta) {
 	HotbarWidget_RenderHotbarBlocks(w);
 }
 
-static bool HotbarWidget_KeyDown(void* widget, Key key) {
+static bool HotbarWidget_KeyDown(void* widget, Key key, bool was) {
 	struct HotbarWidget* w = widget;
 	int index;
 	if (key < KEY_1 || key > KEY_9) return false;
@@ -419,7 +420,7 @@ static bool HotbarWidget_KeyDown(void* widget, Key key) {
 	index = key - KEY_1;
 	if (KeyBind_IsPressed(KEYBIND_HOTBAR_SWITCH)) {
 		/* Pick from first to ninth row */
-		Inventory_SetOffset(index * INVENTORY_BLOCKS_PER_HOTBAR);
+		Inventory_SetHotbarIndex(index);
 		w->AltHandled = true;
 	} else {
 		Inventory_SetSelectedIndex(index);
@@ -443,7 +444,7 @@ static bool HotbarWidget_KeyUp(void* widget, Key key) {
 
 	/* Alternate between first and second row */
 	index = Inventory_Offset == 0 ? 1 : 0;
-	Inventory_SetOffset(index * INVENTORY_BLOCKS_PER_HOTBAR);
+	Inventory_SetHotbarIndex(index);
 	return true;
 }
 
@@ -479,7 +480,7 @@ static bool HotbarWidget_MouseScroll(void* widget, float delta) {
 	if (KeyBind_IsPressed(KEYBIND_HOTBAR_SWITCH)) {
 		index = Inventory_Offset / INVENTORY_BLOCKS_PER_HOTBAR;
 		index = HotbarWidget_ScrolledIndex(w, delta, index, 1);
-		Inventory_SetOffset(index * INVENTORY_BLOCKS_PER_HOTBAR);
+		Inventory_SetHotbarIndex(index);
 		w->AltHandled = true;
 	} else {
 		index = HotbarWidget_ScrolledIndex(w, delta, Inventory_SelectedIndex, -1);
@@ -806,7 +807,7 @@ static bool TableWidget_MouseMove(void* widget, int x, int y) {
 	return true;
 }
 
-static bool TableWidget_KeyDown(void* widget, Key key) {
+static bool TableWidget_KeyDown(void* widget, Key key, bool was) {
 	struct TableWidget* w = widget;
 	if (w->SelectedIndex == -1) return false;
 
@@ -826,7 +827,7 @@ static bool TableWidget_KeyDown(void* widget, Key key) {
 
 static struct WidgetVTABLE TableWidget_VTABLE = {
 	TableWidget_Init,      TableWidget_Render,  TableWidget_Free,      TableWidget_Recreate,
-	TableWidget_KeyDown,   Widget_Key,          Widget_KeyPress,
+	TableWidget_KeyDown,   Widget_KeyUp,        Widget_KeyPress,
 	TableWidget_MouseDown, TableWidget_MouseUp, TableWidget_MouseMove, TableWidget_MouseScroll,
 	TableWidget_Reposition,
 };
@@ -955,13 +956,13 @@ static void InputWidget_UpdateCaret(struct InputWidget* w) {
 		InputWidget_FormatLine(w, w->CaretY, &line);
 
 		args.Text = String_UNSAFE_Substring(&line, 0, w->CaretX);
-		lineWidth = Drawer2D_MeasureText(&args).Width;
+		lineWidth = Drawer2D_TextWidth(&args);
 		if (w->CaretY == 0) lineWidth += w->PrefixWidth;
 
 		if (w->CaretX < line.length) {
 			args.Text = String_UNSAFE_Substring(&line, w->CaretX, 1);
 			args.UseShadow = true;
-			w->CaretTex.Width = Drawer2D_MeasureText(&args).Width;
+			w->CaretTex.Width = Drawer2D_TextWidth(&args);
 		}
 	}
 
@@ -1211,7 +1212,7 @@ static void InputWidget_Reposition(void* widget) {
 	w->InputTex.X += w->X - oldX; w->InputTex.Y += w->Y - oldY;
 }
 
-static bool InputWidget_KeyDown(void* widget, Key key) {
+static bool InputWidget_KeyDown(void* widget, Key key, bool was) {
 	struct InputWidget* w = widget;
 	if (key == KEY_LEFT) {
 		InputWidget_LeftKey(w);
@@ -1260,11 +1261,11 @@ static bool InputWidget_MouseDown(void* widget, int x, int y, MouseButton button
 
 		for (cx = 0; cx < line.length; cx++) {
 			args.Text = String_UNSAFE_Substring(&line, 0, cx);
-			charX     = Drawer2D_MeasureText(&args).Width;
+			charX     = Drawer2D_TextWidth(&args);
 			if (cy == 0) charX += w->PrefixWidth;
 
 			args.Text = String_UNSAFE_Substring(&line, cx, 1);
-			charWidth = Drawer2D_MeasureText(&args).Width;
+			charWidth = Drawer2D_TextWidth(&args);
 
 			if (Gui_Contains(charX, cy * charHeight, charWidth, charHeight, x, y)) {
 				w->CaretPos = offset + cx;
@@ -1281,7 +1282,7 @@ static bool InputWidget_MouseDown(void* widget, int x, int y, MouseButton button
 }
 
 CC_NOINLINE static void InputWidget_Create(struct InputWidget* w, const FontDesc* font, STRING_REF const String* prefix) {
-	static String caret = String_FromConst("_");
+	const static String caret = String_FromConst("_");
 	struct DrawTextArgs args;
 	Size2D size;
 	Widget_Reset(w);
@@ -1345,12 +1346,12 @@ static bool Int_ValidChar(struct MenuInputValidator* v, char c) {
 static bool Int_ValidString(struct MenuInputValidator* v, const String* s) {
 	int value;
 	if (s->length == 1 && s->buffer[0] == '-') return true; /* input is just a minus sign */
-	return Convert_TryParseInt(s, &value);
+	return Convert_ParseInt(s, &value);
 }
 
 static bool Int_ValidValue(struct MenuInputValidator* v, const String* s) {
 	int value, min = v->Meta._Int.Min, max = v->Meta._Int.Max;
-	return Convert_TryParseInt(s, &value) && min <= value && value <= max;
+	return Convert_ParseInt(s, &value) && min <= value && value <= max;
 }
 
 static struct MenuInputValidatorVTABLE IntInputValidator_VTABLE = {
@@ -1388,12 +1389,12 @@ static bool Float_ValidChar(struct MenuInputValidator* v, char c) {
 static bool Float_ValidString(struct MenuInputValidator* v, const String* s) {
 	float value;
 	if (s->length == 1 && Float_ValidChar(v, s->buffer[0])) return true;
-	return Convert_TryParseFloat(s, &value);
+	return Convert_ParseFloat(s, &value);
 }
 
 static bool Float_ValidValue(struct MenuInputValidator* v, const String* s) {
 	float value, min = v->Meta._Float.Min, max = v->Meta._Float.Max;
-	return Convert_TryParseFloat(s, &value) && min <= value && value <= max;
+	return Convert_ParseFloat(s, &value) && min <= value && value <= max;
 }
 
 static struct MenuInputValidatorVTABLE FloatInputValidator_VTABLE = {
@@ -1482,19 +1483,14 @@ static void MenuInputWidget_RemakeTexture(void* widget) {
 	Bitmap bmp;
 
 	DrawTextArgs_Make(&args, &w->Base.Lines[0], &w->Base.Font, false);
-	size = Drawer2D_MeasureText(&args);
+	size.Width   = Drawer2D_TextWidth(&args);
+	/* Text may be empty, but don't want 0 height if so */
+	size.Height  = Drawer2D_FontHeight(&w->Base.Font, false);
 	w->Base.CaretAccumulator = 0.0;
 
 	String_InitArray(range, rangeBuffer);
 	v = &w->Validator;
 	v->VTABLE->GetRange(v, &range);
-
-	/* Ensure we don't have 0 text height */
-	if (size.Height == 0) {
-		args.Text   = range;
-		size.Height = Drawer2D_MeasureText(&args).Height;
-		args.Text   = w->Base.Lines[0];
-	}
 
 	w->Base.Width  = max(size.Width,  w->MinWidth);
 	w->Base.Height = max(size.Height, w->MinHeight);
@@ -1788,12 +1784,12 @@ static void ChatInputWidget_TabKey(struct InputWidget* w) {
 	}
 }
 
-static bool ChatInputWidget_KeyDown(void* widget, Key key) {
+static bool ChatInputWidget_KeyDown(void* widget, Key key, bool was) {
 	struct InputWidget* w = widget;
 	if (key == KEY_TAB)  { ChatInputWidget_TabKey(w);  return true; }
 	if (key == KEY_UP)   { ChatInputWidget_UpKey(w);   return true; }
 	if (key == KEY_DOWN) { ChatInputWidget_DownKey(w); return true; }
-	return InputWidget_KeyDown(w, key);
+	return InputWidget_KeyDown(w, key, was);
 }
 
 static int ChatInputWidget_GetMaxLines(void) {
@@ -1807,7 +1803,7 @@ static struct WidgetVTABLE ChatInputWidget_VTABLE = {
 	InputWidget_Reposition,
 };
 void ChatInputWidget_Create(struct ChatInputWidget* w, const FontDesc* font) {
-	static String prefix = String_FromConst("> ");
+	const static String prefix = String_FromConst("> ");
 
 	InputWidget_Create(&w->Base, font, &prefix);
 	w->TypingLogPos = Chat_InputLog.Count; /* Index of newest entry + 1. */
@@ -2151,9 +2147,9 @@ static void PlayerListWidget_Init(void* widget) {
 	TextWidget_Create(&w->Title, &title, &w->Font);
 	Widget_SetLocation(&w->Title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
 
-	Event_RegisterInt(&TabListEvents_Added,   w, PlayerListWidget_TabEntryAdded);
-	Event_RegisterInt(&TabListEvents_Changed, w, PlayerListWidget_TabEntryChanged);
-	Event_RegisterInt(&TabListEvents_Removed, w, PlayerListWidget_TabEntryRemoved);
+	Event_RegisterInt(&TabListEvents.Added,   w, PlayerListWidget_TabEntryAdded);
+	Event_RegisterInt(&TabListEvents.Changed, w, PlayerListWidget_TabEntryChanged);
+	Event_RegisterInt(&TabListEvents.Removed, w, PlayerListWidget_TabEntryRemoved);
 }
 
 static void PlayerListWidget_Render(void* widget, double delta) {
@@ -2193,14 +2189,14 @@ static void PlayerListWidget_Free(void* widget) {
 	}
 
 	Elem_TryFree(&w->Title);
-	Event_UnregisterInt(&TabListEvents_Added,   w, PlayerListWidget_TabEntryAdded);
-	Event_UnregisterInt(&TabListEvents_Changed, w, PlayerListWidget_TabEntryChanged);
-	Event_UnregisterInt(&TabListEvents_Removed, w, PlayerListWidget_TabEntryRemoved);
+	Event_UnregisterInt(&TabListEvents.Added,   w, PlayerListWidget_TabEntryAdded);
+	Event_UnregisterInt(&TabListEvents.Changed, w, PlayerListWidget_TabEntryChanged);
+	Event_UnregisterInt(&TabListEvents.Removed, w, PlayerListWidget_TabEntryRemoved);
 }
 
 static struct WidgetVTABLE PlayerListWidget_VTABLE = {
 	PlayerListWidget_Init, PlayerListWidget_Render, PlayerListWidget_Free, Gui_DefaultRecreate,
-	Widget_Key,	           Widget_Key,              Widget_KeyPress,
+	Widget_KeyDown,	       Widget_KeyUp,            Widget_KeyPress,
 	Widget_Mouse,          Widget_Mouse,            Widget_MouseMove,      Widget_MouseScroll,
 	PlayerListWidget_Reposition,
 };
@@ -2487,9 +2483,9 @@ static bool TextGroupWidget_GetUrl(struct TextGroupWidget* w, String* text, int 
 	for (i = 0, x = 0; i < portionsCount; i++) {
 		bit = portions[i];
 		args.Text = String_UNSAFE_Substring(&line, bit.LineBeg, bit.LineLen);
-		args.Font = (bit.Len & TEXTGROUPWIDGET_URL) ? w->UnderlineFont : w->Font;
+		args.Font = w->Font;
 
-		width = Drawer2D_MeasureText(&args).Width;
+		width = Drawer2D_TextWidth(&args);
 		if ((bit.Len & TEXTGROUPWIDGET_URL) && mouseX >= x && mouseX < x + width) {
 			bit.Len &= TEXTGROUPWIDGET_PACKED_LEN;
 			url = String_Init(&chars[bit.Beg], bit.Len, bit.Len);
@@ -2542,14 +2538,12 @@ static void TextGroupWidget_DrawAdvanced(struct TextGroupWidget* w, struct Textu
 	Size2D partSizes[Array_Elems(portions)];
 	Bitmap bmp;
 	int portionsCount;
-	int i, x;
+	int i, x, ul;
 
 	portionsCount = TextGroupWidget_Reduce(w, chars, index, portions);
 	for (i = 0; i < portionsCount; i++) {
 		bit = portions[i];
-
 		args->Text = String_UNSAFE_Substring(text, bit.LineBeg, bit.LineLen);
-		args->Font = (bit.Len & TEXTGROUPWIDGET_URL) ? w->UnderlineFont : w->Font;
 
 		partSizes[i] = Drawer2D_MeasureText(args);
 		size.Height = max(partSizes[i].Height, size.Height);
@@ -2561,11 +2555,13 @@ static void TextGroupWidget_DrawAdvanced(struct TextGroupWidget* w, struct Textu
 		x = 0;
 		for (i = 0; i < portionsCount; i++) {
 			bit = portions[i];
-
+			ul  = (bit.Len & TEXTGROUPWIDGET_URL);
 			args->Text = String_UNSAFE_Substring(text, bit.LineBeg, bit.LineLen);
-			args->Font = (bit.Len & TEXTGROUPWIDGET_URL) ? w->UnderlineFont : w->Font;
 
+			if (ul) args->Font.Style |= FONT_FLAG_UNDERLINE;
 			Drawer2D_DrawText(&bmp, args, x, 0);
+			if (ul) args->Font.Style &= ~FONT_FLAG_UNDERLINE;
+
 			x += partSizes[i].Width;
 		}
 		Drawer2D_Make2DTexture(tex, &bmp, size, 0, 0);
@@ -2641,17 +2637,16 @@ static void TextGroupWidget_Free(void* widget) {
 
 static struct WidgetVTABLE TextGroupWidget_VTABLE = {
 	TextGroupWidget_Init, TextGroupWidget_Render, TextGroupWidget_Free, Gui_DefaultRecreate,
-	Widget_Key,	          Widget_Key,             Widget_KeyPress,
+	Widget_KeyDown,	      Widget_KeyUp,           Widget_KeyPress,
 	Widget_Mouse,         Widget_Mouse,           Widget_MouseMove,     Widget_MouseScroll,
 	TextGroupWidget_Reposition,
 };
-void TextGroupWidget_Create(struct TextGroupWidget* w, int lines, const FontDesc* font, const FontDesc* ulFont, STRING_REF struct Texture* textures, STRING_REF char* buffer) {
+void TextGroupWidget_Create(struct TextGroupWidget* w, int lines, const FontDesc* font, STRING_REF struct Texture* textures, STRING_REF char* buffer) {
 	Widget_Reset(w);
 	w->VTABLE = &TextGroupWidget_VTABLE;
 
 	w->LinesCount = lines;
 	w->Font       = *font;
-	w->UnderlineFont = *ulFont;
 	w->Textures   = textures;
 	w->Buffer     = buffer;
 }
@@ -2892,7 +2887,7 @@ void SpecialInputWidget_SetActive(struct SpecialInputWidget* w, bool active) {
 
 static struct WidgetVTABLE SpecialInputWidget_VTABLE = {
 	SpecialInputWidget_Init,      SpecialInputWidget_Render, SpecialInputWidget_Free, Gui_DefaultRecreate,
-	Widget_Key,                   Widget_Key,                Widget_KeyPress,
+	Widget_KeyDown,               Widget_KeyUp,              Widget_KeyPress,
 	SpecialInputWidget_MouseDown, Widget_Mouse,              Widget_MouseMove,        Widget_MouseScroll,
 	Widget_CalcPosition,
 };

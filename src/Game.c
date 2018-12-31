@@ -12,13 +12,13 @@
 #include "Window.h"
 #include "Event.h"
 #include "Utils.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Entity.h"
 #include "Chat.h"
 #include "Drawer2D.h"
 #include "Model.h"
 #include "Particle.h"
-#include "AsyncDownloader.h"
+#include "Http.h"
 #include "Inventory.h"
 #include "InputHandler.h"
 #include "ServerConnection.h"
@@ -34,33 +34,25 @@
 #include "Stream.h"
 
 int Game_Width, Game_Height;
-double Game_Accumulator;
+double Game_Time;
 int Game_ChunkUpdates, Game_Port;
-bool Game_CameraClipping, Game_UseCPEBlocks;
+bool Game_UseCPEBlocks;
 
-struct PickedPos Game_SelectedPos, Game_CameraClipPos;
+struct PickedPos Game_SelectedPos;
 int Game_ViewDistance, Game_MaxViewDistance, Game_UserViewDistance;
 int Game_Fov, Game_DefaultFov, Game_ZoomFov;
 
 float game_limitMs;
 int  Game_FpsLimit, Game_Vertices;
 bool Game_ShowAxisLines, Game_SimpleArmsAnim;
-bool Game_ClassicArmModel, Game_InvertMouse;
+bool Game_ClassicArmModel;
 
-int  Game_MouseSensitivity, Game_ChatLines;
-bool Game_TabAutocomplete, Game_UseClassicGui;
-bool Game_UseClassicTabList, Game_UseClassicOptions;
 bool Game_ClassicMode, Game_ClassicHacks;
 bool Game_AllowCustomBlocks, Game_UseCPE;
-bool Game_AllowServerTextures, Game_SmoothLighting;
-bool Game_ChatLogging, Game_AutoRotate;
-bool Game_SmoothCamera, Game_ClickableChat;
-bool Game_HideGui, Game_ShowFPS;
+bool Game_AllowServerTextures;
 
-bool Game_ViewBobbing, Game_ShowBlockInHand;
-int  Game_SoundsVolume, Game_MusicVolume;
+bool Game_ViewBobbing, Game_HideGui;
 bool Game_BreakableLiquids, Game_ScreenshotRequested;
-int  Game_MaxChunkUpdates;
 float Game_RawHotbarScale, Game_RawChatScale, Game_RawInventoryScale;
 
 static struct ScheduledTask Game_Tasks[6];
@@ -93,7 +85,7 @@ int ScheduledTask_Add(double interval, ScheduledTaskCallback callback) {
 	task.Callback    = callback;
 
 	if (Game_TasksCount == Array_Elems(Game_Tasks)) {
-		ErrorHandler_Fail("ScheduledTask_Add - hit max count");
+		Logger_Abort("ScheduledTask_Add - hit max count");
 	}
 	Game_Tasks[Game_TasksCount++] = task;
 	return Game_TasksCount - 1;
@@ -143,7 +135,7 @@ void Game_SetDefaultTexturePack(const String* texPack) {
 }
 
 bool Game_ChangeTerrainAtlas(Bitmap* atlas) {
-	String terrain = String_FromConst("terrain.png");
+	const static String terrain = String_FromConst("terrain.png");
 	if (!Game_ValidateBitmap(&terrain, atlas)) return false;
 
 	if (atlas->Height < atlas->Width) {
@@ -156,7 +148,7 @@ bool Game_ChangeTerrainAtlas(Bitmap* atlas) {
 	Atlas_Free();
 	Atlas_Update(atlas);
 
-	Event_RaiseVoid(&TextureEvents_AtlasChanged);
+	Event_RaiseVoid(&TextureEvents.AtlasChanged);
 	return true;
 }
 
@@ -165,7 +157,7 @@ void Game_SetViewDistance(int distance) {
 	if (distance == Game_ViewDistance) return;
 	Game_ViewDistance = distance;
 
-	Event_RaiseVoid(&GfxEvents_ViewDistanceChanged);
+	Event_RaiseVoid(&GfxEvents.ViewDistanceChanged);
 	Game_UpdateProjection();
 }
 
@@ -176,16 +168,16 @@ void Game_UserSetViewDistance(int distance) {
 }
 
 void Game_UpdateProjection(void) {
-	Game_DefaultFov = Options_GetInt(OPT_FIELD_OF_VIEW, 1, 150, 70);
+	Game_DefaultFov = Options_GetInt(OPT_FIELD_OF_VIEW, 1, 179, 70);
 	Camera_Active->GetProjection(&Gfx_Projection);
 
 	Gfx_LoadMatrix(MATRIX_PROJECTION, &Gfx_Projection);
-	Event_RaiseVoid(&GfxEvents_ProjectionChanged);
+	Event_RaiseVoid(&GfxEvents.ProjectionChanged);
 }
 
 void Game_Disconnect(const String* title, const String* reason) {
 	World_Reset();
-	Event_RaiseVoid(&WorldEvents_NewMap);
+	Event_RaiseVoid(&WorldEvents.NewMap);
 	Gui_FreeActive();
 	Gui_SetActive(DisconnectScreen_MakeInstance(title, reason));
 	Game_Reset();
@@ -240,7 +232,7 @@ bool Game_UpdateTexture(GfxResourceID* texId, struct Stream* src, const String* 
 	ReturnCode res;
 	
 	res = Png_Decode(&bmp, src);
-	if (res) { Chat_LogError2(res, "decoding", file); }
+	if (res) { Logger_Warn2(res, "decoding", file); }
 
 	success = !res && Game_ValidateBitmap(file, &bmp);
 	if (success) {
@@ -271,20 +263,11 @@ bool Game_ValidateBitmap(const String* file, Bitmap* bmp) {
 	if (!Math_IsPowOf2(bmp->Width) || !Math_IsPowOf2(bmp->Height)) {
 		Chat_Add1("&cUnable to use %s from the texture pack.", file);
 
-		Chat_Add2("&c Its size is (%i,%i), which is not power of two dimensions.", 
+		Chat_Add2("&c Its size is (%i,%i), which is not a power of two size.", 
 			&bmp->Width, &bmp->Height);
 		return false;
 	}
 	return true;
-}
-
-int Game_CalcRenderType(const String* type) {
-	if (String_CaselessEqualsConst(type, "legacyfast")) return 0x03;
-	if (String_CaselessEqualsConst(type, "legacy"))     return 0x01;
-	if (String_CaselessEqualsConst(type, "normal"))     return 0x00;
-	if (String_CaselessEqualsConst(type, "normalfast")) return 0x02;
-
-	return -1;
 }
 
 void Game_UpdateClientSize(void) {
@@ -322,7 +305,7 @@ static void Game_TextureChangedCore(void* obj, struct Stream* src, const String*
 		res = Png_Decode(&bmp, src);
 
 		if (res) { 
-			Chat_LogError2(res, "decoding", name);
+			Logger_Warn2(res, "decoding", name);
 			Mem_Free(bmp.Scan0);
 		} else if (!Game_ChangeTerrainAtlas(&bmp)) {
 			Mem_Free(bmp.Scan0);
@@ -331,13 +314,20 @@ static void Game_TextureChangedCore(void* obj, struct Stream* src, const String*
 }
 
 static void Game_OnLowVRAMDetected(void* obj) {
-	if (Game_UserViewDistance <= 16) ErrorHandler_Fail("Out of video memory!");
+	if (Game_UserViewDistance <= 16) Logger_Abort("Out of video memory!");
 	Game_UserViewDistance /= 2;
 	Game_UserViewDistance = max(16, Game_UserViewDistance);
 
 	MapRenderer_Refresh();
 	Game_SetViewDistance(Game_UserViewDistance);
 	Chat_AddRaw("&cOut of VRAM! Halving view distance..");
+}
+
+static void Game_Warn(ReturnCode result, const char* place) {
+	Chat_Add4("&cError %h when %c", &result, place, NULL, NULL);
+}
+static void Game_Warn2(ReturnCode result, const char* place, const String* path) {
+	Chat_Add4("&cError %h when %c '%s'", &result, place, path, NULL);
 }
 
 static void Game_ExtractInitialTexturePack(void) {
@@ -364,29 +354,23 @@ static void Game_LoadOptions(void) {
 	Game_AllowCustomBlocks = Options_GetBool(OPT_CUSTOM_BLOCKS, true);
 	Game_UseCPE            = Options_GetBool(OPT_CPE, true);
 	Game_SimpleArmsAnim    = Options_GetBool(OPT_SIMPLE_ARMS_ANIM, false);
-	Game_ChatLogging       = Options_GetBool(OPT_CHAT_LOGGING, true);
 	Game_ClassicArmModel   = Options_GetBool(OPT_CLASSIC_ARM_MODEL, Game_ClassicMode);
-
-	Game_ViewBobbing    = Options_GetBool(OPT_VIEW_BOBBING, true);
-	Game_SmoothLighting = Options_GetBool(OPT_SMOOTH_LIGHTING, false);
+	Game_ViewBobbing       = Options_GetBool(OPT_VIEW_BOBBING, true);
 
 	method = Options_GetEnum(OPT_FPS_LIMIT, 0, FpsLimit_Names, FPS_LIMIT_COUNT);
 	Game_SetFpsLimit(method);
 	Game_ViewDistance     = Options_GetInt(OPT_VIEW_DISTANCE, 16, 4096, 512);
 	Game_UserViewDistance = Game_ViewDistance;
 
-	Game_DefaultFov = Options_GetInt(OPT_FIELD_OF_VIEW, 1, 150, 70);
+	Game_DefaultFov = Options_GetInt(OPT_FIELD_OF_VIEW, 1, 179, 70);
 	Game_Fov        = Game_DefaultFov;
 	Game_ZoomFov    = Game_DefaultFov;
 	Game_BreakableLiquids = !Game_ClassicMode && Options_GetBool(OPT_MODIFIABLE_LIQUIDS, false);
-	Game_CameraClipping    = Options_GetBool(OPT_CAMERA_CLIPPING, true);
-	Game_MaxChunkUpdates   = Options_GetInt(OPT_MAX_CHUNK_UPDATES, 4, 1024, 30);
-
 	Game_AllowServerTextures = Options_GetBool(OPT_SERVER_TEXTURES, true);
-	Game_MouseSensitivity    = Options_GetInt(OPT_SENSITIVITY, 1, 100, 30);
-	Game_ShowBlockInHand     = Options_GetBool(OPT_SHOW_BLOCK_IN_HAND, true);
-	Game_InvertMouse         = Options_GetBool(OPT_INVERT_MOUSE, false);
 
+	Game_RawInventoryScale = Options_GetFloat(OPT_INVENTORY_SCALE, 0.25f, 5.0f, 1.0f);
+	Game_RawHotbarScale    = Options_GetFloat(OPT_HOTBAR_SCALE,    0.25f, 5.0f, 1.0f);
+	Game_RawChatScale      = Options_GetFloat(OPT_CHAT_SCALE,      0.35f, 5.0f, 1.0f);
 	/* TODO: Do we need to support option to skip SSL */
 	/*bool skipSsl = Options_GetBool("skip-ssl-check", false);
 	if (skipSsl) {
@@ -395,31 +379,56 @@ static void Game_LoadOptions(void) {
 	}*/
 }
 
-static void Game_LoadGuiOptions(void) {
-	Game_ChatLines         = Options_GetInt(OPT_CHATLINES, 0, 30, 12);
-	Game_ClickableChat     = Options_GetBool(OPT_CLICKABLE_CHAT, false);
-	Game_RawInventoryScale = Options_GetFloat(OPT_INVENTORY_SCALE, 0.25f, 5.0f, 1.0f);
-	Game_RawHotbarScale    = Options_GetFloat(OPT_HOTBAR_SCALE,    0.25f, 5.0f, 1.0f);
-	Game_RawChatScale      = Options_GetFloat(OPT_CHAT_SCALE,      0.35f, 5.0f, 1.0f);
-	Game_ShowFPS           = Options_GetBool(OPT_SHOW_FPS, true);
+static void Game_LoadPlugin(const String* filename, void* obj) {
+	const static String txt = String_FromConst(".txt");
+	void* lib;
+	void* verSymbol;  /* EXPORT int Plugin_ApiVersion = GAME_API_VER; */
+	void* compSymbol; /* EXPORT struct IGameComponent Plugin_Component = { (whatever) } */
+	int ver;
+	ReturnCode res;
 
-	Game_UseClassicGui     = Options_GetBool(OPT_CLASSIC_GUI, true)      || Game_ClassicMode;
-	Game_UseClassicTabList = Options_GetBool(OPT_CLASSIC_TABLIST, false) || Game_ClassicMode;
-	Game_UseClassicOptions = Options_GetBool(OPT_CLASSIC_OPTIONS, false) || Game_ClassicMode;
+	/* ignore classicalsharp's accepted.txt */
+	if (String_CaselessEnds(filename, &txt)) return;
+	res = Platform_LoadLibrary(filename, &lib);
+	if (res) { Logger_Warn2(res, "loading plugin", filename); return; }
 
-	Game_TabAutocomplete = Options_GetBool(OPT_TAB_AUTOCOMPLETE, false);
+	res = Platform_GetSymbol(lib, "Plugin_ApiVersion", &verSymbol);
+	if (res) { Logger_Warn2(res, "getting version of", filename); return; }
+	res = Platform_GetSymbol(lib, "Plugin_Component", &compSymbol);
+	if (res) { Logger_Warn2(res, "initing", filename); return; }
+
+	ver = *((int*)verSymbol);
+	if (ver < GAME_API_VER) {
+		Chat_Add1("&c%s plugin is outdated! Try getting a more recent version.", filename);
+		return;
+	} else if (ver > GAME_API_VER) {
+		Chat_Add1("&cYour game is too outdated to use %s plugin! Try updating it.", filename);
+		return;
+	}
+
+	Game_AddComponent((struct IGameComponent*)compSymbol);
+}
+
+static void Game_LoadPlugins(void) {
+	const static String dir = String_FromConst("plugins");
+	ReturnCode res;
+
+	res = Directory_Enum(&dir, NULL, Game_LoadPlugin);
+	if (res) Logger_Warn(res, "enumerating plugins directory");
 }
 
 void Game_Free(void* obj);
-void Game_Load(void) {
+static void Game_Load(void) {
 	String title;      char titleBuffer[STRING_SIZE];
 	struct IGameComponent* comp;
+
+	Logger_Warn  = Game_Warn;
+	Logger_Warn2 = Game_Warn2;
 
 	Game_ViewDistance     = 512;
 	Game_MaxViewDistance  = 32768;
 	Game_UserViewDistance = 512;
 	Game_Fov = 70;
-	Game_AutoRotate = true;
 
 	Gfx_Init();
 	Gfx_SetVSync(true);
@@ -428,15 +437,14 @@ void Game_Load(void) {
 
 	Game_UpdateClientSize();
 	Game_LoadOptions();
-	Game_LoadGuiOptions();
 
-	Event_RegisterVoid(&WorldEvents_NewMap,         NULL, Game_OnNewMapCore);
-	Event_RegisterVoid(&WorldEvents_MapLoaded,      NULL, Game_OnNewMapLoadedCore);
-	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, Game_TextureChangedCore);
-	Event_RegisterVoid(&GfxEvents_LowVRAMDetected,  NULL, Game_OnLowVRAMDetected);
+	Event_RegisterVoid(&WorldEvents.NewMap,         NULL, Game_OnNewMapCore);
+	Event_RegisterVoid(&WorldEvents.MapLoaded,      NULL, Game_OnNewMapLoadedCore);
+	Event_RegisterEntry(&TextureEvents.FileChanged, NULL, Game_TextureChangedCore);
+	Event_RegisterVoid(&GfxEvents.LowVRAMDetected,  NULL, Game_OnLowVRAMDetected);
 
-	Event_RegisterVoid(&WindowEvents_Resized,       NULL, Game_OnResize);
-	Event_RegisterVoid(&WindowEvents_Closed,        NULL, Game_Free);
+	Event_RegisterVoid(&WindowEvents.Resized,       NULL, Game_OnResize);
+	Event_RegisterVoid(&WindowEvents.Closed,        NULL, Game_Free);
 
 	TextureCache_Init();
 	/* TODO: Survival vs Creative game mode */
@@ -445,13 +453,13 @@ void Game_Load(void) {
 	Game_AddComponent(&Blocks_Component);
 	Game_AddComponent(&Drawer2D_Component);
 
+	Game_AddComponent(&Chat_Component);
 	Game_AddComponent(&Particles_Component);
 	Game_AddComponent(&TabList_Component);
-	Game_AddComponent(&Chat_Component);
 
 	Game_AddComponent(&Models_Component);
 	Game_AddComponent(&Entities_Component);
-	Game_AddComponent(&AsyncDownloader_Component);
+	Game_AddComponent(&Http_Component);
 	Game_AddComponent(&Lighting_Component);
 
 	Game_AddComponent(&Animations_Component);
@@ -478,24 +486,15 @@ void Game_Load(void) {
 	Game_AddComponent(&Audio_Component);
 	Game_AddComponent(&AxisLinesRenderer_Component);
 
-	/* TODO: plugin dll support */
-	/* List<string> nonLoaded = PluginLoader.LoadAll(); */
-
+	Game_LoadPlugins();
 	for (comp = comps_head; comp; comp = comp->Next) {
 		if (comp->Init) comp->Init();
 	}
+
 	Game_ExtractInitialTexturePack();
-
 	entTaskI = ScheduledTask_Add(GAME_DEF_TICKS, Entities_Tick);
-	/* TODO: plugin dll support */
-	/* if (nonLoaded != null) {
-		for (int i = 0; i < nonLoaded.Count; i++) {
-			Overlay warning = new PluginOverlay(this, nonLoaded[i]);
-			Gui_ShowOverlay(warning, false);
-		}
-	}*/
 
-	if (Gfx_WarnIfNecessary()) EnvRenderer_UseLegacyMode(true);
+	if (Gfx_WarnIfNecessary()) EnvRenderer_SetMode(EnvRenderer_Minimal | ENV_LEGACY);
 	String_InitArray(title, titleBuffer);
 	String_Format2(&title, "Connecting to %s:%i..", &Game_IPAddress, &Game_Port);
 
@@ -511,6 +510,7 @@ void Game_SetFpsLimit(enum FpsLimit method) {
 }
 
 float Game_CalcLimitMillis(enum FpsLimit method) {
+	if (method == FPS_LIMIT_144) return 1000/144.0f;
 	if (method == FPS_LIMIT_120) return 1000/120.0f;
 	if (method == FPS_LIMIT_60)  return 1000/60.0f;
 	if (method == FPS_LIMIT_30)  return 1000/30.0f;
@@ -621,15 +621,15 @@ void Game_TakeScreenshot(void) {
 	String_Format1(&path, "screenshots/%s", &filename);
 
 	res = Stream_CreateFile(&stream, &path);
-	if (res) { Chat_LogError2(res, "creating", &path); return; }
+	if (res) { Logger_Warn2(res, "creating", &path); return; }
 
 	res = Gfx_TakeScreenshot(&stream, Game_Width, Game_Height);
 	if (res) { 
-		Chat_LogError2(res, "saving to", &path); stream.Close(&stream); return;
+		Logger_Warn2(res, "saving to", &path); stream.Close(&stream); return;
 	}
 
 	res = stream.Close(&stream);
-	if (res) { Chat_LogError2(res, "closing", &path); return; }
+	if (res) { Logger_Warn2(res, "closing", &path); return; }
 
 	Chat_Add1("&eTaken screenshot as: %s", &filename);
 }
@@ -643,7 +643,7 @@ static void Game_RenderFrame(double delta) {
 	frameStart = Stopwatch_Measure();
 	Gfx_BeginFrame();
 	Gfx_BindIb(Gfx_defaultIb);
-	Game_Accumulator += delta;
+	Game_Time += delta;
 	Game_Vertices = 0;
 
 	Camera_Active->UpdateMouse();
@@ -684,17 +684,20 @@ void Game_Free(void* obj) {
 	struct IGameComponent* comp;
 	Atlas_Free();
 
-	Event_UnregisterVoid(&WorldEvents_NewMap,         NULL, Game_OnNewMapCore);
-	Event_UnregisterVoid(&WorldEvents_MapLoaded,      NULL, Game_OnNewMapLoadedCore);
-	Event_UnregisterEntry(&TextureEvents_FileChanged, NULL, Game_TextureChangedCore);
-	Event_UnregisterVoid(&GfxEvents_LowVRAMDetected,  NULL, Game_OnLowVRAMDetected);
+	Event_UnregisterVoid(&WorldEvents.NewMap,         NULL, Game_OnNewMapCore);
+	Event_UnregisterVoid(&WorldEvents.MapLoaded,      NULL, Game_OnNewMapLoadedCore);
+	Event_UnregisterEntry(&TextureEvents.FileChanged, NULL, Game_TextureChangedCore);
+	Event_UnregisterVoid(&GfxEvents.LowVRAMDetected,  NULL, Game_OnLowVRAMDetected);
 
-	Event_UnregisterVoid(&WindowEvents_Resized,       NULL, Game_OnResize);
-	Event_UnregisterVoid(&WindowEvents_Closed,        NULL, Game_Free);
+	Event_UnregisterVoid(&WindowEvents.Resized,       NULL, Game_OnResize);
+	Event_UnregisterVoid(&WindowEvents.Closed,        NULL, Game_Free);
 
 	for (comp = comps_head; comp; comp = comp->Next) {
 		if (comp->Free) comp->Free();
 	}
+
+	Logger_Warn  = Logger_DialogWarn;
+	Logger_Warn2 = Logger_DialogWarn2;
 	Gfx_Free();
 
 	if (!Options_HasAnyChanged()) return;
@@ -711,7 +714,7 @@ void Game_Run(int width, int height, const String* title) {
 	Window_SetVisible(true);
 
 	Game_Load();
-	Event_RaiseVoid(&WindowEvents_Resized);
+	Event_RaiseVoid(&WindowEvents.Resized);
 
 	lastRender = Stopwatch_Measure();
 	for (;;) {

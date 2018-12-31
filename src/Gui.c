@@ -8,9 +8,13 @@
 #include "Screens.h"
 #include "Camera.h"
 #include "InputHandler.h"
-#include "ErrorHandler.h"
+#include "Logger.h"
 #include "Platform.h"
 #include "Bitmap.h"
+
+bool Gui_ClassicTexture, Gui_ClassicTabList, Gui_ClassicMenu;
+int  Gui_Chatlines;
+bool Gui_ClickableChat, Gui_TabAutocomplete, Gui_ShowFPS;
 
 GfxResourceID Gui_GuiTex, Gui_GuiClassicTex, Gui_IconsTex;
 struct Screen* Gui_Status;
@@ -26,16 +30,16 @@ void Gui_DefaultRecreate(void* elem) {
 
 void Screen_CommonInit(void* screen) { 
 	struct Screen* s = screen;
-	Event_RegisterVoid(&GfxEvents_ContextLost,      s, s->VTABLE->ContextLost);
-	Event_RegisterVoid(&GfxEvents_ContextRecreated, s, s->VTABLE->ContextRecreated);
+	Event_RegisterVoid(&GfxEvents.ContextLost,      s, s->VTABLE->ContextLost);
+	Event_RegisterVoid(&GfxEvents.ContextRecreated, s, s->VTABLE->ContextRecreated);
 
 	if (Gfx_LostContext) return;
 	s->VTABLE->ContextRecreated(s);
 }
 
 void Screen_CommonFree(void* screen) { struct Screen* s = screen;
-	Event_UnregisterVoid(&GfxEvents_ContextLost,      s, s->VTABLE->ContextLost);
-	Event_UnregisterVoid(&GfxEvents_ContextRecreated, s, s->VTABLE->ContextRecreated);
+	Event_UnregisterVoid(&GfxEvents.ContextLost,      s, s->VTABLE->ContextLost);
+	Event_UnregisterVoid(&GfxEvents.ContextRecreated, s, s->VTABLE->ContextRecreated);
 	s->VTABLE->ContextLost(s);
 }
 
@@ -88,6 +92,18 @@ CC_NOINLINE static void Gui_RecreateScreen(struct Screen* screen) {
 	Elem_Recreate(screen);
 }
 
+static void Gui_LoadOptions(void) {
+	Gui_Chatlines       = Options_GetInt(OPT_CHATLINES, 0, 30, 12);
+	Gui_ClickableChat   = Options_GetBool(OPT_CLICKABLE_CHAT, false);
+	Gui_TabAutocomplete = Options_GetBool(OPT_TAB_AUTOCOMPLETE, false);
+
+	Gui_ClassicTexture = Options_GetBool(OPT_CLASSIC_GUI, true)      || Game_ClassicMode;
+	Gui_ClassicTabList = Options_GetBool(OPT_CLASSIC_TABLIST, false) || Game_ClassicMode;
+	Gui_ClassicMenu    = Options_GetBool(OPT_CLASSIC_OPTIONS, false) || Game_ClassicMode;
+
+	Gui_ShowFPS = Options_GetBool(OPT_SHOW_FPS, true);
+}
+
 static void Gui_FontChanged(void* obj) {
 	Gui_RecreateScreen(Gui_Active);
 	Gui_RecreateScreen(Gui_Status);
@@ -105,11 +121,12 @@ static void Gui_FileChanged(void* obj, struct Stream* stream, const String* name
 }
 
 static void Gui_Init(void) {
-	Event_RegisterVoid(&ChatEvents_FontChanged,     NULL, Gui_FontChanged);
-	Event_RegisterEntry(&TextureEvents_FileChanged, NULL, Gui_FileChanged);
+	Event_RegisterVoid(&ChatEvents.FontChanged,     NULL, Gui_FontChanged);
+	Event_RegisterEntry(&TextureEvents.FileChanged, NULL, Gui_FileChanged);
+	Gui_LoadOptions();
+
 	Gui_Status = StatusScreen_MakeInstance();
 	Gui_HUD    = HUDScreen_MakeInstance();
-
 	Elem_Init(Gui_Status);
 	Elem_Init(Gui_HUD);
 }
@@ -123,8 +140,8 @@ static void Gui_Reset(void) {
 }
 
 static void Gui_Free(void) {
-	Event_UnregisterVoid(&ChatEvents_FontChanged,     NULL, Gui_FontChanged);
-	Event_UnregisterEntry(&TextureEvents_FileChanged, NULL, Gui_FileChanged);
+	Event_UnregisterVoid(&ChatEvents.FontChanged,     NULL, Gui_FontChanged);
+	Event_UnregisterEntry(&TextureEvents.FileChanged, NULL, Gui_FileChanged);
 	Gui_CloseActive();
 	Elem_TryFree(Gui_Status);
 	Elem_TryFree(Gui_HUD);
@@ -176,7 +193,7 @@ void Gui_RefreshHud(void) { Elem_Recreate(Gui_HUD); }
 void Gui_ShowOverlay(struct Screen* overlay, bool atFront) {
 	int i;
 	if (Gui_OverlaysCount == GUI_MAX_OVERLAYS) {
-		ErrorHandler_Fail("Gui_ShowOverlay - hit max count");
+		Logger_Abort("Gui_ShowOverlay - hit max count");
 	}
 
 	if (atFront) {		
@@ -266,24 +283,31 @@ void TextAtlas_Make(struct TextAtlas* atlas, const String* chars, const FontDesc
 	struct DrawTextArgs args; 
 	Size2D size;
 	Bitmap bmp;
-	int i;
+	int i, width;
 
 	DrawTextArgs_Make(&args, prefix, font, true);
 	size = Drawer2D_MeasureText(&args);
+	atlas->Offset = size.Width;
+	
+	width = atlas->Offset;
+	for (i = 0; i < chars->length; i++) {
+		args.Text = String_UNSAFE_Substring(chars, i, 1);
+		size = Drawer2D_MeasureText(&args);
 
-	atlas->Offset   = size.Width;
-	atlas->FontSize = font->Size;
-	size.Width += 16 * chars->length;
+		atlas->Widths[i]  = size.Width;
+		atlas->Offsets[i] = width;
+		/* add 1 pixel of padding */
+		width += size.Width + 1;
+	}
 
-	Mem_Set(atlas->Widths, 0, sizeof(atlas->Widths));
-	Bitmap_AllocateClearedPow2(&bmp, size.Width, size.Height);
+	Bitmap_AllocateClearedPow2(&bmp, width, size.Height);
 	{
-		Drawer2D_DrawText(&bmp, &args, 0, 0);		
+		args.Text = *prefix;
+		Drawer2D_DrawText(&bmp, &args, 0, 0);	
+
 		for (i = 0; i < chars->length; i++) {
 			args.Text = String_UNSAFE_Substring(chars, i, 1);
-			atlas->Widths[i] = Drawer2D_MeasureText(&args).Width;
-
-			Drawer2D_DrawText(&bmp, &args, atlas->Offset + font->Size * i, 0);
+			Drawer2D_DrawText(&bmp, &args, atlas->Offsets[i], 0);
 		}
 		Drawer2D_Make2DTexture(&atlas->Tex, &bmp, size, 0, 0);
 	}	
@@ -303,8 +327,8 @@ void TextAtlas_Add(struct TextAtlas* atlas, int charI, VertexP3fT2fC4b** vertice
 	PackedCol white = PACKEDCOL_WHITE;
 
 	part.X  = atlas->CurX; part.Width = width;
-	part.uv.U1 = (atlas->Offset + charI * atlas->FontSize) * atlas->uScale;
-	part.uv.U2 = part.uv.U1 + width                        * atlas->uScale;
+	part.uv.U1 = atlas->Offsets[charI] * atlas->uScale;
+	part.uv.U2 = part.uv.U1 + width    * atlas->uScale;
 
 	atlas->CurX += width;	
 	Gfx_Make2DQuad(&part, white, vertices);
