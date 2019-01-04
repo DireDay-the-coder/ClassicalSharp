@@ -38,20 +38,22 @@ namespace ClassicalSharp {
 		public List<string> InputLog = new List<string>();
 		
 		public void Send(string text, bool logUsage) {
-			if (String.IsNullOrEmpty(text)) return;
+		    if (String.IsNullOrEmpty(text)) return;
 			Events.RaiseChatSending(ref text);
 			if (logUsage) InputLog.Add(text);
-			
-			if (game.CommandList.IsCommandPrefix(text)) {
-				game.CommandList.Execute(text);
+
+		    if (game.CommandList.IsCommandPrefix(text)) {
+		        game.CommandList.Execute(text);
+		    } else if (game.CommandList.IsCommandHackPrefix(text)) {
+		        game.CommandList.ExecuteHacks(text);
 			} else {
 				game.Server.SendChat(text);
 			}
 		}
-		
-		static char[] trimChars = new char[] { ' ', '\0' };
+
+	    public static char[] trimChars = new char[] { ' ', '\0' };
 		StringBuffer logBuffer = new StringBuffer(128);
-		public void Add(string text) { Add(text, MessageType.Normal); }
+	    public void Add(string text) { Add(text, MessageType.Normal); }
 		
 		public void Add(string text, MessageType type) {
 			Events.RaiseChatReceived(ref text, type);
