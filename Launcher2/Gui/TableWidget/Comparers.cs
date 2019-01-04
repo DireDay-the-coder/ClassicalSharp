@@ -14,8 +14,8 @@ namespace Launcher.Gui.Widgets {
 	sealed class DefaultComparer : TableEntryComparer {
 		
 		public override int Compare(TableEntry a, TableEntry b) {
-			long valX = Int64.Parse(a.Players.Substring(0, a.Players.IndexOf('/')));
-			long valY = Int64.Parse(b.Players.Substring(0, b.Players.IndexOf('/')));
+			long valX = Int64.Parse(a.Online);
+			long valY = Int64.Parse(b.Online);
 			int value = valY.CompareTo(valX);
 			if (value != 0) return value;
 			
@@ -46,8 +46,8 @@ namespace Launcher.Gui.Widgets {
 	sealed class PlayersComparer : TableEntryComparer {
 		
 		public override int Compare(TableEntry a, TableEntry b) {
-			long valX = Int64.Parse(a.Players.Substring(0, a.Players.IndexOf('/')));
-			long valY = Int64.Parse(b.Players.Substring(0, b.Players.IndexOf('/')));
+			long valX = Int64.Parse(a.Online);
+			long valY = Int64.Parse(b.Online);
 			int value = valX.CompareTo(valY);
 			return Invert ? -value : value;
 		}

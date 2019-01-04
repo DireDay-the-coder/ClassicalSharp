@@ -133,7 +133,7 @@ namespace Launcher.Web {
 				entry.Players = (string)obj["players"];
 			}
 			if (obj.ContainsKey("country_abbr")) {
-				entry.Flag = (string)obj["country_abbr"];
+				entry.Flag = Utils.ToLower((string)obj["country_abbr"]);
 			}
 			return entry;
 		}
