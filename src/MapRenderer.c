@@ -72,8 +72,8 @@ CC_NOINLINE static int MapRenderer_UsedAtlases(void) {
 	TextureLoc maxLoc = 0;
 	int i;
 
-	for (i = 0; i < Array_Elems(Block_Textures); i++) {
-		maxLoc = max(maxLoc, Block_Textures[i]);
+	for (i = 0; i < Array_Elems(Blocks.Textures); i++) {
+		maxLoc = max(maxLoc, Blocks.Textures[i]);
 	}
 	return Atlas1D_Index(maxLoc) + 1;
 }
@@ -86,11 +86,11 @@ static void MapRenderer_CheckWeather(double delta) {
 	Vector3I pos;
 	BlockID block;
 	bool outside;
-	Vector3I_Floor(&pos, &Camera_CurrentPos);
+	Vector3I_Floor(&pos, &Camera.CurrentPos);
 
 	block   = World_SafeGetBlock_3I(pos);
 	outside = pos.X < 0 || pos.Y < 0 || pos.Z < 0 || pos.X >= World_Width || pos.Z >= World_Length;
-	inTranslucent = Block_Draw[block] == DRAW_TRANSLUCENT || (pos.Y < Env_EdgeHeight && outside);
+	inTranslucent = Blocks.Draw[block] == DRAW_TRANSLUCENT || (pos.Y < Env_EdgeHeight && outside);
 
 	/* If we are under water, render weather before to blend properly */
 	if (!inTranslucent || Env_Weather == WEATHER_SUNNY) return;
@@ -521,14 +521,14 @@ static void MapRenderer_UpdateChunks(double delta) {
 	Math_Clamp(chunksTarget, 4, MapRenderer_MaxUpdates);
 
 	p = &LocalPlayer_Instance;
-	samePos = Vector3_Equals(&Camera_CurrentPos, &lastCamPos)
+	samePos = Vector3_Equals(&Camera.CurrentPos, &lastCamPos)
 		&& p->Base.HeadX == lastHeadX && p->Base.HeadY == lastHeadY;
 
 	renderChunksCount = samePos ?
 		MapRenderer_UpdateChunksStill(&chunkUpdates) :
 		MapRenderer_UpdateChunksAndVisibility(&chunkUpdates);
 
-	lastCamPos = Camera_CurrentPos;
+	lastCamPos = Camera.CurrentPos;
 	lastHeadX  = p->Base.HeadX; 
 	lastHeadY  = p->Base.HeadY;
 
@@ -563,7 +563,7 @@ static void MapRenderer_UpdateSortOrder(void) {
 	int i, dx, dy, dz;
 
 	/* pos is centre coordinate of chunk camera is in */
-	Vector3I_Floor(&pos, &Camera_CurrentPos);
+	Vector3I_Floor(&pos, &Camera.CurrentPos);
 	pos.X = (pos.X & ~CHUNK_MASK) + HALF_CHUNK_SIZE;
 	pos.Y = (pos.Y & ~CHUNK_MASK) + HALF_CHUNK_SIZE;
 	pos.Z = (pos.Z & ~CHUNK_MASK) + HALF_CHUNK_SIZE;
@@ -661,7 +661,7 @@ void MapRenderer_BuildChunk(struct ChunkInfo* info, int* chunkUpdates) {
 	struct ChunkPartInfo* ptr;
 	int i;
 
-	Game_ChunkUpdates++;
+	Game.ChunkUpdates++;
 	(*chunkUpdates)++;
 	info->PendingDelete = false;
 	Builder_MakeChunk(info);
@@ -720,7 +720,7 @@ static void MapRenderer_DeleteChunks_(void* obj)     { MapRenderer_DeleteChunks(
 static void MapRenderer_Refresh_(void* obj)          { MapRenderer_Refresh(); }
 
 static void MapRenderer_OnNewMap(void) {
-	Game_ChunkUpdates = 0;
+	Game.ChunkUpdates = 0;
 	MapRenderer_DeleteChunks();
 	MapRenderer_ResetPartCounts();
 

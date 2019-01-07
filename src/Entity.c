@@ -20,8 +20,6 @@
 #include "Bitmap.h"
 #include "Logger.h"
 
-NameMode Entities_NameMode;
-ShadowMode Entities_ShadowMode;
 const char* NameMode_Names[NAME_MODE_COUNT]   = { "None", "Hovered", "All", "AllHovered", "AllUnscaled" };
 const char* ShadowMode_Names[SHADOW_MODE_COUNT] = { "None", "SnapToBlock", "Circle", "CircleAll" };
 
@@ -183,8 +181,8 @@ bool Entity_TouchesAny(struct AABB* bounds, Entity_TouchesCondition condition) {
 			for (x = bbMin.X; x <= bbMax.X; x++) { v.X = (float)x;
 
 				block = World_GetBlock(x, y, z);
-				Vector3_Add(&blockBB.Min, &v, &Block_MinBB[block]);
-				Vector3_Add(&blockBB.Max, &v, &Block_MaxBB[block]);
+				Vector3_Add(&blockBB.Min, &v, &Blocks.MinBB[block]);
+				Vector3_Add(&blockBB.Max, &v, &Blocks.MaxBB[block]);
 
 				if (!AABB_Intersects(&blockBB, bounds)) continue;
 				if (condition(block)) return true;
@@ -194,7 +192,7 @@ bool Entity_TouchesAny(struct AABB* bounds, Entity_TouchesCondition condition) {
 	return false;
 }
 
-static bool Entity_IsRope(BlockID b) { return Block_ExtendedCollide[b] == COLLIDE_CLIMB_ROPE; }
+static bool Entity_IsRope(BlockID b) { return Blocks.ExtendedCollide[b] == COLLIDE_CLIMB_ROPE; }
 bool Entity_TouchesAnyRope(struct Entity* e) {
 	struct AABB bounds; Entity_GetBounds(e, &bounds);
 	bounds.Max.Y += 0.5f / 16.0f;
@@ -202,14 +200,14 @@ bool Entity_TouchesAnyRope(struct Entity* e) {
 }
 
 static Vector3 entity_liqExpand = { 0.25f/16.0f, 0.0f/16.0f, 0.25f/16.0f };
-static bool Entity_IsLava(BlockID b) { return Block_ExtendedCollide[b] == COLLIDE_LIQUID_LAVA; }
+static bool Entity_IsLava(BlockID b) { return Blocks.ExtendedCollide[b] == COLLIDE_LIQUID_LAVA; }
 bool Entity_TouchesAnyLava(struct Entity* e) {
 	struct AABB bounds; Entity_GetBounds(e, &bounds);
 	AABB_Offset(&bounds, &bounds, &entity_liqExpand);
 	return Entity_TouchesAny(&bounds, Entity_IsLava);
 }
 
-static bool Entity_IsWater(BlockID b) { return Block_ExtendedCollide[b] == COLLIDE_LIQUID_WATER; }
+static bool Entity_IsWater(BlockID b) { return Blocks.ExtendedCollide[b] == COLLIDE_LIQUID_WATER; }
 bool Entity_TouchesAnyWater(struct Entity* e) {
 	struct AABB bounds; Entity_GetBounds(e, &bounds);
 	AABB_Offset(&bounds, &bounds, &entity_liqExpand);
@@ -220,14 +218,14 @@ bool Entity_TouchesAnyWater(struct Entity* e) {
 /*########################################################################################################################*
 *--------------------------------------------------------Entities---------------------------------------------------------*
 *#########################################################################################################################*/
-struct Entity* Entities_List[ENTITIES_MAX_COUNT];
+struct _EntitiesData Entities;
 static EntityID entities_closestId;
 
 void Entities_Tick(struct ScheduledTask* task) {
 	int i;
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		Entities_List[i]->VTABLE->Tick(Entities_List[i], task->Interval);
+		if (!Entities.List[i]) continue;
+		Entities.List[i]->VTABLE->Tick(Entities.List[i], task->Interval);
 	}
 }
 
@@ -237,8 +235,8 @@ void Entities_RenderModels(double delta, float t) {
 	Gfx_SetAlphaTest(true);
 	
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		Entities_List[i]->VTABLE->RenderModel(Entities_List[i], delta, t);
+		if (!Entities.List[i]) continue;
+		Entities.List[i]->VTABLE->RenderModel(Entities.List[i], delta, t);
 	}
 	Gfx_SetTexturing(false);
 	Gfx_SetAlphaTest(false);
@@ -250,9 +248,9 @@ void Entities_RenderNames(double delta) {
 	bool hadFog;
 	int i;
 
-	if (Entities_NameMode == NAME_MODE_NONE) return;
+	if (Entities.NamesMode == NAME_MODE_NONE) return;
 	entities_closestId = Entities_GetCloset(&p->Base);
-	if (!p->Hacks.CanSeeAllNames || Entities_NameMode != NAME_MODE_ALL) return;
+	if (!p->Hacks.CanSeeAllNames || Entities.NamesMode != NAME_MODE_ALL) return;
 
 	Gfx_SetTexturing(true);
 	Gfx_SetAlphaTest(true);
@@ -260,9 +258,9 @@ void Entities_RenderNames(double delta) {
 	if (hadFog) Gfx_SetFog(false);
 
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
+		if (!Entities.List[i]) continue;
 		if (i != entities_closestId || i == ENTITIES_SELF_ID) {
-			Entities_List[i]->VTABLE->RenderName(Entities_List[i]);
+			Entities.List[i]->VTABLE->RenderName(Entities.List[i]);
 		}
 	}
 
@@ -276,8 +274,8 @@ void Entities_RenderHoveredNames(double delta) {
 	bool allNames, hadFog;
 	int i;
 
-	if (Entities_NameMode == NAME_MODE_NONE) return;
-	allNames = !(Entities_NameMode == NAME_MODE_HOVERED || Entities_NameMode == NAME_MODE_ALL) 
+	if (Entities.NamesMode == NAME_MODE_NONE) return;
+	allNames = !(Entities.NamesMode == NAME_MODE_HOVERED || Entities.NamesMode == NAME_MODE_ALL) 
 		&& p->Hacks.CanSeeAllNames;
 
 	Gfx_SetTexturing(true);
@@ -287,9 +285,9 @@ void Entities_RenderHoveredNames(double delta) {
 	if (hadFog) Gfx_SetFog(false);
 
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
+		if (!Entities.List[i]) continue;
 		if ((i == entities_closestId || allNames) && i != ENTITIES_SELF_ID) {
-			Entities_List[i]->VTABLE->RenderName(Entities_List[i]);
+			Entities.List[i]->VTABLE->RenderName(Entities.List[i]);
 		}
 	}
 
@@ -302,8 +300,8 @@ void Entities_RenderHoveredNames(double delta) {
 static void Entities_ContextLost(void* obj) {
 	int i;
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		Entities_List[i]->VTABLE->ContextLost(Entities_List[i]);
+		if (!Entities.List[i]) continue;
+		Entities.List[i]->VTABLE->ContextLost(Entities.List[i]);
 	}
 	Gfx_DeleteTexture(&ShadowComponent_ShadowTex);
 }
@@ -311,24 +309,24 @@ static void Entities_ContextLost(void* obj) {
 static void Entities_ContextRecreated(void* obj) {
 	int i;
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		Entities_List[i]->VTABLE->ContextRecreated(Entities_List[i]);
+		if (!Entities.List[i]) continue;
+		Entities.List[i]->VTABLE->ContextRecreated(Entities.List[i]);
 	}
 }
 
 static void Entities_ChatFontChanged(void* obj) {
 	int i;
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		if (Entities_List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
-		Player_UpdateNameTex((struct Player*)Entities_List[i]);
+		if (!Entities.List[i]) continue;
+		if (Entities.List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
+		Player_UpdateNameTex((struct Player*)Entities.List[i]);
 	}
 }
 
 void Entities_Remove(EntityID id) {
 	Event_RaiseInt(&EntityEvents.Removed, id);
-	Entities_List[id]->VTABLE->Despawn(Entities_List[id]);
-	Entities_List[id] = NULL;
+	Entities.List[id]->VTABLE->Despawn(Entities.List[id]);
+	Entities.List[id] = NULL;
 }
 
 EntityID Entities_GetCloset(struct Entity* src) {
@@ -341,7 +339,7 @@ EntityID Entities_GetCloset(struct Entity* src) {
 	int i;
 
 	for (i = 0; i < ENTITIES_SELF_ID; i++) { /* because we don't want to pick against local player */
-		struct Entity* entity = Entities_List[i];
+		struct Entity* entity = Entities.List[i];
 		if (!entity) continue;
 
 		if (Intersection_RayIntersectsRotatedBox(eyePos, dir, entity, &t0, &t1) && t0 < closestDist) {
@@ -354,7 +352,7 @@ EntityID Entities_GetCloset(struct Entity* src) {
 
 void Entities_DrawShadows(void) {
 	int i;
-	if (Entities_ShadowMode == SHADOW_MODE_NONE) return;
+	if (Entities.ShadowsMode == SHADOW_MODE_NONE) return;
 	ShadowComponent_BoundShadowTex = false;
 
 	Gfx_SetAlphaArgBlend(true);
@@ -363,13 +361,13 @@ void Entities_DrawShadows(void) {
 	Gfx_SetTexturing(true);
 
 	Gfx_SetVertexFormat(VERTEX_FORMAT_P3FT2FC4B);
-	ShadowComponent_Draw(Entities_List[ENTITIES_SELF_ID]);
+	ShadowComponent_Draw(Entities.List[ENTITIES_SELF_ID]);
 
-	if (Entities_ShadowMode == SHADOW_MODE_CIRCLE_ALL) {	
+	if (Entities.ShadowsMode == SHADOW_MODE_CIRCLE_ALL) {	
 		for (i = 0; i < ENTITIES_SELF_ID; i++) {
-			if (!Entities_List[i]) continue;
-			if (Entities_List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
-			ShadowComponent_Draw(Entities_List[i]);
+			if (!Entities.List[i]) continue;
+			if (Entities.List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
+			ShadowComponent_Draw(Entities.List[i]);
 		}
 	}
 
@@ -383,62 +381,78 @@ void Entities_DrawShadows(void) {
 /*########################################################################################################################*
 *--------------------------------------------------------TabList----------------------------------------------------------*
 *#########################################################################################################################*/
-StringsBuffer TabList_Buffer;
-uint16_t TabList_PlayerNames[TABLIST_MAX_NAMES];
-uint16_t TabList_ListNames[TABLIST_MAX_NAMES];
-uint16_t TabList_GroupNames[TABLIST_MAX_NAMES];
-uint8_t  TabList_GroupRanks[TABLIST_MAX_NAMES];
+struct _TabListData TabList;
 
 bool TabList_Valid(EntityID id) {
-	return TabList_PlayerNames[id] || TabList_ListNames[id] || TabList_GroupNames[id];
+	return TabList.PlayerNames[id] || TabList.ListNames[id] || TabList.GroupNames[id];
 }
 
 static void TabList_RemoveAt(int index) {
 	int i;
-	StringsBuffer_Remove(&TabList_Buffer, index);
+	StringsBuffer_Remove(&TabList.Buffer, index);
 
 	for (i = 0; i < TABLIST_MAX_NAMES; i++) {
-		if (TabList_PlayerNames[i] == index) { TabList_PlayerNames[i] = 0; }
-		if (TabList_PlayerNames[i] > index)  { TabList_PlayerNames[i]--; }
+		if (TabList.PlayerNames[i] == index) { TabList.PlayerNames[i] = 0; }
+		if (TabList.PlayerNames[i] > index)  { TabList.PlayerNames[i]--; }
 
-		if (TabList_ListNames[i] == index) { TabList_ListNames[i] = 0; }
-		if (TabList_ListNames[i] > index)  { TabList_ListNames[i]--; }
+		if (TabList.ListNames[i] == index) { TabList.ListNames[i] = 0; }
+		if (TabList.ListNames[i] > index)  { TabList.ListNames[i]--; }
 
-		if (TabList_GroupNames[i] == index) { TabList_GroupNames[i] = 0; }
-		if (TabList_GroupNames[i] > index)  { TabList_GroupNames[i]--; }
+		if (TabList.GroupNames[i] == index) { TabList.GroupNames[i] = 0; }
+		if (TabList.GroupNames[i] > index)  { TabList.GroupNames[i]--; }
 	}
 }
 
-bool TabList_Remove(EntityID id) {
-	if (!TabList_Valid(id)) return false;
+static void TabList_Delete(EntityID id) {
+	if (!TabList_Valid(id)) return;
 
-	TabList_RemoveAt(TabList_PlayerNames[id]);
-	TabList_RemoveAt(TabList_ListNames[id]);
-	TabList_RemoveAt(TabList_GroupNames[id]);
-	TabList_GroupRanks[id] = 0;
-	return true;
+	TabList_RemoveAt(TabList.PlayerNames[id]);
+	TabList_RemoveAt(TabList.ListNames[id]);
+	TabList_RemoveAt(TabList.GroupNames[id]);
+	TabList.GroupRanks[id] = 0;
+}
+
+void TabList_Remove(EntityID id) {
+	TabList_Delete(id);
+	Event_RaiseInt(&TabListEvents.Removed, id);
 }
 
 void TabList_Set(EntityID id, const String* player, const String* list, const String* group, uint8_t rank) {
-	String colorlessName; char colorlessBuffer[STRING_SIZE];
+	String oldPlayer, oldList, oldGroup;
+	uint8_t oldRank;
+	struct Event_Int* events;
+	
+	if (TabList_Valid(id)) {
+		oldPlayer = TabList_UNSAFE_GetPlayer(id);
+		oldList   = TabList_UNSAFE_GetList(id);
+		oldGroup  = TabList_UNSAFE_GetGroup(id);
+		oldRank   = TabList.GroupRanks[id];
 
-	String_InitArray(colorlessName, colorlessBuffer);
-	String_AppendColorless(&colorlessName, player);
-	TabList_Remove(id);
+		/* Don't redraw the tab list if nothing changed. */
+		if (String_Equals(player, &oldPlayer)  && String_Equals(list, &oldList)
+			&& String_Equals(group, &oldGroup) && rank == oldRank) return;
 
-	TabList_PlayerNames[id] = TabList_Buffer.Count; StringsBuffer_Add(&TabList_Buffer, &colorlessName);
-	TabList_ListNames[id]   = TabList_Buffer.Count; StringsBuffer_Add(&TabList_Buffer, list);
-	TabList_GroupNames[id]  = TabList_Buffer.Count; StringsBuffer_Add(&TabList_Buffer, group);
-	TabList_GroupRanks[id]  = rank;
+		events = &TabListEvents.Changed;
+	} else {
+		events = &TabListEvents.Added;
+	}
+	TabList_Delete(id);
+
+	TabList.PlayerNames[id] = TabList.Buffer.Count; StringsBuffer_Add(&TabList.Buffer, player);
+	TabList.ListNames[id]   = TabList.Buffer.Count; StringsBuffer_Add(&TabList.Buffer, list);
+	TabList.GroupNames[id]  = TabList.Buffer.Count; StringsBuffer_Add(&TabList.Buffer, group);
+	TabList.GroupRanks[id]  = rank;
+
+	Event_RaiseInt(&TabListEvents.Added, id);
 }
 
-static void TabList_Free(void) { StringsBuffer_Clear(&TabList_Buffer); }
+static void TabList_Free(void) { StringsBuffer_Clear(&TabList.Buffer); }
 static void TabList_Reset(void) {
-	Mem_Set(TabList_PlayerNames, 0, sizeof(TabList_PlayerNames));
-	Mem_Set(TabList_ListNames,   0, sizeof(TabList_ListNames));
-	Mem_Set(TabList_GroupNames,  0, sizeof(TabList_GroupNames));
-	Mem_Set(TabList_GroupRanks,  0, sizeof(TabList_GroupRanks));
-	StringsBuffer_Clear(&TabList_Buffer);
+	Mem_Set(TabList.PlayerNames, 0, sizeof(TabList.PlayerNames));
+	Mem_Set(TabList.ListNames,   0, sizeof(TabList.ListNames));
+	Mem_Set(TabList.GroupNames,  0, sizeof(TabList.GroupNames));
+	Mem_Set(TabList.GroupRanks,  0, sizeof(TabList.GroupRanks));
+	StringsBuffer_Clear(&TabList.Buffer);
 }
 
 struct IGameComponent TabList_Component = {
@@ -531,7 +545,7 @@ static void Player_DrawName(struct Player* p) {
 	scale  = scale > 1.0f ? (1.0f/70.0f) : (scale/70.0f);
 	size.X = p->NameTex.Width * scale; size.Y = p->NameTex.Height * scale;
 
-	if (Entities_NameMode == NAME_MODE_ALL_UNSCALED && LocalPlayer_Instance.Hacks.CanSeeAllNames) {			
+	if (Entities.NamesMode == NAME_MODE_ALL_UNSCALED && LocalPlayer_Instance.Hacks.CanSeeAllNames) {			
 		Matrix_Mul(&mat, &Gfx_View, &Gfx_Projection); /* TODO: This mul is slow, avoid it */
 		/* Get W component of transformed position */
 		scale = pos.X * mat.Row0.W + pos.Y * mat.Row1.W + pos.Z * mat.Row2.W + mat.Row3.W;
@@ -551,10 +565,10 @@ static struct Player* Player_FirstOtherWithSameSkin(struct Player* player) {
 
 	skin = String_FromRawArray(entity->SkinNameRaw);
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i] || Entities_List[i] == entity) continue;
-		if (Entities_List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
+		if (!Entities.List[i] || Entities.List[i] == entity) continue;
+		if (Entities.List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
 
-		p     = (struct Player*)Entities_List[i];
+		p     = (struct Player*)Entities.List[i];
 		pSkin = String_FromRawArray(p->Base.SkinNameRaw);
 		if (String_Equals(&skin, &pSkin)) return p;
 	}
@@ -569,10 +583,10 @@ static struct Player* Player_FirstOtherWithSameSkinAndFetchedSkin(struct Player*
 
 	skin = String_FromRawArray(entity->SkinNameRaw);
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i] || Entities_List[i] == entity) continue;
-		if (Entities_List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
+		if (!Entities.List[i] || Entities.List[i] == entity) continue;
+		if (Entities.List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
 
-		p     = (struct Player*)Entities_List[i];
+		p     = (struct Player*)Entities.List[i];
 		pSkin = String_FromRawArray(p->Base.SkinNameRaw);
 		if (p->FetchedSkin && String_Equals(&skin, &pSkin)) return p;
 	}
@@ -614,10 +628,10 @@ static void Player_SetSkinAll(struct Player* player, bool reset) {
 
 	skin = String_FromRawArray(entity->SkinNameRaw);
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
-		if (Entities_List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
+		if (!Entities.List[i]) continue;
+		if (Entities.List[i]->EntityType != ENTITY_TYPE_PLAYER) continue;
 
-		p     = (struct Player*)Entities_List[i];
+		p     = (struct Player*)Entities.List[i];
 		pSkin = String_FromRawArray(p->Base.SkinNameRaw);
 		if (!String_Equals(&skin, &pSkin)) continue;
 
@@ -814,7 +828,7 @@ static void LocalPlayer_HandleInput(float* xMoving, float* zMoving) {
 		hacks->FlyingDown   = KeyBind_IsPressed(KEYBIND_FLY_DOWN);
 
 		if (hacks->WOMStyleHacks && hacks->Enabled && hacks->CanNoclip) {
-			if (hacks->Noclip) p->Base.Velocity = Vector3_Zero;
+			if (hacks->Noclip) p->Base.Velocity = Vector3_Zero();
 			hacks->Noclip = KeyBind_IsPressed(KEYBIND_NOCLIP);
 		}
 	}
@@ -844,7 +858,7 @@ static void LocalPlayer_Tick(struct Entity* e, double delta) {
 
 	/* Immediate stop in noclip mode */
 	if (!hacks->NoclipSlide && (hacks->Noclip && xMoving == 0 && zMoving == 0)) {
-		e->Velocity = Vector3_Zero;
+		e->Velocity = Vector3_Zero();
 	}
 
 	PhysicsComp_UpdateVelocityState(&p->Physics);
@@ -867,12 +881,12 @@ static void LocalPlayer_RenderModel(struct Entity* e, double deltaTime, float t)
 	AnimatedComp_GetCurrent(e, t);
 	TiltComp_GetCurrent(&p->Tilt, t);
 
-	if (!Camera_Active->IsThirdPerson) return;
+	if (!Camera.Active->IsThirdPerson) return;
 	Model_Render(e->Model, e);
 }
 
 static void LocalPlayer_RenderName(struct Entity* e) {
-	if (!Camera_Active->IsThirdPerson) return;
+	if (!Camera.Active->IsThirdPerson) return;
 	Player_DrawName((struct Player*)e);
 }
 
@@ -914,7 +928,7 @@ static void LocalPlayer_Init(void) {
 static void LocalPlayer_Reset(void) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
 	p->ReachDistance = 5.0f;
-	p->Base.Velocity = Vector3_Zero;
+	p->Base.Velocity = Vector3_Zero();
 	p->Physics.JumpVel       = 0.42f;
 	p->Physics.ServerJumpVel = 0.42f;
 	/* p->Base.Health = 20; TODO: survival mode stuff */
@@ -922,15 +936,15 @@ static void LocalPlayer_Reset(void) {
 
 static void LocalPlayer_OnNewMap(void) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
-	p->Base.Velocity = Vector3_Zero;
-	p->OldVelocity   = Vector3_Zero;
+	p->Base.Velocity = Vector3_Zero();
+	p->OldVelocity   = Vector3_Zero();
 
 	p->_WarnedRespawn = false;
 	p->_WarnedFly     = false;
 	p->_WarnedNoclip  = false;
 }
 
-static bool LocalPlayer_IsSolidCollide(BlockID b) { return Block_Collide[b] == COLLIDE_SOLID; }
+static bool LocalPlayer_IsSolidCollide(BlockID b) { return Blocks.Collide[b] == COLLIDE_SOLID; }
 static void LocalPlayer_DoRespawn(void) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
 	struct LocationUpdate update;
@@ -952,7 +966,7 @@ static void LocalPlayer_DoRespawn(void) {
 
 			if (spawnY == RESPAWN_NOT_FOUND) {
 				block   = World_GetPhysicsBlock(pos.X, y, pos.Z);
-				height  = Block_Collide[block] == COLLIDE_SOLID ? Block_MaxBB[block].Y : 0.0f;
+				height  = Blocks.Collide[block] == COLLIDE_SOLID ? Blocks.MaxBB[block].Y : 0.0f;
 				spawn.Y = y + height + ENTITY_ADJUSTMENT;
 				break;
 			}
@@ -963,7 +977,7 @@ static void LocalPlayer_DoRespawn(void) {
 	spawn.Y += 2.0f/16.0f;
 	LocationUpdate_MakePosAndOri(&update, spawn, p->SpawnRotY, p->SpawnHeadX, false);
 	p->Base.VTABLE->SetLocation(&p->Base, &update, false);
-	p->Base.Velocity = Vector3_Zero;
+	p->Base.Velocity = Vector3_Zero();
 
 	/* Update onGround, otherwise if 'respawn' then 'space' is pressed, you still jump into the air if onGround was true before */
 	Entity_GetBounds(&p->Base, &bb);
@@ -1084,7 +1098,7 @@ static void NetPlayer_RenderName(struct Entity* e) {
 	if (!p->ShouldRender) return;
 
 	distance  = Model_RenderDistance(e);
-	threshold = Entities_NameMode == NAME_MODE_ALL_UNSCALED ? 8192 * 8192 : 32 * 32;
+	threshold = Entities.NamesMode == NAME_MODE_ALL_UNSCALED ? 8192 * 8192 : 32 * 32;
 	if (distance <= (float)threshold) Player_DrawName((struct Player*)p);
 }
 
@@ -1109,22 +1123,22 @@ static void Entities_Init(void) {
 	Event_RegisterVoid(&GfxEvents.ContextRecreated, NULL, Entities_ContextRecreated);
 	Event_RegisterVoid(&ChatEvents.FontChanged,     NULL, Entities_ChatFontChanged);
 
-	Entities_NameMode = Options_GetEnum(OPT_NAMES_MODE, NAME_MODE_HOVERED,
+	Entities.NamesMode = Options_GetEnum(OPT_NAMES_MODE, NAME_MODE_HOVERED,
 		NameMode_Names, Array_Elems(NameMode_Names));
-	if (Game_ClassicMode) Entities_NameMode = NAME_MODE_HOVERED;
+	if (Game_ClassicMode) Entities.NamesMode = NAME_MODE_HOVERED;
 
-	Entities_ShadowMode = Options_GetEnum(OPT_ENTITY_SHADOW, SHADOW_MODE_NONE,
+	Entities.ShadowsMode = Options_GetEnum(OPT_ENTITY_SHADOW, SHADOW_MODE_NONE,
 		ShadowMode_Names, Array_Elems(ShadowMode_Names));
-	if (Game_ClassicMode) Entities_ShadowMode = SHADOW_MODE_NONE;
+	if (Game_ClassicMode) Entities.ShadowsMode = SHADOW_MODE_NONE;
 
-	Entities_List[ENTITIES_SELF_ID] = &LocalPlayer_Instance.Base;
+	Entities.List[ENTITIES_SELF_ID] = &LocalPlayer_Instance.Base;
 	LocalPlayer_Init();
 }
 
 static void Entities_Free(void) {
 	int i;
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
-		if (!Entities_List[i]) continue;
+		if (!Entities.List[i]) continue;
 		Entities_Remove((EntityID)i);
 	}
 

@@ -9,7 +9,7 @@
 #include "Funcs.h"
 #include "Model.h"
 #include "MapGenerator.h"
-#include "ServerConnection.h"
+#include "Server.h"
 #include "Chat.h"
 #include "ExtMath.h"
 #include "Window.h"
@@ -232,7 +232,7 @@ static void Menu_RenderBounds(void) {
 	Then using wolfram alpha to solve the glblendfunc equation */
 	PackedCol topCol    = PACKEDCOL_CONST(24, 24, 24, 105);
 	PackedCol bottomCol = PACKEDCOL_CONST(51, 51, 98, 162);
-	Gfx_Draw2DGradient(0, 0, Game_Width, Game_Height, topCol, bottomCol);
+	Gfx_Draw2DGradient(0, 0, Game.Width, Game.Height, topCol, bottomCol);
 }
 
 static int Menu_DoMouseDown(void* screen, int x, int y, MouseButton btn) {
@@ -647,7 +647,7 @@ static void PauseScreen_ContextRecreated(void* screen) {
 		Menu_Back(s,   7, &s->Buttons[7], "Back to game",&s->TitleFont, PauseScreen_Game);
 	}
 
-	if (!ServerConnection_IsSinglePlayer) {
+	if (!Server.IsSinglePlayer) {
 		s->Buttons[1].Disabled = true;
 		s->Buttons[2].Disabled = true;
 	}
@@ -895,7 +895,7 @@ static void EditHotkeyScreen_Render(void* screen, double delta) {
 	int x, y;
 	MenuScreen_Render(screen, delta);
 
-	x = Game_Width / 2; y = Game_Height / 2;	
+	x = Game.Width / 2; y = Game.Height / 2;	
 	Gfx_Draw2DFlat(x - 250, y - 65, 500, 2, grey);
 	Gfx_Draw2DFlat(x - 250, y + 45, 500, 2, grey);
 }
@@ -1302,7 +1302,7 @@ static void SaveLevelScreen_Render(void* screen, double delta) {
 	int x, y;
 	MenuScreen_Render(screen, delta);
 
-	x = Game_Width / 2; y = Game_Height / 2;
+	x = Game.Width / 2; y = Game.Height / 2;
 	Gfx_Draw2DFlat(x - 250, y + 90, 500, 2, grey);
 }
 
@@ -1901,8 +1901,8 @@ static void MenuOptionsScreen_FreeExtHelp(struct MenuOptionsScreen* s) {
 }
 
 static void MenuOptionsScreen_RepositionExtHelp(struct MenuOptionsScreen* s) {
-	s->ExtHelp.XOffset = Game_Width  / 2 - s->ExtHelp.Width / 2;
-	s->ExtHelp.YOffset = Game_Height / 2 + 100;
+	s->ExtHelp.XOffset = Game.Width  / 2 - s->ExtHelp.Width / 2;
+	s->ExtHelp.YOffset = Game.Height / 2 + 100;
 	Widget_Reposition(&s->ExtHelp);
 }
 
@@ -2174,8 +2174,8 @@ static void ClassicOptionsScreen_SetMusic(const String* v) {
 	Options_SetInt(OPT_MUSIC_VOLUME, Audio_MusicVolume);
 }
 
-static void ClassicOptionsScreen_GetInvert(String* v) { Menu_GetBool(v, Camera_Invert); }
-static void ClassicOptionsScreen_SetInvert(const String* v) { Camera_Invert = Menu_SetBool(v, OPT_INVERT_MOUSE); }
+static void ClassicOptionsScreen_GetInvert(String* v) { Menu_GetBool(v, Camera.Invert); }
+static void ClassicOptionsScreen_SetInvert(const String* v) { Camera.Invert = Menu_SetBool(v, OPT_INVERT_MOUSE); }
 
 static void ClassicOptionsScreen_GetViewDist(String* v) {
 	if (Game_ViewDistance >= 512) {
@@ -2247,8 +2247,8 @@ static void ClassicOptionsScreen_ContextRecreated(void* screen) {
 	Menu_Back(s,  10, &s->Buttons[10], "Done",     &s->TitleFont, Menu_SwitchPause);
 
 	/* Disable certain options */
-	if (!ServerConnection_IsSinglePlayer) Menu_Remove(s, 3);
-	if (!Game_ClassicHacks)               Menu_Remove(s, 8);
+	if (!Server.IsSinglePlayer) Menu_Remove(s, 3);
+	if (!Game_ClassicHacks)     Menu_Remove(s, 8);
 }
 
 struct Screen* ClassicOptionsScreen_MakeInstance(void) {
@@ -2384,15 +2384,15 @@ static void GraphicsOptionsScreen_SetSmooth(const String* v) {
 	MapRenderer_Refresh();
 }
 
-static void GraphicsOptionsScreen_GetNames(String* v) { String_AppendConst(v, NameMode_Names[Entities_NameMode]); }
+static void GraphicsOptionsScreen_GetNames(String* v) { String_AppendConst(v, NameMode_Names[Entities.NamesMode]); }
 static void GraphicsOptionsScreen_SetNames(const String* v) {
-	Entities_NameMode = Utils_ParseEnum(v, 0, NameMode_Names, NAME_MODE_COUNT);
+	Entities.NamesMode = Utils_ParseEnum(v, 0, NameMode_Names, NAME_MODE_COUNT);
 	Options_Set(OPT_NAMES_MODE, v);
 }
 
-static void GraphicsOptionsScreen_GetShadows(String* v) { String_AppendConst(v, ShadowMode_Names[Entities_ShadowMode]); }
+static void GraphicsOptionsScreen_GetShadows(String* v) { String_AppendConst(v, ShadowMode_Names[Entities.ShadowsMode]); }
 static void GraphicsOptionsScreen_SetShadows(const String* v) {
-	Entities_ShadowMode = Utils_ParseEnum(v, 0, ShadowMode_Names, SHADOW_MODE_COUNT);
+	Entities.ShadowsMode = Utils_ParseEnum(v, 0, ShadowMode_Names, SHADOW_MODE_COUNT);
 	Options_Set(OPT_ENTITY_SHADOW, v);
 }
 
@@ -2582,9 +2582,9 @@ static void HacksSettingsScreen_SetSpeed(const String* v) {
 	Options_Set(OPT_SPEED_FACTOR, v);
 }
 
-static void HacksSettingsScreen_GetClipping(String* v) { Menu_GetBool(v, Camera_Clipping); }
+static void HacksSettingsScreen_GetClipping(String* v) { Menu_GetBool(v, Camera.Clipping); }
 static void HacksSettingsScreen_SetClipping(const String* v) {
-	Camera_Clipping = Menu_SetBool(v, OPT_CAMERA_CLIPPING);
+	Camera.Clipping = Menu_SetBool(v, OPT_CAMERA_CLIPPING);
 }
 
 static void HacksSettingsScreen_GetJump(String* v) { String_AppendFloat(v, LocalPlayer_JumpHeight(), 3); }
@@ -2751,12 +2751,12 @@ static void MiscOptionsScreen_SetPhysics(const String* v) {
 static void MiscOptionsScreen_GetAutoClose(String* v) { Menu_GetBool(v, Options_GetBool(OPT_AUTO_CLOSE_LAUNCHER, false)); }
 static void MiscOptionsScreen_SetAutoClose(const String* v) { Menu_SetBool(v, OPT_AUTO_CLOSE_LAUNCHER); }
 
-static void MiscOptionsScreen_GetInvert(String* v) { Menu_GetBool(v, Camera_Invert); }
-static void MiscOptionsScreen_SetInvert(const String* v) { Camera_Invert = Menu_SetBool(v, OPT_INVERT_MOUSE); }
+static void MiscOptionsScreen_GetInvert(String* v) { Menu_GetBool(v, Camera.Invert); }
+static void MiscOptionsScreen_SetInvert(const String* v) { Camera.Invert = Menu_SetBool(v, OPT_INVERT_MOUSE); }
 
-static void MiscOptionsScreen_GetSensitivity(String* v) { String_AppendInt(v, Camera_Sensitivity); }
+static void MiscOptionsScreen_GetSensitivity(String* v) { String_AppendInt(v, Camera.Sensitivity); }
 static void MiscOptionsScreen_SetSensitivity(const String* v) {
-	Camera_Sensitivity = Menu_Int(v);
+	Camera.Sensitivity = Menu_Int(v);
 	Options_Set(OPT_SENSITIVITY, v);
 }
 
@@ -2786,8 +2786,8 @@ static void MiscOptionsScreen_ContextRecreated(void* screen) {
 	widgets[9] = NULL; widgets[10] = NULL; widgets[11] = NULL;
 
 	/* Disable certain options */
-	if (!ServerConnection_IsSinglePlayer) Menu_Remove(s, 0);
-	if (!ServerConnection_IsSinglePlayer) Menu_Remove(s, 4);
+	if (!Server.IsSinglePlayer) Menu_Remove(s, 0);
+	if (!Server.IsSinglePlayer) Menu_Remove(s, 4);
 }
 
 struct Screen* MiscOptionsScreen_MakeInstance(void) {
@@ -2813,8 +2813,8 @@ struct Screen* MiscOptionsScreen_MakeInstance(void) {
 /*########################################################################################################################*
 *-----------------------------------------------------NostalgiaScreen-----------------------------------------------------*
 *#########################################################################################################################*/
-static void NostalgiaScreen_GetHand(String* v) { Menu_GetBool(v, Game_ClassicArmModel); }
-static void NostalgiaScreen_SetHand(const String* v) { Game_ClassicArmModel = Menu_SetBool(v, OPT_CLASSIC_ARM_MODEL); }
+static void NostalgiaScreen_GetHand(String* v) { Menu_GetBool(v, Models.ClassicArms); }
+static void NostalgiaScreen_SetHand(const String* v) { Models.ClassicArms = Menu_SetBool(v, OPT_CLASSIC_ARM_MODEL); }
 
 static void NostalgiaScreen_GetAnim(String* v) { Menu_GetBool(v, !Game_SimpleArmsAnim); }
 static void NostalgiaScreen_SetAnim(const String* v) {
@@ -2942,15 +2942,15 @@ static void TexIdsOverlay_ContextRecreated(void* screen) {
 	struct TexIdsOverlay* s = screen;
 	int size;
 
-	size = Game_Height / ATLAS2D_TILES_PER_ROW;
+	size = Game.Height / ATLAS2D_TILES_PER_ROW;
 	size = (size / 8) * 8;
 	Math_Clamp(size, 8, 40);
 
 	s->DynamicVb = Gfx_CreateDynamicVb(VERTEX_FORMAT_P3FT2FC4B, TEXID_OVERLAY_VERTICES_COUNT);
 	TextAtlas_Make(&s->IdAtlas, &chars, &s->TextFont, &prefix);
 
-	s->XOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * Atlas_RowsCount,     Game_Width);
-	s->YOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * ATLAS2D_TILES_PER_ROW, Game_Height);
+	s->XOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * Atlas_RowsCount,       Game.Width);
+	s->YOffset  = Gui_CalcPos(ANCHOR_CENTRE, 0, size * ATLAS2D_TILES_PER_ROW, Game.Height);
 	s->TileSize = size;
 	
 	Menu_Label(s, 0, &s->Title, &title, &s->TitleFont,
@@ -3219,7 +3219,7 @@ static void TexPackOverlay_YesClick(void* screen, void* widget) {
 	Gui_FreeOverlay(s);
 	url = String_UNSAFE_SubstringAt(&s->Identifier, 3);
 
-	ServerConnection_DownloadTexturePack(&url);
+	Server_DownloadTexturePack(&url);
 	isAlways = WarningOverlay_IsAlways(s, widget);
 	if (isAlways && !TextureCache_HasAccepted(&url)) {
 		TextureCache_Accept(&url);

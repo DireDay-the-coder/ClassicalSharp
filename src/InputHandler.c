@@ -1,6 +1,6 @@
 #include "InputHandler.h"
 #include "Utils.h"
-#include "ServerConnection.h"
+#include "Server.h"
 #include "HeldBlockRenderer.h"
 #include "Game.h"
 #include "Platform.h"
@@ -44,7 +44,7 @@ static void InputHandler_ButtonStateUpdate(MouseButton button, bool pressed) {
 	}
 
 	input_buttonsDown[button] = pressed;
-	ServerConnection.SendPlayerClick(button, pressed, 
+	Server.SendPlayerClick(button, pressed, 
 									(EntityID)input_pickingId, &Game_SelectedPos);	
 }
 
@@ -63,7 +63,7 @@ void InputHandler_ScreenChanged(struct Screen* oldScreen, struct Screen* newScre
 		input_lastClick = DateTime_CurrentUTC_MS();
 	}
 
-	if (ServerConnection_SupportsPlayerClick) {
+	if (Server.SupportsPlayerClick) {
 		input_pickingId = -1;
 		InputHandler_ButtonStateChanged(MOUSE_LEFT,   false);
 		InputHandler_ButtonStateChanged(MOUSE_RIGHT,  false);
@@ -146,7 +146,7 @@ static bool InputHandler_HandleNonClassicKey(Key key) {
 	if (key == KeyBind_Get(KEYBIND_HIDE_GUI)) {
 		Game_HideGui = !Game_HideGui;
 	} else if (key == KeyBind_Get(KEYBIND_SMOOTH_CAMERA)) {
-		InputHandler_Toggle(key, &Camera_Smooth,
+		InputHandler_Toggle(key, &Camera.Smooth,
 			"  &eSmooth camera is &aenabled",
 			"  &eSmooth camera is &cdisabled");
 	} else if (key == KeyBind_Get(KEYBIND_AXIS_LINES)) {
@@ -163,7 +163,7 @@ static bool InputHandler_HandleNonClassicKey(Key key) {
 		if (Inventory_CheckChangeSelected() && Inventory_SelectedBlock != BLOCK_AIR) {
 			/* Don't assign SelectedIndex directly, because we don't want held block
 			switching positions if they already have air in their inventory hotbar. */
-			Inventory_Set(Inventory_SelectedIndex, BLOCK_AIR);
+			Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
 			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 		}
 	} else if (key == KeyBind_Get(KEYBIND_IDOVERLAY)) {
@@ -215,7 +215,7 @@ static bool InputHandler_HandleCoreKey(Key key) {
 	return true;
 }
 
-static bool InputHandler_TouchesSolid(BlockID b) { return Block_Collide[b] == COLLIDE_SOLID; }
+static bool InputHandler_TouchesSolid(BlockID b) { return Blocks.Collide[b] == COLLIDE_SOLID; }
 static bool InputHandler_PushbackPlace(struct AABB* blockBB) {
 	struct Entity* p        = &LocalPlayer_Instance.Base;
 	struct HacksComp* hacks = &LocalPlayer_Instance.Hacks;
@@ -265,11 +265,11 @@ static bool InputHandler_IntersectsOthers(Vector3 pos, BlockID block) {
 	struct Entity* entity;
 	int id;
 
-	Vector3_Add(&blockBB.Min, &pos, &Block_MinBB[block]);
-	Vector3_Add(&blockBB.Max, &pos, &Block_MaxBB[block]);
+	Vector3_Add(&blockBB.Min, &pos, &Blocks.MinBB[block]);
+	Vector3_Add(&blockBB.Max, &pos, &Blocks.MaxBB[block]);
 	
 	for (id = 0; id < ENTITIES_SELF_ID; id++) {
-		entity = Entities_List[id];
+		entity = Entities.List[id];
 		if (!entity) continue;
 
 		Entity_GetBounds(entity, &entityBB);
@@ -288,14 +288,14 @@ static bool InputHandler_CheckIsFree(BlockID block) {
 	struct LocationUpdate update;
 
 	/* Non solid blocks (e.g. water/flowers) can always be placed on players */
-	if (Block_Collide[block] != COLLIDE_SOLID) return true;
+	if (Blocks.Collide[block] != COLLIDE_SOLID) return true;
 
 	Vector3I_ToVector3(&pos, &Game_SelectedPos.TranslatedPos);
 	if (InputHandler_IntersectsOthers(pos, block)) return false;
 	
 	nextPos = LocalPlayer_Instance.Interp.Next.Pos;
-	Vector3_Add(&blockBB.Min, &pos, &Block_MinBB[block]);
-	Vector3_Add(&blockBB.Max, &pos, &Block_MaxBB[block]);
+	Vector3_Add(&blockBB.Min, &pos, &Blocks.MinBB[block]);
+	Vector3_Add(&blockBB.Max, &pos, &Blocks.MaxBB[block]);
 
 	/* NOTE: Need to also test against next position here, otherwise player can 
 	fall through the block at feet as collision is performed against nextPos */
@@ -311,7 +311,7 @@ static bool InputHandler_CheckIsFree(BlockID block) {
 	if (AABB_Intersects(&playerBB, &blockBB)) return false;
 
 	/* Push player upwards when they are jumping and trying to place a block underneath them */
-	nextPos.Y = pos.Y + Block_MaxBB[block].Y + ENTITY_ADJUSTMENT;
+	nextPos.Y = pos.Y + Blocks.MaxBB[block].Y + ENTITY_ADJUSTMENT;
 	LocationUpdate_MakePos(&update, nextPos, false);
 	p->VTABLE->SetLocation(p, &update, false);
 	return true;
@@ -328,14 +328,14 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 	if (cooldown && delta < 250) return; /* 4 times per second */
 	input_lastClick = now;
 
-	if (ServerConnection_SupportsPlayerClick && !Gui_GetActiveScreen()->HandlesAllInput) {
+	if (Server.SupportsPlayerClick && !Gui_GetActiveScreen()->HandlesAllInput) {
 		input_pickingId = -1;
 		InputHandler_ButtonStateChanged(MOUSE_LEFT,   left);
 		InputHandler_ButtonStateChanged(MOUSE_RIGHT,  right);
 		InputHandler_ButtonStateChanged(MOUSE_MIDDLE, middle);
 	}
 
-	if (Gui_GetActiveScreen()->HandlesAllInput || !Inventory_CanUse) return;
+	if (Gui_GetActiveScreen()->HandlesAllInput || !Inventory.CanUse) return;
 
 	if (left) {
 		/* always play delete animations, even if we aren't picking a block */
@@ -345,7 +345,7 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		if (!Game_SelectedPos.Valid || !World_IsValidPos_3I(p)) return;
 
 		old = World_GetBlock(p.X, p.Y, p.Z);
-		if (Block_Draw[old] == DRAW_GAS || !Block_CanDelete[old]) return;
+		if (Blocks.Draw[old] == DRAW_GAS || !Blocks.CanDelete[old]) return;
 
 		Game_ChangeBlock(p.X, p.Y, p.Z, BLOCK_AIR);
 		Event_RaiseBlock(&UserEvents.BlockChanged, p, old, BLOCK_AIR);
@@ -357,9 +357,9 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		block = Inventory_SelectedBlock;
 		if (AutoRotate_Enabled) block = AutoRotate_RotateBlock(block);
 
-		if (Game_CanPick(old) || !Block_CanPlace[block]) return;
+		if (Game_CanPick(old) || !Blocks.CanPlace[block]) return;
 		/* air-ish blocks can only replace over other air-ish blocks */
-		if (Block_Draw[block] == DRAW_GAS && Block_Draw[old] != DRAW_GAS) return;
+		if (Blocks.Draw[block] == DRAW_GAS && Blocks.Draw[old] != DRAW_GAS) return;
 		if (!InputHandler_CheckIsFree(block)) return;
 
 		Game_ChangeBlock(p.X, p.Y, p.Z, block);
@@ -369,8 +369,8 @@ void InputHandler_PickBlocks(bool cooldown, bool left, bool middle, bool right) 
 		if (!World_IsValidPos_3I(p)) return;
 
 		cur = World_GetBlock(p.X, p.Y, p.Z);
-		if (Block_Draw[cur] == DRAW_GAS) return;
-		if (!(Block_CanPlace[cur] || Block_CanDelete[cur])) return;
+		if (Blocks.Draw[cur] == DRAW_GAS) return;
+		if (!(Blocks.CanPlace[cur] || Blocks.CanDelete[cur])) return;
 		if (!Inventory_CheckChangeSelected() || Inventory_SelectedBlock == cur) return;
 
 		/* Is the currently selected block an empty slot? */
@@ -403,8 +403,8 @@ static void InputHandler_MouseWheel(void* obj, float delta) {
 	if (Elem_HandlesMouseScroll(active, delta)) return;
 
 	hotbar = Key_IsAltPressed() || Key_IsControlPressed() || Key_IsShiftPressed();
-	if (!hotbar && Camera_Active->Zoom(delta)) return;
-	if (InputHandler_DoFovZoom(delta) || !Inventory_CanChangeSelected) return;
+	if (!hotbar && Camera.Active->Zoom(delta)) return;
+	if (InputHandler_DoFovZoom(delta) || !Inventory.CanChangeSelected) return;
 
 	widget = HUDScreen_GetHotbar(Gui_HUD);
 	Elem_HandlesMouseScroll(widget, delta);
@@ -430,7 +430,7 @@ static void InputHandler_MouseDown(void* obj, int button) {
 static void InputHandler_MouseUp(void* obj, int button) {
 	struct Screen* active = Gui_GetActiveScreen();
 	if (!Elem_HandlesMouseUp(active, Mouse_X, Mouse_Y, button)) {
-		if (ServerConnection_SupportsPlayerClick && button <= MOUSE_MIDDLE) {
+		if (Server.SupportsPlayerClick && button <= MOUSE_MIDDLE) {
 			input_pickingId = -1;
 			InputHandler_ButtonStateChanged(button, false);
 		}

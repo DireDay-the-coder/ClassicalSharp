@@ -10,12 +10,15 @@
 struct DisplayDevice;
 struct Stream;
 
-/* Width and height of the window. (1 at minimum) */
-extern int Game_Width, Game_Height;
-/* Total time (in seconds) the game has been running for. */
-extern double Game_Time;
-/* Number of chunks updated within last second. Resets to 0 after every second. */
-extern int Game_ChunkUpdates;
+CC_VAR extern struct _GameData {
+	/* Width and height of the window. (1 at minimum) */
+	int Width, Height;
+	/* Total time (in seconds) the game has been running for. */
+	double Time;
+	/* Number of chunks updated within last second. Resets to 0 after every second. */
+	int ChunkUpdates;
+} Game;
+
 extern struct PickedPos Game_SelectedPos;
 extern bool Game_UseCPEBlocks;
 
@@ -34,7 +37,6 @@ extern float game_limitMs;
 extern int  Game_FpsLimit;
 extern bool Game_ShowAxisLines;
 extern bool Game_SimpleArmsAnim;
-extern bool Game_ClassicArmModel;
 extern int  Game_Vertices;
 
 extern bool Game_ClassicMode;
@@ -79,7 +81,8 @@ bool Game_CanPick(BlockID block);
 bool Game_UpdateTexture(GfxResourceID* texId, struct Stream* src, const String* file, uint8_t* skinType);
 /* Checks that the given bitmap can be loaded into a native gfx texture. */
 /* (must be power of two size and be <= Gfx_MaxTexWidth/Gfx_MaxHeight) */
-bool Game_ValidateBitmap(const String* file, Bitmap* bmp);/* Calculates Game_Width and Game_Height. */
+bool Game_ValidateBitmap(const String* file, Bitmap* bmp);
+/* Updates Game_Width and Game_Height. */
 void Game_UpdateClientSize(void);
 /* Sets the strategy/method used to limit frames per second. */
 void Game_SetFpsLimit(enum FpsLimit method);

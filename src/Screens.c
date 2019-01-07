@@ -10,7 +10,7 @@
 #include "TexturePack.h"
 #include "Model.h"
 #include "MapGenerator.h"
-#include "ServerConnection.h"
+#include "Server.h"
 #include "Chat.h"
 #include "ExtMath.h"
 #include "Window.h"
@@ -268,10 +268,10 @@ static void StatusScreen_MakeText(struct StatusScreen* s, String* status) {
 	String_Format1(status, "%i fps, ", &s->FPS);
 
 	if (Game_ClassicMode) {
-		String_Format1(status, "%i chunk updates", &Game_ChunkUpdates);
+		String_Format1(status, "%i chunk updates", &Game.ChunkUpdates);
 	} else {
-		if (Game_ChunkUpdates) {
-			String_Format1(status, "%i chunks/s, ", &Game_ChunkUpdates);
+		if (Game.ChunkUpdates) {
+			String_Format1(status, "%i chunks/s, ", &Game.ChunkUpdates);
 		}
 
 		indices = ICOUNT(Game_Vertices);
@@ -312,7 +312,7 @@ static void StatusScreen_DrawPosition(struct StatusScreen* s) {
 	Gfx_BindTexture(atlas->Tex.ID);
 	/* TODO: Do we need to use a separate VB here? */
 	count = (int)(ptr - vertices);
-	Gfx_UpdateDynamicVb_IndexedTris(Model_Vb, vertices, count);
+	Gfx_UpdateDynamicVb_IndexedTris(Models.Vb, vertices, count);
 }
 
 static bool StatusScreen_HacksChanged(struct StatusScreen* s) {
@@ -356,7 +356,7 @@ static void StatusScreen_Update(struct StatusScreen* s, double delta) {
 	TextWidget_Set(&s->Line1, &status, &s->Font);
 	s->Accumulator = 0.0;
 	s->Frames = 0;
-	Game_ChunkUpdates = 0;
+	Game.ChunkUpdates = 0;
 }
 
 static void StatusScreen_OnResize(void* screen) { }
@@ -526,7 +526,7 @@ static void LoadingScreen_UpdateBackgroundVB(VertexP3fT2fC4b* vertices, int coun
 
 	Gfx_SetVertexFormat(VERTEX_FORMAT_P3FT2FC4B);
 	/* TODO: Do we need to use a separate VB here? */
-	Gfx_UpdateDynamicVb_IndexedTris(Model_Vb, vertices, count);
+	Gfx_UpdateDynamicVb_IndexedTris(Models.Vb, vertices, count);
 }
 
 #define LOADING_TILE_SIZE 64
@@ -542,11 +542,11 @@ static void LoadingScreen_DrawBackground(void) {
 
 	loc = Block_GetTex(BLOCK_DIRT, FACE_YMAX);
 	tex.ID    = GFX_NULL;
-	Tex_SetRect(tex, 0,0, Game_Width,LOADING_TILE_SIZE);
+	Tex_SetRect(tex, 0,0, Game.Width,LOADING_TILE_SIZE);
 	tex.uv    = Atlas1D_TexRec(loc, 1, &atlasIndex);
-	tex.uv.U2 = (float)Game_Width / LOADING_TILE_SIZE;
+	tex.uv.U2 = (float)Game.Width / LOADING_TILE_SIZE;
 	
-	for (y = 0; y < Game_Height; y += LOADING_TILE_SIZE) {
+	for (y = 0; y < Game.Height; y += LOADING_TILE_SIZE) {
 		tex.Y = y;
 		Gfx_Make2DQuad(&tex, col, &ptr);
 		count += 4;
@@ -586,8 +586,8 @@ static void LoadingScreen_Render(void* screen, double delta) {
 	Elem_Render(&s->Message, delta);
 	Gfx_SetTexturing(false);
 
-	x = Gui_CalcPos(ANCHOR_CENTRE,  0, PROG_BAR_WIDTH,  Game_Width);
-	y = Gui_CalcPos(ANCHOR_CENTRE, 34, PROG_BAR_HEIGHT, Game_Height);
+	x = Gui_CalcPos(ANCHOR_CENTRE,  0, PROG_BAR_WIDTH,  Game.Width);
+	y = Gui_CalcPos(ANCHOR_CENTRE, 34, PROG_BAR_HEIGHT, Game.Height);
 	progWidth = (int)(PROG_BAR_WIDTH * s->Progress);
 
 	Gfx_Draw2DFlat(x, y, PROG_BAR_WIDTH, PROG_BAR_HEIGHT, backCol);
@@ -664,7 +664,7 @@ static void GeneratingScreen_EndGeneration(void) {
 	LocationUpdate_MakePosAndOri(&update, p->Spawn, 0.0f, 0.0f, false);
 	p->Base.VTABLE->SetLocation(&p->Base, &update, false);
 
-	Camera_CurrentPos = Camera_Active->GetPosition(0.0f);
+	Camera.CurrentPos = Camera.Active->GetPosition(0.0f);
 	Event_RaiseVoid(&WorldEvents.MapLoaded);
 }
 
@@ -713,7 +713,7 @@ static int ChatScreen_InputUsedHeight(struct ChatScreen* s) {
 	if (s->AltText.Height == 0) {
 		return s->Input.Base.Height + 20;
 	} else {
-		return (Game_Height - s->AltText.Y) + 5;
+		return (Game.Height - s->AltText.Y) + 5;
 	}
 }
 
@@ -722,7 +722,7 @@ static void ChatScreen_UpdateAltTextY(struct ChatScreen* s) {
 	int height = max(input->Height + input->YOffset, ChatScreen_BottomOffset());
 	height += input->YOffset;
 
-	s->AltText.Tex.Y = Game_Height - (height + s->AltText.Tex.Height);
+	s->AltText.Tex.Y = Game.Height - (height + s->AltText.Tex.Height);
 	s->AltText.Y     = s->AltText.Tex.Y;
 }
 
@@ -783,7 +783,7 @@ static void ChatScreen_ConstructWidgets(struct ChatScreen* s) {
 	Elem_Init(&s->ClientStatus);
 
 	TextWidget_Create(&s->Announcement, &String_Empty, &s->AnnouncementFont);
-	Widget_SetLocation(&s->Announcement, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, -Game_Height / 4);
+	Widget_SetLocation(&s->Announcement, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, -Game.Height / 4);
 }
 
 static void ChatScreen_SetInitialMessages(struct ChatScreen* s) {
@@ -957,7 +957,7 @@ static bool ChatScreen_KeyUp(void* screen, Key key) {
 	struct ChatScreen* s = screen;
 	if (!s->HandlesAllInput) return false;
 
-	if (ServerConnection_SupportsFullCP437 && key == KeyBind_Get(KEYBIND_EXT_INPUT)) {
+	if (Server.SupportsFullCP437 && key == KeyBind_Get(KEYBIND_EXT_INPUT)) {
 		if (!Window_Focused) return true;
 		SpecialInputWidget_SetActive(&s->AltText, !s->AltText.Active);
 	}
@@ -1200,10 +1200,10 @@ static void HUDScreen_DrawCrosshairs(void) {
 	int extent;
 	if (!Gui_IconsTex) return;
 
-	extent = (int)(CH_EXTENT * Game_Scale(Game_Height / 480.0f));
+	extent = (int)(CH_EXTENT * Game_Scale(Game.Height / 480.0f));
 	tex.ID = Gui_IconsTex;
-	tex.X  = (Game_Width  / 2) - extent;
-	tex.Y  = (Game_Height / 2) - extent;
+	tex.X  = (Game.Width  / 2) - extent;
+	tex.Y  = (Game.Height / 2) - extent;
 
 	tex.Width  = extent * 2;
 	tex.Height = extent * 2;
@@ -1227,7 +1227,7 @@ static void HUDScreen_ContextRecreated(void* screen) {
 	Elem_Init(&s->Hotbar);
 
 	if (!s->WasShowingList) return;
-	extended = ServerConnection_SupportsExtPlayerList && !Gui_ClassicTabList;
+	extended = Server.SupportsExtPlayerList && !Gui_ClassicTabList;
 	PlayerListWidget_Create(&s->PlayerList, &s->PlayerFont, !extended);
 	s->ShowingList = true;
 
@@ -1254,7 +1254,7 @@ static bool HUDScreen_KeyDown(void* screen, Key key, bool was) {
 	bool handles = playerListKey != KEY_TAB || !Gui_TabAutocomplete || !s->Chat->HandlesAllInput;
 
 	if (key == playerListKey && handles) {
-		if (!s->ShowingList && !ServerConnection_IsSinglePlayer) {
+		if (!s->ShowingList && !Server.IsSinglePlayer) {
 			s->WasShowingList = true;
 			HUDScreen_ContextRecreated(s);
 		}
@@ -1467,7 +1467,7 @@ static void DisconnectScreen_Render(void* screen, double delta) {
 	PackedCol bottom = PACKEDCOL_CONST(80, 16, 16, 255);
 
 	if (s->CanReconnect) { DisconnectScreen_UpdateDelayLeft(s, delta); }
-	Gfx_Draw2DGradient(0, 0, Game_Width, Game_Height, top, bottom);
+	Gfx_Draw2DGradient(0, 0, Game.Width, Game.Height, top, bottom);
 
 	Gfx_SetTexturing(true);
 	Elem_Render(&s->Title, delta);
@@ -1509,7 +1509,7 @@ static bool DisconnectScreen_MouseDown(void* screen, int x, int y, MouseButton b
 
 		Gui_FreeActive();
 		Gui_SetActive(LoadingScreen_MakeInstance(&title, &String_Empty));
-		ServerConnection.BeginConnect();
+		Server.BeginConnect();
 	}
 	return true;
 }

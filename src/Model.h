@@ -15,16 +15,22 @@ extern struct IGameComponent Models_Component;
 
 #define MODEL_QUAD_VERTICES 4
 #define MODEL_BOX_VERTICES (FACE_COUNT * MODEL_QUAD_VERTICES)
-enum ROTATE_ORDER { ROTATE_ORDER_ZYX, ROTATE_ORDER_XZY, ROTATE_ORDER_YZX };
+enum RotateOrder { ROTATE_ORDER_ZYX, ROTATE_ORDER_XZY, ROTATE_ORDER_YZX };
 
 /* Describes a vertex within a model. */
 struct ModelVertex { float X, Y, Z; uint16_t U, V; };
-void ModelVertex_Init(struct ModelVertex* vertex, float x, float y, float z, int u, int v);
+static CC_INLINE void ModelVertex_Init(struct ModelVertex* vertex, float x, float y, float z, int u, int v) {
+	vertex->X = x; vertex->Y = y; vertex->Z = z;
+	vertex->U = u; vertex->V = v;
+}
 
 /* Describes the starting index of this part within a model's array of vertices,
 and the number of vertices following the starting index that this part uses. */
 struct ModelPart { uint16_t Offset, Count; float RotX, RotY, RotZ; };
-void ModelPart_Init(struct ModelPart* part, int offset, int count, float rotX, float rotY, float rotZ);
+static CC_INLINE void ModelPart_Init(struct ModelPart* part, int offset, int count, float rotX, float rotY, float rotZ) {
+	part->Offset = offset; part->Count = count;
+	part->RotX = rotX; part->RotY = rotY; part->RotZ = rotZ;
+}
 
 struct ModelTex;
 /* Contains information about a texture used for models. */
@@ -72,15 +78,29 @@ struct Model {
 public CustomModel[] CustomModels = new CustomModel[256];
 #endif
 
-extern PackedCol Model_Cols[FACE_COUNT];
-/* U/V scale applied to the skin when rendering the model. */
-/* Default uScale is 1/32, vScale is 1/32 or 1/64 depending on skin. */
-extern float Model_uScale, Model_vScale;
-/* Angle of offset of head from body rotation */
-extern float Model_cosHead, Model_sinHead;
-extern uint8_t Model_Rotation, Model_skinType;
-extern struct Model* Model_ActiveModel;
-void Model_Init(struct Model* model);
+/* Shared data for models. */
+CC_VAR extern struct _ModelsData {
+	/* Tint colour applied to the faces of model parts. */
+	PackedCol Cols[FACE_COUNT];
+	/* U/V scale applied to skin texture when rendering models. */
+	/* Default uScale is 1/32, vScale is 1/32 or 1/64 depending on skin. */
+	float uScale, vScale;
+	/* Angle of offset of head from body rotation */
+	float cosHead, sinHead;
+	/* Order of axes rotation when rendering parts. */
+	uint8_t Rotation;
+	/* Skin type of current skin texture. */
+	uint8_t skinType;
+	/* Whether to render arms like vanilla Minecraft Classic. */
+	bool ClassicArms;
+	/* Model currently being built or rendered. */
+	struct Model* Active;
+	/* Dynamic vertex buffer for uploading model vertices. */
+	GfxResourceID Vb;
+} Models;
+
+/* Initialises fields of a model to default. */
+CC_API void Model_Init(struct Model* model);
 
 #define Model_SetPointers(instance, typeName)\
 instance.GetEyeY = typeName ## _GetEyeY;\
@@ -89,26 +109,37 @@ instance.GetPickingBounds = typeName ## _GetPickingBounds;\
 instance.CreateParts = typeName ## _CreateParts;\
 instance.DrawModel = typeName ## _DrawModel;
 
+/* Whether the bounding sphere of the model is currently visible. */
 bool Model_ShouldRender(struct Entity* entity);
+/* Approximately how far the given entity is away from the player. */
 float Model_RenderDistance(struct Entity* entity);
-void Model_Render(struct Model* model, struct Entity* entity);
-void Model_SetupState(struct Model* model, struct Entity* entity);
-void Model_UpdateVB(void);
-void Model_ApplyTexture(struct Entity* entity);
-void Model_DrawPart(struct ModelPart* part);
-void Model_DrawRotate(float angleX, float angleY, float angleZ, struct ModelPart* part, bool head);
+/* Draws the given entity as the given model. */
+CC_API void Model_Render(struct Model* model, struct Entity* entity);
+/* Sets up state to be suitable for rendering the given model. */
+/* NOTE: Model_Render already calls this, you don't normally need to call this. */
+CC_API void Model_SetupState(struct Model* model, struct Entity* entity);
+/* Flushes buffered vertices to the GPU. */
+CC_API void Model_UpdateVB(void);
+/* Applies the skin texture of the given entity to the model. */
+/* Uses model's default texture if the entity doesn't have a custom skin. */
+CC_API void Model_ApplyTexture(struct Entity* entity);
+/* Draws the given part with no part-specific rotation (e.g. torso). */
+CC_API void Model_DrawPart(struct ModelPart* part);
+/* Draws the given part with rotation around part's rotation origin. (e.g. arms, head) */
+CC_API void Model_DrawRotate(float angleX, float angleY, float angleZ, struct ModelPart* part, bool head);
+/* Renders the 'arm' of a model. */
 void Model_RenderArm(struct Model* model, struct Entity* entity);
-void Model_DrawArmPart(struct ModelPart* part);
+/* Draws the given part with appropriate rotation to produce an arm look. */
+CC_API void Model_DrawArmPart(struct ModelPart* part);
 
 /* Maximum number of vertices a model can have */
 #define MODEL_MAX_VERTICES (24 * 12)
-extern GfxResourceID Model_Vb;
 extern VertexP3fT2fC4b Model_Vertices[MODEL_MAX_VERTICES];
 extern struct Model* Human_ModelPtr;
 
-/* Returns pointer to model whose name caselessly matches given name. */
+/* Returns a pointer to the model whose name caselessly matches given name. */
 CC_API struct Model* Model_Get(const String* name);
-/* Returns index of cached texture whose name caselessly matches given name. */
+/* Returns index of the model texture whose name caselessly matches given name. */
 CC_API struct ModelTex* Model_GetTexture(const String* name);
 /* Adds a model to the list of models. (e.g. "skeleton") */
 /* Models can be applied to entities to change their appearance. Use Entity_SetModel for that. */
@@ -129,8 +160,8 @@ struct BoxDesc {
 /* Macros for making initialising a BoxDesc easier to understand. See Model.c for how these get used. */
 #define BoxDesc_Tex(x, y)                 x,y
 #define BoxDesc_Dims(x1,y1,z1,x2,y2,z2)   BoxDesc_Dim(x1,x2), BoxDesc_Dim(y1,y2), BoxDesc_Dim(z1,z2)
-#define BoxDesc_Bounds(x1,y1,z1,x2,y2,z2) x1/16.0f,y1/16.0f,z1/16.0f, x2/16.0f,y2/16.0f,z2/16.0f
-#define BoxDesc_Rot(x, y, z)              x/16.0f,y/16.0f,z/16.0f
+#define BoxDesc_Bounds(x1,y1,z1,x2,y2,z2) (x1)/16.0f,(y1)/16.0f,(z1)/16.0f, (x2)/16.0f,(y2)/16.0f,(z2)/16.0f
+#define BoxDesc_Rot(x, y, z)              (x)/16.0f,(y)/16.0f,(z)/16.0f
 #define BoxDesc_Box(x1,y1,z1,x2,y2,z2)    BoxDesc_Dims(x1,y1,z1,x2,y2,z2), BoxDesc_Bounds(x1,y1,z1,x2,y2,z2)
 
 /* Builds a box model assuming the follow texture layout:
@@ -146,7 +177,7 @@ let SW = sides width, BW = body width, BH = body height
 |H--------tex---------H|H--------tex---------H|H--------tex---------H|H--------tex---------H|
 |----------SW----------|----------BW----------|----------SW----------|----------BW----------|
 ********************************************************************************************* */
-void BoxDesc_BuildBox(struct ModelPart* part, const struct BoxDesc* desc);
+CC_API void BoxDesc_BuildBox(struct ModelPart* part, const struct BoxDesc* desc);
 
 /* Builds a box model assuming the follow texture layout:
 let SW = sides width, BW = body width, BH = body height
@@ -161,9 +192,9 @@ let SW = sides width, BW = body width, BH = body height
 |H--------tex---------H|H--------tex---------H|H--------tex---------H|H--------tex---------H|
 |----------SW----------|----------BW----------|----------BW----------|----------------------|
 ********************************************************************************************* */
-void BoxDesc_BuildRotatedBox(struct ModelPart* part, const struct BoxDesc* desc);
+CC_API void BoxDesc_BuildRotatedBox(struct ModelPart* part, const struct BoxDesc* desc);
 
-void BoxDesc_XQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float z1, float z2, float y1, float y2, float x, bool swapU);
-void BoxDesc_YQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float x1, float x2, float z1, float z2, float y, bool swapU);
-void BoxDesc_ZQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float x1, float x2, float y1, float y2, float z, bool swapU);
+CC_API void BoxDesc_XQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float z1, float z2, float y1, float y2, float x, bool swapU);
+CC_API void BoxDesc_YQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float x1, float x2, float z1, float z2, float y, bool swapU);
+CC_API void BoxDesc_ZQuad(struct Model* m, int texX, int texY, int texWidth, int texHeight, float x1, float x2, float y1, float y2, float z, bool swapU);
 #endif

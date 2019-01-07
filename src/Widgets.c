@@ -10,7 +10,7 @@
 #include "Model.h"
 #include "Screens.h"
 #include "Platform.h"
-#include "ServerConnection.h"
+#include "Server.h"
 #include "Event.h"
 #include "Chat.h"
 #include "Game.h"
@@ -328,7 +328,7 @@ static void HotbarWidget_RenderHotbarOutline(struct HotbarWidget* w) {
 	w->BackTex.ID = tex;
 	Texture_Render(&w->BackTex);
 
-	i     = Inventory_SelectedIndex;
+	i     = Inventory.SelectedIndex;
 	width = w->ElemSize + w->BorderSize;
 	x     = (int)(w->X + w->BarXOffset + width * i + w->ElemSize / 2);
 
@@ -343,7 +343,7 @@ static void HotbarWidget_RenderHotbarBlocks(struct HotbarWidget* w) {
 	float width, scale;
 	int i, x, y;
 
-	IsometricDrawer_BeginBatch(vertices, Model_Vb);
+	IsometricDrawer_BeginBatch(vertices, Models.Vb);
 	width =  w->ElemSize + w->BorderSize;
 	scale = (w->ElemSize * 13.5f/16.0f) / 2.0f;
 
@@ -443,7 +443,7 @@ static bool HotbarWidget_KeyUp(void* widget, Key key) {
 	if (!Window_Focused) return true;
 
 	/* Alternate between first and second row */
-	index = Inventory_Offset == 0 ? 1 : 0;
+	index = Inventory.Offset == 0 ? 1 : 0;
 	Inventory_SetHotbarIndex(index);
 	return true;
 }
@@ -478,12 +478,12 @@ static bool HotbarWidget_MouseScroll(void* widget, float delta) {
 	int index;
 
 	if (KeyBind_IsPressed(KEYBIND_HOTBAR_SWITCH)) {
-		index = Inventory_Offset / INVENTORY_BLOCKS_PER_HOTBAR;
+		index = Inventory.Offset / INVENTORY_BLOCKS_PER_HOTBAR;
 		index = HotbarWidget_ScrolledIndex(w, delta, index, 1);
 		Inventory_SetHotbarIndex(index);
 		w->AltHandled = true;
 	} else {
-		index = HotbarWidget_ScrolledIndex(w, delta, Inventory_SelectedIndex, -1);
+		index = HotbarWidget_ScrolledIndex(w, delta, Inventory.SelectedIndex, -1);
 		Inventory_SetSelectedIndex(index);
 	}
 	return true;
@@ -559,8 +559,8 @@ static void TableWidget_MakeBlockDesc(String* desc, BlockID block) {
 	if (Game_ClassicMode) return;
 
 	String_Format1(desc, " (ID %i&f", &block_);
-	if (!Block_CanPlace[block])  { String_AppendConst(desc,  ", place &cNo&f"); }
-	if (!Block_CanDelete[block]) { String_AppendConst(desc, ", delete &cNo&f"); }
+	if (!Blocks.CanPlace[block])  { String_AppendConst(desc,  ", place &cNo&f"); }
+	if (!Blocks.CanDelete[block]) { String_AppendConst(desc, ", delete &cNo&f"); }
 	String_Append(desc, ')');
 }
 
@@ -573,8 +573,8 @@ static void TableWidget_UpdatePos(struct TableWidget* w) {
 	int rowsDisplayed = min(TABLE_MAX_ROWS_DISPLAYED, w->RowsCount);
 	w->Width  = w->CellSize * w->ElementsPerRow;
 	w->Height = w->CellSize * rowsDisplayed;
-	w->X = Game_Width  / 2 - w->Width  / 2;
-	w->Y = Game_Height / 2 - w->Height / 2;
+	w->X = Game.Width  / 2 - w->Width  / 2;
+	w->Y = Game.Height / 2 - w->Height / 2;
 	TableWidget_UpdateDescTexPos(w);
 }
 
@@ -603,10 +603,10 @@ void TableWidget_MakeDescTex(struct TableWidget* w, BlockID block) {
 }
 
 static bool TableWidget_RowEmpty(struct TableWidget* w, int start) {
-	int i, end = min(start + w->ElementsPerRow, Array_Elems(Inventory_Map));
+	int i, end = min(start + w->ElementsPerRow, Array_Elems(Inventory.Map));
 
 	for (i = start; i < end; i++) {
-		if (Inventory_Map[i] != BLOCK_AIR) return false;
+		if (Inventory.Map[i] != BLOCK_AIR) return false;
 	}
 	return true;
 }
@@ -616,12 +616,12 @@ static void TableWidget_RecreateElements(struct TableWidget* w) {
 	BlockID block;
 	w->ElementsCount = 0;
 
-	for (i = 0; i < Array_Elems(Inventory_Map); ) {
+	for (i = 0; i < Array_Elems(Inventory.Map); ) {
 		if ((i % w->ElementsPerRow) == 0 && TableWidget_RowEmpty(w, i)) {
 			i += w->ElementsPerRow; continue;
 		}
 
-		block = Inventory_Map[i];
+		block = Inventory.Map[i];
 		if (block < max) { w->Elements[w->ElementsCount++] = block; }
 		i++;
 	}
@@ -1008,7 +1008,7 @@ void InputWidget_Clear(struct InputWidget* w) {
 }
 
 static bool InputWidget_AllowedChar(void* widget, char c) {
-	return Utils_IsValidInputChar(c, ServerConnection_SupportsFullCP437);
+	return Server.SupportsFullCP437 || (Convert_CP437ToUnicode(c) == c);
 }
 
 static void InputWidget_AppendChar(struct InputWidget* w, char c) {
@@ -1440,7 +1440,7 @@ static void String_Range(struct MenuInputValidator* v, String* range) {
 }
 
 static bool String_ValidChar(struct MenuInputValidator* v, char c) {
-	return c != '&' && Utils_IsValidInputChar(c, true);
+	return c != '&';
 }
 
 static bool String_ValidString(struct MenuInputValidator* v, const String* s) {
@@ -1635,7 +1635,7 @@ static void ChatInputWidget_Render(void* widget, double delta) {
 		caretAtEnd = (w->CaretY == i) && (w->CaretX == INPUTWIDGET_LEN || w->CaretPos == -1);
 		width      = w->LineSizes[i].Width + (caretAtEnd ? w->CaretTex.Width : 0);
 		/* Cover whole window width to match original classic behaviour */
-		if (Game_PureClassic) { width = max(width, Game_Width - x * 4); }
+		if (Game_PureClassic) { width = max(width, Game.Width - x * 4); }
 	
 		Gfx_Draw2DFlat(x, y, width + w->Padding * 2, w->PrefixHeight, backCol);
 		y += w->LineSizes[i].Height;
@@ -1793,7 +1793,7 @@ static bool ChatInputWidget_KeyDown(void* widget, Key key, bool was) {
 }
 
 static int ChatInputWidget_GetMaxLines(void) {
-	return !Game_ClassicMode && ServerConnection_SupportsPartialMessages ? 3 : 1;
+	return !Game_ClassicMode && Server.SupportsPartialMessages ? 3 : 1;
 }
 
 static struct WidgetVTABLE ChatInputWidget_VTABLE = {
@@ -1871,7 +1871,7 @@ void PlayerListWidget_GetNameUnder(struct PlayerListWidget* w, int x, int y, Str
 static void PlayerListWidget_UpdateTableDimensions(struct PlayerListWidget* w) {
 	int width = w->XMax - w->XMin, height = w->YHeight;
 	w->X = (w->XMin                     ) - LIST_BOUNDS_SIZE;
-	w->Y = (Game_Height / 2 - height / 2) - LIST_BOUNDS_SIZE;
+	w->Y = (Game.Height / 2 - height / 2) - LIST_BOUNDS_SIZE;
 	w->Width  = width  + LIST_BOUNDS_SIZE * 2;
 	w->Height = height + LIST_BOUNDS_SIZE * 2;
 }
@@ -1930,11 +1930,11 @@ static void PlayerListWidget_RepositionColumns(struct PlayerListWidget* w) {
 	}
 
 	if (width < 480) width = 480;
-	w->XMin = Game_Width / 2 - width / 2;
-	w->XMax = Game_Width / 2 + width / 2;
+	w->XMin = Game.Width / 2 - width / 2;
+	w->XMax = Game.Width / 2 + width / 2;
 
 	x = w->XMin;
-	y = Game_Height / 2 - w->YHeight / 2;
+	y = Game.Height / 2 - w->YHeight / 2;
 
 	for (col = 0; col < columns; col++) {
 		PlayerListWidget_SetColumnPos(w, col, x, y);
@@ -1946,7 +1946,7 @@ static void PlayerListWidget_Reposition(void* widget) {
 	struct PlayerListWidget* w = widget;
 	int i, y, oldX, oldY;
 
-	y = Game_Height / 4 - w->Height / 2;
+	y = Game.Height / 4 - w->Height / 2;
 	w->YOffset = -max(0, y);
 
 	oldX = w->X; oldY = w->Y;
@@ -2016,8 +2016,8 @@ static int PlayerListWidget_PlayerCompare(int x, int y) {
 	uint8_t xRank, yRank;
 	String xNameRaw, yNameRaw;
 
-	xRank = TabList_GroupRanks[x];
-	yRank = TabList_GroupRanks[y];
+	xRank = TabList.GroupRanks[x];
+	yRank = TabList.GroupRanks[y];
 	if (xRank != yRank) return (xRank < yRank ? -1 : 1);
 	
 	String_InitArray(xName, xNameBuffer);
@@ -2266,7 +2266,7 @@ static int TextGroupWidget_CalcY(struct TextGroupWidget* w, int index, int newHe
 			textures[i].Y += deltaY;
 		}
 	} else {
-		y = Game_Height - w->YOffset;
+		y = Game.Height - w->YOffset;
 		for (i = index + 1; i < w->LinesCount; i++) {
 			y -= textures[i].Height;
 		}
@@ -2311,7 +2311,7 @@ static void TextGroupWidget_Reposition(void* widget) {
 	if (!w->LinesCount) return;
 
 	for (i = 0; i < w->LinesCount; i++) {
-		textures[i].X = Gui_CalcPos(w->HorAnchor, w->XOffset, textures[i].Width, Game_Width);
+		textures[i].X = Gui_CalcPos(w->HorAnchor, w->XOffset, textures[i].Width, Game.Width);
 		textures[i].Y += w->Y - oldY;
 	}
 }
@@ -2592,7 +2592,7 @@ void TextGroupWidget_SetText(struct TextGroupWidget* w, int index, const String*
 		tex.Height = w->PlaceholderHeight[index] ? w->DefaultHeight : 0;
 	}
 
-	tex.X = Gui_CalcPos(w->HorAnchor, w->XOffset, tex.Width, Game_Width);
+	tex.X = Gui_CalcPos(w->HorAnchor, w->XOffset, tex.Width, Game.Width);
 	tex.Y = TextGroupWidget_CalcY(w, index, tex.Height);
 	w->Textures[index] = tex;
 	TextGroupWidget_UpdateDimensions(w);

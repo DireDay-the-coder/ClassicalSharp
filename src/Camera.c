@@ -8,14 +8,7 @@
 #include "Entity.h"
 #include "Input.h"
 
-int Camera_Sensitivity;
-bool Camera_Smooth, Camera_Clipping, Camera_Invert;
-
-struct Matrix Camera_TiltM;
-float Camera_BobbingVer, Camera_BobbingHor;
-Vector3 Camera_CurrentPos;
-struct Camera* Camera_Active;
-
+struct _CameraData Camera;
 static struct PickedPos cameraClipPos;
 static Vector2 cam_rotOffset;
 static bool cam_isForwardThird;
@@ -25,15 +18,15 @@ static bool cam_isForwardThird;
 *#########################################################################################################################*/
 static void PerspectiveCamera_GetProjection(struct Matrix* proj) {
 	float fovy = Game_Fov * MATH_DEG2RAD;
-	float aspectRatio = (float)Game_Width / (float)Game_Height;
+	float aspectRatio = (float)Game.Width / (float)Game.Height;
 	Matrix_PerspectiveFieldOfView(proj, fovy, aspectRatio, Gfx_MinZNear, (float)Game_ViewDistance);
 }
 
 static void PerspectiveCamera_GetView(struct Matrix* mat) {
-	Vector3 pos = Camera_CurrentPos;
-	Vector2 rot = Camera_Active->GetOrientation();
+	Vector3 pos = Camera.CurrentPos;
+	Vector2 rot = Camera.Active->GetOrientation();
 	Matrix_LookRot(mat, pos, rot);
-	Matrix_MulBy(mat, &Camera_TiltM);
+	Matrix_MulBy(mat, &Camera.TiltM);
 }
 
 static void PerspectiveCamera_GetPickedBlock(struct PickedPos* pos) {
@@ -47,8 +40,8 @@ static void PerspectiveCamera_GetPickedBlock(struct PickedPos* pos) {
 static Point2D cam_prev, cam_delta;
 static void PerspectiveCamera_CentreMousePosition(void) {
 	Point2D topLeft = Window_PointToScreen(0, 0);
-	int cenX = topLeft.X + Game_Width  / 2;
-	int cenY = topLeft.Y + Game_Height / 2;
+	int cenX = topLeft.X + Game.Width  / 2;
+	int cenY = topLeft.Y + Game.Height / 2;
 
 	Window_SetScreenCursorPos(cenX, cenY);
 	/* Fixes issues with large DPI displays on Windows >= 8.0. */
@@ -66,11 +59,11 @@ static void PerspectiveCamera_RegrabMouse(void) {
 #define CAMERA_ADJUST 0.025f
 
 static Vector2 PerspectiveCamera_GetMouseDelta(void) {
-	float sensitivity = CAMERA_SENSI_FACTOR * Camera_Sensitivity;
+	float sensitivity = CAMERA_SENSI_FACTOR * Camera.Sensitivity;
 	static float speedX, speedY;
 	Vector2 v;
 
-	if (Camera_Smooth) {
+	if (Camera.Smooth) {
 		speedX += cam_delta.X * CAMERA_ADJUST;
 		speedX *= CAMERA_SLIPPERY;
 		speedY += cam_delta.Y * CAMERA_ADJUST;
@@ -81,7 +74,7 @@ static Vector2 PerspectiveCamera_GetMouseDelta(void) {
 	}
 
 	v.X = speedX * sensitivity; v.Y = speedY * sensitivity;
-	if (Camera_Invert) v.Y = -v.Y;
+	if (Camera.Invert) v.Y = -v.Y;
 	return v;
 }
 
@@ -93,7 +86,7 @@ static void PerspectiveCamera_UpdateMouseRotation(void) {
 	float headY, headX;
 	Vector2 rot = PerspectiveCamera_GetMouseDelta();
 
-	if (Key_IsAltPressed() && Camera_Active->IsThirdPerson) {
+	if (Key_IsAltPressed() && Camera.Active->IsThirdPerson) {
 		cam_rotOffset.X += rot.X; cam_rotOffset.Y += rot.Y;
 		return;
 	}
@@ -127,20 +120,20 @@ static void PerspectiveCamera_CalcViewBobbing(float t, float velTiltScale) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
 	struct Entity* e = &p->Base;
 
-	struct Matrix Camera_tiltY, Camera_velX;
+	struct Matrix tiltY, velX;
 	float vel;
-	if (!Game_ViewBobbing) { Camera_TiltM = Matrix_Identity; return; }
+	if (!Game_ViewBobbing) { Camera.TiltM = Matrix_Identity; return; }
 
-	Matrix_RotateZ(&Camera_TiltM, -p->Tilt.TiltX                  * e->Anim.BobStrength);
-	Matrix_RotateX(&Camera_tiltY, Math_AbsF(p->Tilt.TiltY) * 3.0f * e->Anim.BobStrength);
-	Matrix_MulBy(&Camera_TiltM, &Camera_tiltY);
+	Matrix_RotateZ(&Camera.TiltM, -p->Tilt.TiltX                  * e->Anim.BobStrength);
+	Matrix_RotateX(&tiltY,        Math_AbsF(p->Tilt.TiltY) * 3.0f * e->Anim.BobStrength);
+	Matrix_MulBy(&Camera.TiltM, &tiltY);
 
-	Camera_BobbingHor = (e->Anim.BobbingHor * 0.3f) * e->Anim.BobStrength;
-	Camera_BobbingVer = (e->Anim.BobbingVer * 0.6f) * e->Anim.BobStrength;
+	Camera.BobbingHor = (e->Anim.BobbingHor * 0.3f) * e->Anim.BobStrength;
+	Camera.BobbingVer = (e->Anim.BobbingVer * 0.6f) * e->Anim.BobStrength;
 
 	vel = Math_Lerp(p->OldVelocity.Y + 0.08f, e->Velocity.Y + 0.08f, t);
-	Matrix_RotateX(&Camera_velX, -vel * 0.05f * p->Tilt.VelTiltStrength / velTiltScale);
-	Matrix_MulBy(&Camera_TiltM, &Camera_velX);
+	Matrix_RotateX(&velX, -vel * 0.05f * p->Tilt.VelTiltStrength / velTiltScale);
+	Matrix_MulBy(&Camera.TiltM, &velX);
 }
 
 
@@ -160,9 +153,9 @@ static Vector3 FirstPersonCamera_GetPosition(float t) {
 	float headY      = p->HeadY * MATH_DEG2RAD;
 	PerspectiveCamera_CalcViewBobbing(t, 1);
 	
-	camPos.Y += Camera_BobbingVer;
-	camPos.X += Camera_BobbingHor * (float)Math_Cos(headY);
-	camPos.Z += Camera_BobbingHor * (float)Math_Sin(headY);
+	camPos.Y += Camera.BobbingVer;
+	camPos.X += Camera.BobbingHor * (float)Math_Cos(headY);
+	camPos.Z += Camera.BobbingHor * (float)Math_Sin(headY);
 	return camPos;
 }
 
@@ -200,9 +193,9 @@ static Vector3 ThirdPersonCamera_GetPosition(float t) {
 
 	PerspectiveCamera_CalcViewBobbing(t, dist);
 	target = Entity_GetEyePosition(p);
-	target.Y += Camera_BobbingVer;
+	target.Y += Camera.BobbingVer;
 
-	rot = Camera_Active->GetOrientation();
+	rot = Camera.Active->GetOrientation();
 	dir = Vector3_GetDirVector(rot.X, rot.Y);
 	Vector3_Negate(&dir, &dir);
 
@@ -241,21 +234,21 @@ void Camera_Init(void) {
 	Camera_FirstPerson.Next  = &Camera_ThirdPerson;
 	Camera_ThirdPerson.Next  = &Camera_ForwardThird;
 	Camera_ForwardThird.Next = &Camera_FirstPerson;
-	Camera_Active            = &Camera_FirstPerson;
+	Camera.Active            = &Camera_FirstPerson;
 
-	Camera_Sensitivity = Options_GetInt(OPT_SENSITIVITY, 1, 100, 30);
-	Camera_Clipping    = Options_GetBool(OPT_CAMERA_CLIPPING, true);
-	Camera_Invert = Options_GetBool(OPT_INVERT_MOUSE, false);
+	Camera.Sensitivity = Options_GetInt(OPT_SENSITIVITY, 1, 100, 30);
+	Camera.Clipping    = Options_GetBool(OPT_CAMERA_CLIPPING, true);
+	Camera.Invert      = Options_GetBool(OPT_INVERT_MOUSE, false);
 }
 
 void Camera_CycleActive(void) {
 	struct LocalPlayer* p = &LocalPlayer_Instance;
 	if (Game_ClassicMode) return;
-	Camera_Active = Camera_Active->Next;
+	Camera.Active = Camera.Active->Next;
 
-	cam_isForwardThird = Camera_Active == &Camera_ForwardThird;
+	cam_isForwardThird = Camera.Active == &Camera_ForwardThird;
 	if (!p->Hacks.CanUseThirdPersonCamera || !p->Hacks.Enabled) {
-		Camera_Active = &Camera_FirstPerson;
+		Camera.Active = &Camera_FirstPerson;
 	}
 
 	/* reset rotation offset when changing cameras */
