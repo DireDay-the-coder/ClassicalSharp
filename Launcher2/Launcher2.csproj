@@ -48,6 +48,10 @@
     <StartAction>Project</StartAction>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="SharpWave, Version=1.0.6943.3379, Culture=neutral, processorArchitecture=x86">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\SharpWave\bin\Debug\SharpWave.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Security" />
@@ -249,24 +253,6 @@
     <Compile Include="Utils\LauncherSkin.cs" />
     <Compile Include="Utils\Secure.cs" />
   </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Gui" />
-    <Folder Include="Drawing\Platform" />
-    <Folder Include="Gui\Views" />
-    <Folder Include="Gui\TableWidget" />
-    <Folder Include="Gui\Screens" />
-    <Folder Include="Gui\Widgets" />
-    <Folder Include="Drawing" />
-    <Folder Include="Shared" />
-    <Folder Include="Updater" />
-    <Folder Include="Utils" />
-    <Folder Include="Patcher" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\SharpWave\SharpWave.csproj">
-      <Project>{77EA9D1E-4995-4D05-A9C7-29173CB5DC72}</Project>
-      <Name>SharpWave</Name>
-    </ProjectReference>
-  </ItemGroup>
+  <ItemGroup />
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
 </Project>

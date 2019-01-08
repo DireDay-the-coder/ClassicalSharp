@@ -293,7 +293,7 @@ namespace ClassicalSharp {
 		bool DoFovZoom(float deltaPrecise) {
 			if (!game.IsKeyDown(KeyBind.ZoomScrolling)) return false;
 			LocalPlayer p = game.LocalPlayer;
-			if (!p.Hacks.Enabled || !p.Hacks.CanAnyHacks || !p.Hacks.CanUseThirdPersonCamera)
+			if (!p.Hacks.Enabled || !HacksComponent.CanAnyHacks || !HacksComponent.CanUseThirdPersonCamera)
 				return false;
 			
 			if (fovIndex == -1) fovIndex = game.ZoomFov;
@@ -306,7 +306,7 @@ namespace ClassicalSharp {
 		public bool SetFOV(int fov, bool setZoom) {
 			LocalPlayer p = game.LocalPlayer;
 			if (game.Fov == fov) return true;
-			if (!p.Hacks.Enabled || !p.Hacks.CanAnyHacks || !p.Hacks.CanUseThirdPersonCamera)
+			if (!p.Hacks.Enabled || !HacksComponent.CanAnyHacks || !HacksComponent.CanUseThirdPersonCamera)
 				return false;
 			
 			game.Fov = fov;

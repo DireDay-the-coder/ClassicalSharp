@@ -52,7 +52,7 @@ namespace ClassicalSharp.Entities {
 		
 		public override void Tick(double delta) {
 			if (!game.World.HasBlocks) return;
-			StepSize = Hacks.FullBlockStep && Hacks.Enabled && Hacks.CanAnyHacks && Hacks.CanSpeed ? 1 : 0.5f;
+			StepSize = Hacks.FullBlockStep && Hacks.Enabled && HacksComponent.CanAnyHacks && HacksComponent.CanSpeed ? 1 : 0.5f;
 			OldVelocity = Velocity;
 			float xMoving = 0, zMoving = 0;
 			interp.AdvanceState();
@@ -127,7 +127,7 @@ namespace ClassicalSharp.Entities {
 				Hacks.FlyingUp = game.IsKeyDown(KeyBind.FlyUp);
 				Hacks.FlyingDown = game.IsKeyDown(KeyBind.FlyDown);
 				
-				if (Hacks.WOMStyleHacks && Hacks.Enabled && Hacks.CanNoclip) {
+				if (Hacks.WOMStyleHacks && Hacks.Enabled && HacksComponent.CanNoclip) {
 					if (Hacks.Noclip) Velocity = Vector3.Zero;
 					Hacks.Noclip = game.IsKeyDown(KeyBind.NoClip);
 				}
@@ -180,7 +180,7 @@ namespace ClassicalSharp.Entities {
 			AABB bb;
 			
 			// Spawn player at highest valid position
-			if (Hacks.CanNoclip) {
+			if (HacksComponent.CanNoclip) {
 			    if (game.World.IsValidPos(P)) {
 			        bb = AABB.Make(spawn, Size);
 			        for (int y = P.Y; y <= game.World.Height; y++) {
@@ -208,7 +208,7 @@ namespace ClassicalSharp.Entities {
 		}
 		
 		bool HandleRespawn() {
-			if (Hacks.CanRespawn) {
+			if (HacksComponent.CanRespawn) {
 				DoRespawn();
 				return true;
 			} else if (!warnedRespawn) {
@@ -219,12 +219,12 @@ namespace ClassicalSharp.Entities {
 		}
 		
 		bool HandleSetSpawn() {
-			if (Hacks.CanRespawn) {
-		        if (!Hacks.CanNoclip && !onGround) {
+			if (HacksComponent.CanRespawn) {
+		        if (!HacksComponent.CanNoclip && !onGround) {
 		            game.Chat.Add("&cCannot set spawn midair when noclip is disabled");
 		            return false;
 		        }
-		        if (!Hacks.CanNoclip) {
+		        if (!HacksComponent.CanNoclip) {
 		            Spawn.X = Position.X;
 		            Spawn.Y = Position.Y;
 		            Spawn.Z = Position.Z;
@@ -240,7 +240,7 @@ namespace ClassicalSharp.Entities {
 		}
 		
 		bool HandleFly() {
-			if (Hacks.CanFly && Hacks.Enabled) {
+			if (HacksComponent.CanFly && Hacks.Enabled) {
 				Hacks.Flying = !Hacks.Flying;
 				return true;
 			} else if (!warnedFly) {
@@ -251,7 +251,7 @@ namespace ClassicalSharp.Entities {
 		}
 		
 		bool HandleNoClip() {
-			if (Hacks.CanNoclip && Hacks.Enabled) {
+			if (HacksComponent.CanNoclip && Hacks.Enabled) {
 				if (Hacks.WOMStyleHacks) return true; // don't handle this here
 				if (Hacks.Noclip) Velocity.Y = 0;
 				

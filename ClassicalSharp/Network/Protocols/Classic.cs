@@ -67,7 +67,7 @@ namespace ClassicalSharp.Network.Protocols {
 			game.Chat.SetLogName(net.ServerName);
 			
 			game.LocalPlayer.Hacks.SetUserType(reader.ReadUInt8(), !net.cpeData.blockPerms);
-			game.LocalPlayer.Hacks.HacksFlags = net.ServerName + net.ServerMotd;
+			HacksComponent.HacksFlags = net.ServerName + net.ServerMotd;
 			game.LocalPlayer.Hacks.UpdateHacksState();
 		}
 		

@@ -235,7 +235,7 @@ namespace ClassicalSharp.Network.Protocols {
 		}
 		
 		void HandleHackControl() {
-            ////LocalPlayer p = game.LocalPlayer;
+            //LocalPlayer p = game.LocalPlayer;
             //         p.Hacks.CanFly = reader.ReadUInt8() != 0;
             //         p.Hacks.CanNoclip = reader.ReadUInt8() != 0;
             //         p.Hacks.CanSpeed = reader.ReadUInt8() != 0;
@@ -249,15 +249,15 @@ namespace ClassicalSharp.Network.Protocols {
             //         } else {
             //             p.physics.CalculateJumpVelocity(jumpHeight / 32f);
             //         }
-
             //         p.physics.serverJumpVel = p.physics.jumpVel;
-		    //         Events.RaiseHackPermissionsChanged();
+		             
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt16();
+		    Events.RaiseHackPermissionsChanged();
 		}
 
         void HandleExtAddEntity2() {

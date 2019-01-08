@@ -161,19 +161,19 @@ namespace ClassicalSharp.Gui.Screens {
 		bool HacksChanged()  {
 			HacksComponent hacks = game.LocalPlayer.Hacks;
 			return hacks.Speeding != speed || hacks.HalfSpeeding != halfSpeed || hacks.Flying != fly
-				|| hacks.Noclip != noclip || game.Fov != lastFov || hacks.CanSpeed != canSpeed;
+				|| hacks.Noclip != noclip || game.Fov != lastFov || HacksComponent.CanSpeed != canSpeed;
 		}
 		
 		void UpdateHackState() {
 			HacksComponent hacks = game.LocalPlayer.Hacks;
 			speed = hacks.Speeding; halfSpeed = hacks.HalfSpeeding; fly = hacks.Flying;
-			noclip = hacks.Noclip; lastFov = game.Fov; canSpeed = hacks.CanSpeed;
+			noclip = hacks.Noclip; lastFov = game.Fov; canSpeed = HacksComponent.CanSpeed;
 			
 			statusBuffer.Clear();
 			if (game.Fov != game.DefaultFov) statusBuffer.Append("Zoom fov ").AppendNum(lastFov).Append("  ");
 			if (fly) statusBuffer.Append("Fly ON   ");
 			
-			bool speeding = (speed || halfSpeed) && hacks.CanSpeed;
+			bool speeding = (speed || halfSpeed) && HacksComponent.CanSpeed;
 			if (speeding) statusBuffer.Append("Speed ON   ");
 			if (noclip)   statusBuffer.Append("Noclip ON   ");
 			line2.Set(statusBuffer.ToString(), font);

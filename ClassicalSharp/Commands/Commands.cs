@@ -45,36 +45,47 @@ namespace ClassicalSharp.Commands
         }
     }
 
-    public sealed class HacksCommand : Command
+    public sealed class HacksOnCommand : Command
     {
 
-        public HacksCommand()
+        public HacksOnCommand()
         {
-            Name = "Hacks";
+            Name = "Hackson";
             Help = new string[]
             {
                 "&a/client hacks [command name]",
-                "&eAllows for controlling hacks.",
+                "&eSwitches on Hack bypass",
             };
         }
 
         public override void Execute(string[] args)
         {
-            HacksComponent hacks = new HacksComponent(game);
-            if (args.Equals("bypass"))
+                game.Chat.Add("Please supply a hack to bypass");
+                HacksComponent.ParseAllFlag("hax");
+                game.Chat.Add("Hacks will now disobey map motd", MessageType.Normal);
+                game.Chat.Add("Hacks on", MessageType.Status1);  
+        }
+    }
+
+    public sealed class HacksOffCommand : Command
+    {
+
+        public HacksOffCommand()
+        {
+            Name = "Hacksoff";
+            Help = new string[]
             {
-                hacks.ParseAllFlag("+hax");
-                Events.RaiseHackPermissionsChanged();
-                game.Chat.Add("Hacks successfully bypassed and will now disobey motd restrictions", MessageType.Normal);
+                "&a/client hacks [command name]",
+                "&eSwitches off Hack Bypass.",
+            };
+        }
+
+        public override void Execute(string[] args)
+        {
+                game.Chat.Add("Please supply a hack to debypass");
+                HacksComponent.ParseAllFlag("hax");
+                game.Chat.Add("Hacks will now obey map motd", MessageType.Normal);
                 game.Chat.Add("Hacks off", MessageType.Status1);
-            }
-            else
-            {
-                hacks.ParseAllFlag("-hax");
-                Events.RaiseHackPermissionsChanged();
-                game.Chat.Add("Hacks will now obey motd restrictions", MessageType.Normal);
-                game.Chat.Add("Hacks off", MessageType.Status1);
-            }
         }
     }
 

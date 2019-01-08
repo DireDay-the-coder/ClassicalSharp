@@ -106,7 +106,7 @@ namespace ClassicalSharp {
 			localBB.Min.Y = Math.Min(p.interp.next.Pos.Y, localBB.Min.Y);
 			
 			if (p.Hacks.Noclip || !localBB.Intersects(blockBB)) return true;
-			if (p.Hacks.CanPushbackBlocks && p.Hacks.PushbackPlacing && p.Hacks.Enabled)
+			if (HacksComponent.CanPushbackBlocks && p.Hacks.PushbackPlacing && p.Hacks.Enabled)
 				return PushbackPlace(game, blockBB);
 			
 			localBB.Min.Y += 0.25f + Entity.Adjustment;

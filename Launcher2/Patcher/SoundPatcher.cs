@@ -5,9 +5,10 @@ using ClassicalSharp;
 using ClassicalSharp.Network;
 using SharpWave;
 
-namespace Launcher.Patcher {
-	
-	public sealed class SoundPatcher {
+namespace Launcher.Patcher
+{
+
+    public sealed class SoundPatcher {
 
 		string[] files, hashes, identifiers;
 		string prefix;
@@ -60,8 +61,8 @@ namespace Launcher.Patcher {
 			
 			using (Stream dst = Platform.FileCreate(path))
 				using (MemoryStream src = new MemoryStream(rawData))
-			{
-				dst.SetLength(44);
+				{
+				    dst.SetLength(44);
 				VorbisCodec codec = new VorbisCodec();
 				AudioFormat format = codec.ReadHeader(src);
 				

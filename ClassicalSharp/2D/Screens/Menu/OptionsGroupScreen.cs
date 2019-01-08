@@ -1,5 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
+using ClassicalSharp.Entities;
 using ClassicalSharp.Gui.Widgets;
 
 namespace ClassicalSharp.Gui.Screens {
@@ -42,7 +43,7 @@ namespace ClassicalSharp.Gui.Screens {
 		static void SwitchNostalgiaOptions(Game g, Widget w) { g.Gui.SetNewScreen(new NostalgiaScreen(g)); }
 		
 		void CheckHacksAllowed() {
-			widgets[5].Disabled = !game.LocalPlayer.Hacks.CanAnyHacks; // env settings
+			widgets[5].Disabled = !HacksComponent.CanAnyHacks; // env settings
 		}
 		
 		void MakeDesc() {

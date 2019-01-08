@@ -44,7 +44,8 @@ namespace ClassicalSharp.Commands
             this.game = game;
             Register(new GpuInfoCommand());
             Register(new HelpCommand());
-            Register(new HacksCommand());
+            Register(new HacksOnCommand());
+            Register(new HacksOffCommand());
             Register(new RenderTypeCommand());
             Register(new ResolutionCommand());
             Register(new ModelCommand());

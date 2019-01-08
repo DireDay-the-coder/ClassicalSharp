@@ -1,5 +1,6 @@
 ﻿// Copyright 2014-2017 ClassicalSharp | Licensed under BSD-3
 using System;
+using ClassicalSharp.Entities;
 using ClassicalSharp.Gui.Widgets;
 
 namespace ClassicalSharp.Gui.Screens {
@@ -73,7 +74,7 @@ namespace ClassicalSharp.Gui.Screens {
 		
 		void CheckHacksAllowed() {
 			if (game.UseClassicOptions) return;
-			widgets[4].Disabled = !game.LocalPlayer.Hacks.CanAnyHacks; // select texture pack
+			widgets[4].Disabled = !HacksComponent.CanAnyHacks; // select texture pack
 		}
 		
 		ButtonWidget Make(int dir, int y, string text, ClickHandler onClick) {
