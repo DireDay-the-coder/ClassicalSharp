@@ -44,8 +44,6 @@ namespace ClassicalSharp {
 
 		    if (game.CommandList.IsCommandPrefix(text)) {
 		        game.CommandList.Execute(text);
-		    } else if (game.CommandList.IsCommandHackPrefix(text)) {
-		        game.CommandList.ExecuteHacks(text);
 			} else {
 				game.Server.SendChat(text);
 			}

@@ -11,7 +11,6 @@ using BlockID = System.UInt16;
 
 namespace ClassicalSharp.Commands
 {
-
     public sealed class HelpCommand : Command
     {
 
@@ -44,80 +43,37 @@ namespace ClassicalSharp.Commands
                 }
             }
         }
+    }
 
-        public override void ExecuteHacks(string args)
+    public sealed class HacksCommand : Command
+    {
+
+        public HacksCommand()
         {
-            try
+            Name = "Hacks";
+            Help = new string[]
             {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks> - Increases Reach");
-                    game.Chat.Add("&9.hacks <on/off> - Bypasses -hax on server map motd's");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object) game.LocalPlayer.ReachDistance);
-                    }
+                "&a/client hacks [command name]",
+                "&eAllows for controlling hacks.",
+            };
+        }
 
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
+        public override void Execute(string[] args)
+        {
+            HacksComponent hacks = new HacksComponent(game);
+            if (args.Equals("bypass"))
+            {
+                hacks.ParseAllFlag("+hax");
+                Events.RaiseHackPermissionsChanged();
+                game.Chat.Add("Hacks successfully bypassed and will now disobey motd restrictions", MessageType.Normal);
+                game.Chat.Add("Hacks off", MessageType.Status1);
             }
-            catch (Exception ex)
+            else
             {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
+                hacks.ParseAllFlag("-hax");
+                Events.RaiseHackPermissionsChanged();
+                game.Chat.Add("Hacks will now obey motd restrictions", MessageType.Normal);
+                game.Chat.Add("Hacks off", MessageType.Status1);
             }
         }
     }
@@ -143,82 +99,6 @@ namespace ClassicalSharp.Commands
             for (int i = 0; i < lines.Length; i++)
             {
                 if (lines[i] != null) game.Chat.Add("&a" + lines[i]);
-            }
-        }
-
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
             }
         }
     }
@@ -262,82 +142,6 @@ namespace ClassicalSharp.Commands
                 game.Chat.Add("&e/client: &cUnrecognised render type &f\"" + args[1] + "\"&c.");
             }
         }
-
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
-            }
-        }
     }
 
     public sealed class ResolutionCommand : Command
@@ -375,82 +179,6 @@ namespace ClassicalSharp.Commands
                 Options.Set(OptionsKey.WindowHeight, height);
             }
         }
-
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
-            }
-        }
     }
 
     public sealed class ModelCommand : Command
@@ -477,82 +205,6 @@ namespace ClassicalSharp.Commands
             else
             {
                 game.LocalPlayer.SetModel(args[1]);
-            }
-        }
-
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
             }
         }
     }
@@ -593,83 +245,7 @@ namespace ClassicalSharp.Commands
             game.Chat.Add("&eCuboid: &fPlace or delete a block.", MessageType.ClientStatus1);
             Events.BlockChanged += BlockChanged;
         }
-
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
-            }
-        }
-
+        
         bool ParseBlock(string[] args)
         {
             if (args.Length == 1) return true;
@@ -779,80 +355,6 @@ namespace ClassicalSharp.Commands
             }
         }
 
-        public override void ExecuteHacks(string args)
-        {
-            try
-            {
-                if (args.ToLower().StartsWith(".disconnect"))
-                {
-                    game.Disconnect("Disconnected", "Disconnected Self");
-                }
-                else if (args.ToLower().StartsWith(".help"))
-                {
-                    game.Chat.Add("&9DireCube - Hacking Tools:");
-                    game.Chat.Add("&9.reach <blocks>");
-                    game.Chat.Add("&9.hacks <on/off>");
-                    game.Chat.Add("&9.disconnect (Optional Params: <title> <reason>)");
-                }
-                else
-                {
-                    if (args.ToLower().StartsWith(".reach"))
-                    {
-                        game.LocalPlayer.ReachDistance = float.Parse(args.Split(' ')[1]);
-                        game.Chat.Add("&9Reach set to " + (object)game.LocalPlayer.ReachDistance);
-                    }
-
-                    if (args.ToLower().StartsWith(".hacks"))
-                    {
-                        bool flag = args.ToLower().Split(' ')[1] == "on";
-                        int num1;
-                        if (!flag) {
-                            if (args.ToLower().Split(' ')[1] == "off")
-                            {
-                                num1 = 1;
-                                goto label_22;
-                            }
-                            if (args.ToLower().Split(' ')[1] == "")
-                            {
-                                num1 = 0;
-                                goto label_22;
-                            }
-                        }
-                        num1 = 1;
-
-                        label_22:
-                        int num2 = 0;
-                        if (num1 == num2)
-                            throw new Exception("Did not specify \"on\" or \"off\"");
-                        game.LocalPlayer.Hacks.CanAnyHacks = flag;
-                        game.LocalPlayer.Hacks.CanSpeed = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanFly = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanNoclip = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanRespawn = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.LocalPlayer.Hacks.CanDoubleJump = game.LocalPlayer.Hacks.CanAnyHacks;
-                        game.Chat.Add("&9 - Hacks are now " +
-                                      (this.game.LocalPlayer.Hacks.CanAnyHacks ? "&aEnabled" : "&4Disabled"));
-                    }
-
-                    if (args.ToLower().StartsWith(".disconnect"))
-                    {
-                        string title = "Disconnected";
-                        string reason = "Disconnected Self";
-                        if (args.ToLower().Contains(" "))
-                        {
-                            title = args.ToLower().Split(' ')[1];
-                            reason = args.Substring(args.ToLower().Split(' ')[0].Length +
-                                                    args.ToLower().Split(' ')[1].Length + 2);
-                        }
-
-                        game.Disconnect(title, reason);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                game.Chat.Add("&9Jini - 1.0.0 &4Command Error: " + ex.Message);
-            }
-        }
+       
     }
 }
