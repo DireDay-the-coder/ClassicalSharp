@@ -37,11 +37,11 @@ namespace ClassicalSharp.Gui.Screens {
 			}
 			
 			LocalPlayer p = game.LocalPlayer;
-			bool noGlobalHacks = !HacksComponent.CanAnyHacks || !p.Hacks.Enabled;
-			widgets[3].Disabled = noGlobalHacks || !HacksComponent.CanSpeed;
-			widgets[4].Disabled = noGlobalHacks || !HacksComponent.CanSpeed;
-			widgets[5].Disabled = noGlobalHacks || !HacksComponent.CanSpeed;
-			widgets[7].Disabled = noGlobalHacks || !HacksComponent.CanPushbackBlocks;
+			bool noGlobalHacks = !p.Hacks.CanAnyHacks || !p.Hacks.Enabled;
+			widgets[3].Disabled = noGlobalHacks || !p.Hacks.CanSpeed;
+			widgets[4].Disabled = noGlobalHacks || !p.Hacks.CanSpeed;
+			widgets[5].Disabled = noGlobalHacks || !p.Hacks.CanSpeed;
+			widgets[7].Disabled = noGlobalHacks || !p.Hacks.CanPushbackBlocks;
 		}
 		
 		protected override void ContextRecreated() {

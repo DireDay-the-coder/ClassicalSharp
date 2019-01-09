@@ -28,14 +28,13 @@ namespace ClassicalSharp.Entities {
 		/// Note that all 'can use X' set by the server override this. </summary>
 		public bool Enabled = true;
 		/// <summary> Whether the player is allowed to use any type of hacks. </summary>
-		public static bool CanAnyHacks = true;
-		public static bool CanUseThirdPersonCamera = true;
-		public static bool CanSpeed = true;
-		public static bool CanFly = true;
-		public static bool CanRespawn = true;
-		public bool CanPreciseRespawn = false;
-		public static bool CanNoclip = true;
-		public static bool CanPushbackBlocks = true;
+		public bool CanAnyHacks = true;
+		public bool CanUseThirdPersonCamera = true;
+		public bool CanSpeed = true;
+		public bool CanFly = true;
+		public bool CanRespawn = true;
+		public bool CanNoclip = true;
+		public bool CanPushbackBlocks = true;
 		public bool CanSeeAllNames = true;
 		public bool CanDoubleJump = true;
 		public bool CanBePushed = true;
@@ -53,7 +52,7 @@ namespace ClassicalSharp.Entities {
 		
 		public bool CanJumpHigher { get { return Enabled && CanAnyHacks && CanSpeed; } }
 		public bool Floating; // true if Noclip or Flying
-		public static string HacksFlags;
+		public string HacksFlags;
 		
 		string GetFlagValue(string flag) {
 			int start = HacksFlags.IndexOf(flag, StringComparison.OrdinalIgnoreCase);
@@ -83,7 +82,7 @@ namespace ClassicalSharp.Entities {
 			return value;
 		}
 		
-		public static void SetAllHacks(bool allowed) {
+		void SetAllHacks(bool allowed) {
 			CanAnyHacks = CanFly = CanNoclip = CanRespawn = CanSpeed =
 				CanPushbackBlocks = CanUseThirdPersonCamera = allowed;
 		}
@@ -96,7 +95,7 @@ namespace ClassicalSharp.Entities {
 			}
 		}
 		
-		public static void ParseAllFlag(string flag) {
+		public void ParseAllFlag(string flag) {
 			if (HacksFlags.Contains("+" + flag)) {
 				SetAllHacks(true);
 			} else if (HacksFlags.Contains("-" + flag)) {
@@ -139,18 +138,15 @@ namespace ClassicalSharp.Entities {
 		public void UpdateHacksState() {
 			SetAllHacks(true);
 			CanBePushed = true;
-			CanPreciseRespawn = false;
 			if (HacksFlags == null) return;			
 			
 			// By default (this is also the case with WoM), we can use hacks.
-			// if (HacksFlags.Contains("-hax")) SetAllHacks(false);
-
-            ParseFlag(ref CanAnyHacks, "hax");
-		    ParseFlag(ref CanFly, "fly");
+			if (HacksFlags.Contains("-hax")) SetAllHacks(false);
+			
+			ParseFlag(ref CanFly, "fly");
 			ParseFlag(ref CanNoclip, "noclip");
 			ParseFlag(ref CanSpeed, "speed");
 			ParseFlag(ref CanRespawn, "respawn");
-			ParseFlag(ref CanPreciseRespawn, "preciserespawn");
 			ParseFlag(ref CanBePushed, "push");
 
 			if (UserType == 0x64) ParseAllFlag("ophax");

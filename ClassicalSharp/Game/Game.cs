@@ -145,7 +145,7 @@ namespace ClassicalSharp {
 			Camera = Cameras[i];
 			Camera.ResetRotOffset();
 			
-			if (!HacksComponent.CanUseThirdPersonCamera || !LocalPlayer.Hacks.Enabled)
+			if (!LocalPlayer.Hacks.CanUseThirdPersonCamera || !LocalPlayer.Hacks.Enabled)
 				Camera = Cameras[0];
 			UpdateProjection();
 		}

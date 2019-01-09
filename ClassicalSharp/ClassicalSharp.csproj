@@ -20,7 +20,7 @@
     <RunPostBuildEvent>OnBuildSuccess</RunPostBuildEvent>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Platform)' == 'AnyCPU' ">
-    <PlatformTarget>x86</PlatformTarget>
+    <PlatformTarget>AnyCPU</PlatformTarget>
     <BaseAddress>4194304</BaseAddress>
     <RegisterForComInterop>False</RegisterForComInterop>
     <GenerateSerializationAssemblies>Auto</GenerateSerializationAssemblies>
@@ -69,10 +69,6 @@
   </PropertyGroup>
   <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
   <ItemGroup>
-    <Reference Include="SharpWave, Version=1.0.6943.3379, Culture=neutral, processorArchitecture=x86">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\SharpWave\bin\Debug\SharpWave.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
@@ -405,11 +401,50 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Folder Include="2D\Drawing" />
+    <Folder Include="2D\Screens\Overlays" />
+    <Folder Include="2D\Utils" />
+    <Folder Include="2D\Screens" />
+    <Folder Include="2D\Screens\Menu" />
+    <Folder Include="2D\Widgets" />
+    <Folder Include="2D\Widgets\Menu" />
+    <Folder Include="2D\Widgets\Chat" />
+    <Folder Include="Blocks" />
+    <Folder Include="Entities\Components" />
+    <Folder Include="Entities\Mobs" />
+    <Folder Include="Generator" />
+    <Folder Include="Map\Lighting" />
+    <Folder Include="Math\Physics" />
+    <Folder Include="MeshBuilder" />
+    <Folder Include="Network\Protocols" />
+    <Folder Include="Mode" />
+    <Folder Include="Platform" />
+    <Folder Include="Particles" />
+    <Folder Include="GraphicsAPI" />
+    <Folder Include="Entities" />
+    <Folder Include="Ionic.Zlib" />
+    <Folder Include="Map" />
+    <Folder Include="Game" />
+    <Folder Include="Map\Formats" />
+    <Folder Include="Entities\Model" />
+    <Folder Include="Network\Utils" />
+    <Folder Include="Hotkeys" />
+    <Folder Include="Audio" />
+    <Folder Include="Rendering\Env" />
+    <Folder Include="TexturePack" />
+    <Folder Include="Singleplayer" />
+    <Folder Include="Utils" />
+    <Folder Include="Math" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\InteropPatcher\InteropPatcher.csproj">
       <Project>{4A4110EE-21CA-4715-AF67-0C8B7CE0642F}</Project>
       <Name>InteropPatcher</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\SharpWave\SharpWave.csproj">
+      <Project>{77EA9D1E-4995-4D05-A9C7-29173CB5DC72}</Project>
+      <Name>SharpWave</Name>
     </ProjectReference>
   </ItemGroup>
   <Target Name="AfterBuild">

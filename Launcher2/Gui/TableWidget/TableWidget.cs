@@ -169,9 +169,11 @@ namespace Launcher.Gui.Widgets
 
 
         DefaultComparer defComp = new DefaultComparer();
+        FlagComparer flagComp = new FlagComparer();
         NameComparer nameComp = new NameComparer();
-        PlayersComparer playerComp = new PlayersComparer();
+        OnlineComparer onlineComp = new OnlineComparer();
         UptimeComparer uptimeComp = new UptimeComparer();
+        IPComparer ipComp = new IPComparer();
         SoftwareComparer softwareComp = new SoftwareComparer();
         internal int DraggingColumn = -1;
         internal bool DraggingScrollbar = false;
@@ -202,22 +204,34 @@ namespace Launcher.Gui.Widgets
             int x = X + TableView.flagPadding;
             if (mouseX >= x && mouseX < x + ColumnWidths[0])
             {
-                SortEntries(nameComp, false); return;
+                SortEntries(flagComp, false); return;
             }
 
             x += ColumnWidths[0] + 10;
             if (mouseX >= x && mouseX < x + ColumnWidths[1])
             {
-                SortEntries(playerComp, false); return;
+                SortEntries(nameComp, false); return;
             }
 
             x += ColumnWidths[1] + 10;
             if (mouseX >= x && mouseX < x + ColumnWidths[2])
             {
-                SortEntries(uptimeComp, false); return;
+                SortEntries(onlineComp, false); return;
             }
 
             x += ColumnWidths[2] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[3])
+            {
+                SortEntries(uptimeComp, false); return;
+            }
+
+            x += ColumnWidths[3] + 10;
+            if (mouseX >= x && mouseX < x + ColumnWidths[4])
+            {
+                SortEntries(ipComp, false); return;
+            }
+
+            x += ColumnWidths[4] + 10;
             if (mouseX >= x)
             {
                 SortEntries(softwareComp, false); return;

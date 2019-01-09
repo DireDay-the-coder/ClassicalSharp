@@ -93,9 +93,9 @@ namespace Launcher.Gui.Widgets
     static string FilterFlag(TableEntry e) { return e.Flag; } static ColumnFilter filterFlag = FilterFlag;
     static string FilterName(TableEntry e) { return e.Name; } static ColumnFilter filterName = FilterName;
     static string FilterOnline(TableEntry e) { return e.Online; } static ColumnFilter filterOnline = FilterOnline;
-    static string FilterMax(TableEntry e) { return e.Online; } static ColumnFilter filterMax = FilterMax;
+    static string FilterMax(TableEntry e) { return e.Max; } static ColumnFilter filterMax = FilterMax;
     static string FilterUptime(TableEntry e) { return e.Uptime; } static ColumnFilter filterUptime = FilterUptime;
-    static string FilterIP(TableEntry e) { return e.Online; } static ColumnFilter filterIP = FilterIP;
+    static string FilterIP(TableEntry e) { return e.IP; } static ColumnFilter filterIP = FilterIP;
     static string FilterSoftware(TableEntry e) { return e.Software; } static ColumnFilter filterSoftware = FilterSoftware;
 
     static FastBitmap GetFlag(string flag) {
@@ -141,11 +141,11 @@ namespace Launcher.Gui.Widgets
         TableEntry entry = table.Get(i);
         args = new DrawTextArgs(filter(entry), font, true);
         int players = int.Parse(entry.Online);
-        if ((i == table.SelectedIndex || entry.Featured || players == 0 || (players >= 1 && players < 3 || players >= 3 && players < 5) || (players >= 5 && players < 7 || players >= 7 && players < 10 || players >= 10)) && !seperator) {
+        if ((i == table.SelectedIndex || entry.Featured || players == 0 || (players >= 1 && players < 3 || players >= 3 && players < 5) || (players >= 5 && players < 7 || players >= 7 && players < 10 || players >= 10 && players < 20 || players >= 20)) && !seperator) {
           int startY = y - 3;
           int height = Math.Min(y + (entryHeight + 4), table.Y + table.Height) - y;
           drawer.Clear(this.GetGridCol(entry.Featured, i == table.SelectedIndex), table.X, startY, 65, height);
-          drawer.Clear(this.GetGridColpl(players == 0, players >= 1 && players < 3, players >= 3 && players < 5, players >= 5 && players < 7, players >= 7 && players < 10, players >= 10, i == table.SelectedIndex), table.X, startY, table.Width, height);
+          drawer.Clear(this.GetGridColpl(players == 0, players >= 1 && players < 3, players >= 3 && players < 5, players >= 5 && players < 7, players >= 7 && players < 10, players >= 10 && players < 20, players >= 20, i == table.SelectedIndex), table.X, startY, table.Width, height);
         }
         if (!this.DrawColumnEntry(drawer, ref args, maxWidth, x, ref y, ref entry)) {
           maxIndex = i; break;
@@ -166,7 +166,7 @@ namespace Launcher.Gui.Widgets
            return new PackedCol(101, 107, 0);
     }
 
-    private PackedCol GetGridColpl(bool dead, bool superquiet, bool quiet, bool typical, bool busy, bool popular, bool selected) {
+    private PackedCol GetGridColpl(bool dead, bool superquiet, bool quiet, bool typical, bool busy, bool popular, bool superpopular, bool selected) {
             if (dead) {
                 if (selected)
                 return new PackedCol(64, 48, 36);
@@ -203,7 +203,14 @@ namespace Launcher.Gui.Widgets
             return new PackedCol(0, 204, (int) byte.MaxValue);
             }
 
-      return foreGridCol;
+            if (superpopular)
+            {
+                if (selected)
+                return new PackedCol(168, 238, (int)byte.MaxValue);
+            return new PackedCol(168, 238, (int)byte.MaxValue);
+            }
+
+            return foreGridCol;
     }
 
     private bool DrawColumnEntry(IDrawer2D drawer, ref DrawTextArgs args, int maxWidth, int x, ref int y, ref TableEntry entry)

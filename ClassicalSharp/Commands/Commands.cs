@@ -53,17 +53,18 @@ namespace ClassicalSharp.Commands
             Name = "Hackson";
             Help = new string[]
             {
-                "&a/client hacks [command name]",
+                "&a/client hackson",
                 "&eSwitches on Hack bypass",
             };
         }
 
         public override void Execute(string[] args)
         {
-                game.Chat.Add("Please supply a hack to bypass");
-                HacksComponent.ParseAllFlag("hax");
+                game.LocalPlayer.Hacks.HacksFlags = "+hax";             
+                game.LocalPlayer.Hacks.ParseAllFlag("hax");
                 game.Chat.Add("Hacks will now disobey map motd", MessageType.Normal);
-                game.Chat.Add("Hacks on", MessageType.Status1);  
+                game.Chat.Add("Bypassing MOTD", MessageType.Status1);
+                Events.RaiseHackPermissionsChanged();
         }
     }
 
@@ -75,17 +76,18 @@ namespace ClassicalSharp.Commands
             Name = "Hacksoff";
             Help = new string[]
             {
-                "&a/client hacks [command name]",
+                "&a/client hacksoff",
                 "&eSwitches off Hack Bypass.",
             };
         }
 
         public override void Execute(string[] args)
         {
-                game.Chat.Add("Please supply a hack to debypass");
-                HacksComponent.ParseAllFlag("hax");
+                game.LocalPlayer.Hacks.HacksFlags = "-hax";
+                game.LocalPlayer.Hacks.ParseAllFlag("hax");
                 game.Chat.Add("Hacks will now obey map motd", MessageType.Normal);
-                game.Chat.Add("Hacks off", MessageType.Status1);
+                game.Chat.Add("Not bypassing MOTD", MessageType.Status1);
+                Events.RaiseHackPermissionsChanged();
         }
     }
 

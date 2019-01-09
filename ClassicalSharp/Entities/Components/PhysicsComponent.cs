@@ -31,8 +31,8 @@ namespace ClassicalSharp.Entities {
 				int dir = (hacks.FlyingUp || jumping) ? 1 : (hacks.FlyingDown ? -1 : 0);
 				
 				entity.Velocity.Y += 0.12f * dir;
-				if (hacks.Speeding     && HacksComponent.CanSpeed) entity.Velocity.Y += 0.12f * dir;
-				if (hacks.HalfSpeeding && HacksComponent.CanSpeed) entity.Velocity.Y += 0.06f * dir;
+				if (hacks.Speeding     && hacks.CanSpeed) entity.Velocity.Y += 0.12f * dir;
+				if (hacks.HalfSpeeding && hacks.CanSpeed) entity.Velocity.Y += 0.06f * dir;
 			} else if (jumping && entity.TouchesAnyRope() && entity.Velocity.Y > 0.02f) {
 				entity.Velocity.Y = 0.02f;
 			}
@@ -59,8 +59,8 @@ namespace ClassicalSharp.Entities {
 				if (!pastJumpPoint) {
 					canLiquidJump = true;
 					entity.Velocity.Y += 0.04f;
-					if (hacks.Speeding     && HacksComponent.CanSpeed) entity.Velocity.Y += 0.04f;
-					if (hacks.HalfSpeeding && HacksComponent.CanSpeed) entity.Velocity.Y += 0.02f;
+					if (hacks.Speeding     && hacks.CanSpeed) entity.Velocity.Y += 0.04f;
+					if (hacks.HalfSpeeding && hacks.CanSpeed) entity.Velocity.Y += 0.02f;
 				} else if (pastJumpPoint) {
 					// either A) climb up solid on side B) jump bob in water
 					if (collisions.HorizontalCollision) {
@@ -72,11 +72,11 @@ namespace ClassicalSharp.Entities {
 				}
 			} else if (useLiquidGravity) {
 				entity.Velocity.Y += 0.04f;
-				if (hacks.Speeding     && HacksComponent.CanSpeed) entity.Velocity.Y += 0.04f;
-				if (hacks.HalfSpeeding && HacksComponent.CanSpeed) entity.Velocity.Y += 0.02f;
+				if (hacks.Speeding     && hacks.CanSpeed) entity.Velocity.Y += 0.04f;
+				if (hacks.HalfSpeeding && hacks.CanSpeed) entity.Velocity.Y += 0.02f;
 				canLiquidJump = false;
 			} else if (entity.TouchesAnyRope()) {
-				entity.Velocity.Y += (hacks.Speeding && HacksComponent.CanSpeed) ? 0.15f : 0.10f;
+				entity.Velocity.Y += (hacks.Speeding && hacks.CanSpeed) ? 0.15f : 0.10f;
 				canLiquidJump = false;
 			} else if (entity.onGround) {
 				DoNormalJump();
@@ -87,8 +87,8 @@ namespace ClassicalSharp.Entities {
 			if (jumpVel == 0 || hacks.MaxJumps <= 0) return;
 			
 			entity.Velocity.Y = jumpVel;
-			if (hacks.Speeding     && HacksComponent.CanSpeed) entity.Velocity.Y += jumpVel;
-			if (hacks.HalfSpeeding && HacksComponent.CanSpeed) entity.Velocity.Y += jumpVel / 2;
+			if (hacks.Speeding     && hacks.CanSpeed) entity.Velocity.Y += jumpVel;
+			if (hacks.HalfSpeeding && hacks.CanSpeed) entity.Velocity.Y += jumpVel / 2;
 			canLiquidJump = false;
 		}
 		
@@ -205,9 +205,9 @@ namespace ClassicalSharp.Entities {
 
 		float GetSpeed(float speedMul) {
 			float factor = hacks.Floating ? speedMul : 1, speed = factor;		
-			if (hacks.Speeding     && HacksComponent.CanSpeed) speed += factor * hacks.SpeedMultiplier;
-			if (hacks.HalfSpeeding && HacksComponent.CanSpeed) speed += factor * hacks.SpeedMultiplier / 2;
-			return HacksComponent.CanSpeed ? speed : Math.Min(speed, 1.0f);
+			if (hacks.Speeding     && hacks.CanSpeed) speed += factor * hacks.SpeedMultiplier;
+			if (hacks.HalfSpeeding && hacks.CanSpeed) speed += factor * hacks.SpeedMultiplier / 2;
+			return hacks.CanSpeed ? speed : Math.Min(speed, 1.0f);
 		}
 		
 		const float inf = float.PositiveInfinity;

@@ -10,7 +10,7 @@ namespace ClassicalSharp.Model {
 		
 		public ChibiModel(Game game) : base(game) {
 			MaxScale = 7.0f;
-			ShadowScale = 0.005f;
+			ShadowScale = 0.5f;
 		}
 		
 		const float size = 0.5f;

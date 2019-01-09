@@ -236,31 +236,32 @@ namespace ClassicalSharp.Network.Protocols {
 		
 		void HandleHackControl() {
             //LocalPlayer p = game.LocalPlayer;
-            //         p.Hacks.CanFly = reader.ReadUInt8() != 0;
-            //         p.Hacks.CanNoclip = reader.ReadUInt8() != 0;
-            //         p.Hacks.CanSpeed = reader.ReadUInt8() != 0;
-            //         p.Hacks.CanRespawn = reader.ReadUInt8() != 0;
-            //         p.Hacks.CanUseThirdPersonCamera = reader.ReadUInt8() != 0;
-            //         p.CheckHacksConsistency();
+            //p.Hacks.CanFly = reader.ReadUInt8() != 0;
+            //p.Hacks.CanNoclip = reader.ReadUInt8() != 0;
+            //p.Hacks.CanSpeed = reader.ReadUInt8() != 0;
+            //p.Hacks.CanRespawn = reader.ReadUInt8() != 0;
+            //p.Hacks.CanUseThirdPersonCamera = reader.ReadUInt8() != 0;
+            //p.CheckHacksConsistency();
 
-            //         ushort jumpHeight = reader.ReadUInt16();
-            //         if (jumpHeight == ushort.MaxValue) { // special value of -1 to reset default
-            //             p.physics.jumpVel = p.Hacks.CanJumpHigher ? p.physics.userJumpVel : 0.42f;
-            //         } else {
-            //             p.physics.CalculateJumpVelocity(jumpHeight / 32f);
-            //         }
-            //         p.physics.serverJumpVel = p.physics.jumpVel;
-		             
+            //ushort jumpHeight = reader.ReadUInt16();
+            //if (jumpHeight == ushort.MaxValue) { // special value of -1 to reset default
+            //	p.physics.jumpVel = p.Hacks.CanJumpHigher ? p.physics.userJumpVel : 0.42f;
+            //} else {
+            //	p.physics.CalculateJumpVelocity(jumpHeight / 32f);
+		    //}
+
+		    //p.physics.serverJumpVel = p.physics.jumpVel;
+		    //Events.RaiseHackPermissionsChanged();
+
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt8();
 		    reader.ReadUInt16();
-		    Events.RaiseHackPermissionsChanged();
-		}
-
-        void HandleExtAddEntity2() {
+        }
+		
+		void HandleExtAddEntity2() {
 			byte id = reader.ReadUInt8();
 			string displayName = reader.ReadString();
 			string skinName = reader.ReadString();
