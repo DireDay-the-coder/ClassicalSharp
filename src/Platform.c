@@ -243,10 +243,20 @@ int Stopwatch_ElapsedMicroseconds(uint64_t beg, uint64_t end) {
 }
 
 #ifdef CC_BUILD_WIN
+static HANDLE conHandle;
+static BOOL hasDebugger;
+
 void Platform_Log(const String* message) {
-	/* TODO: log to console */
-	OutputDebugStringA(message->buffer);
-	OutputDebugStringA("\n");
+	DWORD wrote;
+	if (conHandle) {
+		WriteFile(conHandle, message->buffer, message->length, &wrote, NULL);
+		WriteFile(conHandle, "\n",            1,               &wrote, NULL);
+	}
+	if (hasDebugger) {
+		/* TODO: This reads past the end of the buffer */
+		OutputDebugStringA(message->buffer);
+		OutputDebugStringA("\n");
+	}
 }
 
 #define FILETIME_EPOCH 50491123200000ULL
@@ -832,7 +842,8 @@ struct FontData {
 	FT_StreamRec stream;
 	uint8_t buffer[8192]; /* small buffer to minimise disk I/O */
 	uint16_t widths[256]; /* cached width of each character glyph */
-	FT_Glyph glyphs[256]; /* cached glyph */
+	FT_Glyph glyphs[256]; /* cached glyphs */
+	FT_Glyph shadow_glyphs[256]; /* cached glyphs (for back layer shadow) */
 #ifdef CC_BUILD_OSX
 	char filename[FILENAME_SIZE + 1];
 #endif
@@ -883,8 +894,9 @@ static bool FontData_Init(const String* path, struct FontData* data, FT_Open_Arg
 	data->filename[filename.length] = '\0';
 	args->pathname = data->filename;
 #endif
-	Mem_Set(data->widths, 0xFF, sizeof(data->widths));
-	Mem_Set(data->glyphs, 0x00, sizeof(data->glyphs));
+	Mem_Set(data->widths,        0xFF, sizeof(data->widths));
+	Mem_Set(data->glyphs,        0x00, sizeof(data->glyphs));
+	Mem_Set(data->shadow_glyphs, 0x00, sizeof(data->shadow_glyphs));
 	return true;
 }
 
@@ -897,6 +909,10 @@ static void FontData_Free(struct FontData* font) {
 	for (i = 0; i < 256; i++) {
 		if (!font->glyphs[i]) continue;
 		FT_Done_Glyph(font->glyphs[i]);
+	}
+	for (i = 0; i < 256; i++) {
+		if (!font->shadow_glyphs[i]) continue;
+		FT_Done_Glyph(font->shadow_glyphs[i]);
 	}
 }
 
@@ -1141,12 +1157,13 @@ static void Platform_BlackWhiteGlyph(FT_Bitmap* img, Bitmap* bmp, int x, int y, 
 	}
 }
 
-int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, BitmapCol col) {
+int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, BitmapCol col, bool shadow) {
 	struct FontData* data = args->Font.Handle;
-	FT_Face face = data->face;
-	String text  = args->Text;
+	FT_Face face     = data->face;
+	String text      = args->Text;
+	FT_Glyph* glyphs = data->glyphs;
 	int descender, height, begX = x;
-
+	
 	/* glyph state */
 	FT_BitmapGlyph glyph;
 	FT_Bitmap* img;
@@ -1154,11 +1171,17 @@ int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, Bitm
 	FT_Error res;
 	Codepoint cp;
 
+	if (shadow) {
+		glyphs = data->shadow_glyphs;
+		FT_Vector delta = { 83, -83 };
+		FT_Set_Transform(face, NULL, &delta);
+	}
+
 	height    = TEXT_CEIL(face->size->metrics.height);
 	descender = TEXT_CEIL(face->size->metrics.descender);
 
 	for (i = 0; i < text.length; i++) {
-		glyph = data->glyphs[(uint8_t)text.buffer[i]];
+		glyph = glyphs[(uint8_t)text.buffer[i]];
 		if (!glyph) {
 			cp  = Convert_CP437ToUnicode(text.buffer[i]);
 			res = FT_Load_Char(face, cp, FT_LOAD_RENDER);
@@ -1169,7 +1192,7 @@ int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, Bitm
 			}
 
 			FT_Get_Glyph(face->glyph, &glyph); /* TODO: Check error */
-			data->glyphs[(uint8_t)text.buffer[i]] = glyph;
+			glyphs[(uint8_t)text.buffer[i]] = glyph;
 		}
 
 		offset = (height + descender) - glyph->top;
@@ -1195,6 +1218,7 @@ int Platform_TextDraw(struct DrawTextArgs* args, Bitmap* bmp, int x, int y, Bitm
 		Drawer2D_Underline(bmp, begX, ulY + y, x - begX, ulHeight, col);
 	}
 
+	if (shadow) FT_Set_Transform(face, NULL, NULL);
 	return x - begX;
 }
 
@@ -1743,6 +1767,10 @@ void Platform_Init(void) {
 	
 	res = WSAStartup(MAKEWORD(2, 2), &wsaData);
 	if (res) Logger_Abort2(res, "WSAStartup failed");
+
+	hasDebugger = IsDebuggerPresent();
+	if (!AttachConsole(ATTACH_PARENT_PROCESS)) return;
+	conHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 }
 
 void Platform_Free(void) {

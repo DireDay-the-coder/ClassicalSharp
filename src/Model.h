@@ -46,6 +46,22 @@ struct Model {
 	struct ModelVertex* vertices;	
 	/* Pointer to default texture for this model */
 	struct ModelTex* defaultTex;
+
+	/* Creates the ModelParts of this model and fills out vertices. */
+	void (*MakeParts)(void);
+	/* Draws/Renders this model for the given entity. */
+	void (*Draw)(struct Entity* entity);
+	/* Returns height the 'nametag' gets drawn at above the entity's feet. */
+	float (*GetNameY)(struct Entity* entity);
+	/* Returns height the 'eye' is located at above the entity's feet. */
+	float (*GetEyeY)(struct Entity* entity);
+	/* Sets entity->Size to the collision size of this model. */
+	void (*GetCollisionSize)(struct Entity* entity);
+	/* Sets entity->ModelAABB to the 'picking' bounds of this model. */
+	/* This is the AABB around the entity in which mouse clicks trigger 'interaction'. */
+	/* NOTE: These bounds are not transformed. (i.e. no rotation, centered around 0,0,0) */
+	void (*GetPickingBounds)(struct Entity* entity);
+
 	/* Count of assigned vertices within the raw vertices array */
 	int index;
 	uint8_t armX, armY; /* these translate arm model part back to (0, 0) */
@@ -58,20 +74,12 @@ struct Model {
 
 	float Gravity; Vector3 Drag, GroundFriction;
 
-	float (*GetEyeY)(struct Entity* entity);
-	void (*GetCollisionSize)(Vector3* size);
-	void (*GetPickingBounds)(struct AABB* bb);
-	void (*CreateParts)(void);
-	void (*DrawModel)(struct Entity* entity);
 	/* Returns the transformation matrix applied to the model when rendering */
 	/* NOTE: Most models just use Entity_GetTransform (except SittingModel) */
 	void (*GetTransform)(struct Entity* entity, Vector3 pos, struct Matrix* m);
-	/* Recalculates properties such as name Y offset, collision size */
-	/* NOTE: Not needed for most models (except BlockModel) */
-	void (*RecalcProperties)(struct Entity* entity);
 	void (*DrawArm)(struct Entity* entity);
 
-	float NameYOffset, MaxScale, ShadowScale, NameScale;
+	float MaxScale, ShadowScale, NameScale;
 	struct Model* Next;
 };
 #if 0
@@ -97,17 +105,17 @@ CC_VAR extern struct _ModelsData {
 	struct Model* Active;
 	/* Dynamic vertex buffer for uploading model vertices. */
 	GfxResourceID Vb;
+	/* Temporary storage for vertices. */
+	VertexP3fT2fC4b* Vertices;
+	/* Maximum number of vertices that can be stored in Vertices. */
+	/* NOTE: If you change this, you MUST also destroy and recreate the dynamic VB. */
+	int MaxVertices;
+	/* Pointer to humanoid/human model.*/
+	struct Model* Human;
 } Models;
 
 /* Initialises fields of a model to default. */
 CC_API void Model_Init(struct Model* model);
-
-#define Model_SetPointers(instance, typeName)\
-instance.GetEyeY = typeName ## _GetEyeY;\
-instance.GetCollisionSize = typeName ## _GetCollisionSize; \
-instance.GetPickingBounds = typeName ## _GetPickingBounds;\
-instance.CreateParts = typeName ## _CreateParts;\
-instance.DrawModel = typeName ## _DrawModel;
 
 /* Whether the bounding sphere of the model is currently visible. */
 bool Model_ShouldRender(struct Entity* entity);
@@ -131,11 +139,6 @@ CC_API void Model_DrawRotate(float angleX, float angleY, float angleZ, struct Mo
 void Model_RenderArm(struct Model* model, struct Entity* entity);
 /* Draws the given part with appropriate rotation to produce an arm look. */
 CC_API void Model_DrawArmPart(struct ModelPart* part);
-
-/* Maximum number of vertices a model can have */
-#define MODEL_MAX_VERTICES (24 * 12)
-extern VertexP3fT2fC4b Model_Vertices[MODEL_MAX_VERTICES];
-extern struct Model* Human_ModelPtr;
 
 /* Returns a pointer to the model whose name caselessly matches given name. */
 CC_API struct Model* Model_Get(const String* name);
